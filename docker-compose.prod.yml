@@ -1,0 +1,100 @@
+# ===================================================================
+# PROD - sunucuda calisan tam stack (app + postgres + redis).
+# Calistirmadan once .env dosyasini doldur, sonra:
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Postgres ve Redis portlari host'a ACILMAZ; sadece ic ag erisir.
+# ===================================================================
+name: scorestv-prod
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scorestv
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scorestv
+
+  # Nesne depolama (logo/gorsel). Host'a port ACILMAZ; herkese acik servis
+  # ileride onune konacak nginx/CDN uzerinden yapilir.
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - scorestv
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scorestv-backend:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      API_FOOTBALL_KEY: ${API_FOOTBALL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      PASSWORD_RESET_URL: ${PASSWORD_RESET_URL}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      STORAGE_PUBLIC_URL: ${STORAGE_PUBLIC_URL}
+    ports:
+      - "8080:8080"
+    networks:
+      - scorestv
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  scorestv:
+    driver: bridge

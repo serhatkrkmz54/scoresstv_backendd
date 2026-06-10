@@ -1,0 +1,35 @@
+﻿# Build
+build/
+.gradle/
+out/
+bin/
+
+# Secrets — KESINLIKLE PUSH ETMEYIN
+firebase-service-account.json
+.env
+.env.*
+*.keystore
+*.jks
+conf/secrets/
+application-secrets.yml
+application-prod.yml
+application-local.yml
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/

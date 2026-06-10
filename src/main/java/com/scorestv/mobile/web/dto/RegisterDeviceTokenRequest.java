@@ -1,0 +1,23 @@
+package com.scorestv.mobile.web.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+
+/**
+ * Mobile uygulamadan FCM token kayit istegi.
+ *
+ * <p>Her app acilisinda gonderilebilir — backend INSERT/UPDATE yapar
+ * (anonim cihaz tabanli, kullanici hesabi yok).
+ */
+public record RegisterDeviceTokenRequest(
+        @NotBlank
+        String fcmToken,
+        /** "android" | "ios" — gelecekte "web" eklenebilir. */
+        @NotBlank
+        @Pattern(regexp = "^(android|ios)$")
+        String platform,
+        /** Sematik versiyon — debug icin yararli, opsiyonel. */
+        String appVersion,
+        /** "tr" | "en" — bildirim icerigi bu dilde uretilir. Default "tr". */
+        String locale
+) {}

@@ -1,0 +1,27 @@
+meta {
+  name: List Users
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/users?page=0&size=20
+  body: none
+  auth: bearer
+}
+
+params:query {
+  page: 0
+  size: 20
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  ADMIN: kullanicilari sayfali listeler.
+  Parametreler: page (0'dan baslar), size (en fazla 100),
+  sort (orn. sort=email,asc veya sort=createdAt,desc).
+  Cevap: content listesi + page, size, totalElements, totalPages, first, last.
+}

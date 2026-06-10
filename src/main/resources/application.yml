@@ -1,0 +1,237 @@
+# ===================================================================
+# Ortak konfigurasyon - tum profiller icin gecerli.
+# Ortama gore degisen ayarlar: application-local.yml / application-prod.yml
+# Aktif profil yoksa "local" kullanilir.
+# ===================================================================
+spring:
+  application:
+    name: scorestv-backend
+  profiles:
+    default: local
+  # .env dosyasini (varsa) ortam degiskeni gibi okur; yoksa hata vermez.
+  config:
+    import: "optional:file:.env[.properties]"
+
+  # Cok parcali dosya yukleme - ceviri Excel import'u icin. Takim dosyasi
+  # binlerce satir olabildiginden varsayilan 1MB limiti yetersiz kalir.
+  servlet:
+    multipart:
+      max-file-size: 15MB
+      max-request-size: 15MB
+
+  jpa:
+    hibernate:
+      ddl-auto: validate          # Sema yonetimi Flyway'de; Hibernate sadece dogrular
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false   # SQL tek satir halinde loglansin
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  cache:
+    type: redis
+
+  data:
+    redis:
+      repositories:
+        enabled: false           # Redis sadece cache icin; repository taramasi kapali
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100       # Asiri buyuk sayfa istegi engellenir
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+server:
+  port: 8080
+  # Ters proxy arkasinda gercek istemci IP'sini cozmek icin (X-Forwarded-*).
+  forward-headers-strategy: framework
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# --- Uygulamaya ozel ayarlar ---
+scorestv:
+  # ============================================================
+  # Gorsel aynalama — API-Football "Image not available" placeholder filtresi.
+  # Indirilen gorselin SHA-256'si bu listedeyse depolanmaz (mobil fallback
+  # gosterir). Virgulle ayrilmis hex hash listesi; IMAGE_PLACEHOLDER_SHA256
+  # env ile verilir. Hash bulma: bir placeholder gorseli indirip sha256sum.
+  image:
+    placeholder-sha256: ${IMAGE_PLACEHOLDER_SHA256:}
+
+  # ============================================================
+  # Elasticsearch — arama motoru (fixtures + teams + leagues + players + countries).
+  # ============================================================
+  # AYRI SUNUCUDA calismak uzere tasarlandi. Local'de docker-compose
+  # uzerinden 9200'de calisir (security KAPALI). Prod'a tasinirken
+  # sadece host/port/credentials env'lerini degistir, kod degismez.
+  #
+  # Local default:
+  #   host=localhost  port=9200  scheme=http  username=  password=
+  #
+  # Prod ornek:
+  #   ELASTICSEARCH_HOST=10.0.0.42
+  #   ELASTICSEARCH_PORT=9200
+  #   ELASTICSEARCH_SCHEME=https
+  #   ELASTICSEARCH_USERNAME=elastic
+  #   ELASTICSEARCH_PASSWORD=<degisken>
+  #
+  # enabled=false ise tum SearchService cagrilari no-op (uygulama calismaya
+  # devam eder ama /api/v1/search bos doner).
+  elasticsearch:
+    enabled: ${ELASTICSEARCH_ENABLED:true}
+    host: ${ELASTICSEARCH_HOST:localhost}
+    port: ${ELASTICSEARCH_PORT:9200}
+    scheme: ${ELASTICSEARCH_SCHEME:http}
+    username: ${ELASTICSEARCH_USERNAME:}
+    password: ${ELASTICSEARCH_PASSWORD:}
+    # Index isimleri (prefix). Multi-tenant kullanmiyoruz ama prefix sayesinde
+    # ayni cluster'i baska proje icin kullanmak istersek catismayi onler.
+    index-prefix: ${ELASTICSEARCH_INDEX_PREFIX:scorestv}
+    # Baglanti zaman asimi (ms).
+    connect-timeout: ${ELASTICSEARCH_CONNECT_TIMEOUT:3000}
+    socket-timeout: ${ELASTICSEARCH_SOCKET_TIMEOUT:10000}
+
+  # Firebase Cloud Messaging — service account JSON path.
+  # classpath: → resources icinde; file:/ → mutlak path (production icin onerilen).
+  # Tanimli degilse FCM gonderim devre disi (backend calismaya devam eder).
+  firebase:
+    service-account-path: ${FIREBASE_SERVICE_ACCOUNT_PATH:}
+  api-football:
+    base-url: https://v3.football.api-sports.io
+    # Dakikalik API istek limiti. Tum istekler buna gore esit araliklarla seri
+    # hale getirilir (ApiFootballClient.throttle synchronized) — yanit
+    # header'indaki X-RateLimit-Limit degerinin biraz altina ayarla.
+    #
+    # Plan referansi:
+    #   Free  : 100/dk, 100/gun       — RPM=80
+    #   Pro   : 300/dk, 1000/gun      — RPM=250
+    #   Ultra : 450/dk, 75000/gun     — RPM=400 (mevcut plan)
+    #   Mega  : 900/dk, 150000+/gun   — RPM=800 (gelecek plan)
+    #
+    # Gunluk kota ApiQuotaTracker tarafindan otomatik izlenir; dakikalik
+    # limit ise burada ayarlanir. Default Ultra plan icin guvenli.
+    requests-per-minute: ${API_FOOTBALL_RPM:400}
+  football:
+    sync:
+      # Zamanlanmis senkron isleri calissin mi (dev'de kapali tutulur).
+      enabled: ${FOOTBALL_SYNC_ENABLED:false}
+      # Anasayfa fikstur penceresi: bugun -before ... bugun +after gun.
+      window-days-before: 7
+      window-days-after: 7
+      # Gun hesabinin yapilacagi saat dilimi (anasayfa "bugun" tanimi).
+      timezone: Europe/Istanbul
+      # Tam pencere senkronu cron ifadesi (her gun 04:00).
+      window-cron: "0 0 4 * * *"
+      # Referans veri (ulke/lig/sezon) senkronu cron'u (her Pazar 05:00).
+      reference-cron: "0 0 5 * * SUN"
+      # Bugun tazeleme cron'u (her saatin basinda). Alt liglerin gecikmeli
+      # NS->FT/PST guncellemelerini en gec 1 saatte yakalar.
+      today-refresh-cron: "0 0 * * * *"
+      # Canli mac senkronu (GET /fixtures?live=all). Acik oldugunda her
+      # live-interval-seconds saniyede bir API yoklanir ve degisimler
+      # WebSocket /topic/fixtures/live/{lang} kanallarina yayilir.
+      live-enabled: ${FOOTBALL_LIVE_ENABLED:false}
+      live-interval-seconds: ${FOOTBALL_LIVE_INTERVAL:15}
+      # Yaklasan-mac kadro yoklayicisi: kickoff'a 0-2 saat olanlar icin
+      # her 15 dk'da bir /fixtures/lineups cagrisi. Ilk kadro geldiginde
+      # /topic/fixtures/{id}/lineups WS push yapilir.
+      imminent-lineups-interval-minutes: ${FOOTBALL_LINEUPS_INTERVAL:15}
+      lineups-lookahead-hours: ${FOOTBALL_LINEUPS_LOOKAHEAD:2}
+      # Canli istatistik (possession, shots, corners, ...) yoklama araligi.
+      # API'nin onerdigi 60sn; pik gunlerde kota icin 90/120 yapabilirsin.
+      live-statistics-interval-seconds: ${FOOTBALL_STATS_INTERVAL:60}
+      # Canli oyuncu istatistik (rating, dakika, gol, asist, ...) yoklama
+      # araligi. Skor kadar kritik degil; varsayilan 120sn kota dostu.
+      live-player-stats-interval-seconds: ${FOOTBALL_PLAYER_STATS_INTERVAL:120}
+      # "Covered" isaretli olmayan (alt ligler) maclar icin yoklama
+      # araliklarinin carpani. 4 = non-covered icin events 30->120sn,
+      # stats 60->240sn, player_stats 120->480sn. Pik kotayi koruyor.
+      non-covered-rate-multiplier: ${FOOTBALL_NONCOVERED_MULT:4}
+    # Anasayfa goruntu/sunum ayarlari.
+    serving:
+      # Anasayfa lig listesinin EN BASINDA, BU SIRAYLA gosterilecek
+      # API-Football lig ID'leri. Listedeki sira = oncelik. Geri kalan
+      # ligler bu listeden sonra "ulke adi (alfabetik) -> lig adi
+      # (alfabetik)" duzeniyle sıralanır.
+      #
+      # Hicbiri girilmezse herseyf alfabetik gosterilir.
+      # ID'leri https://www.api-football.com/documentation-v3 uzerinden
+      # veya admin panelden lig kayitlarindan ogrenebilirsin.
+      #
+      # Ornek bazi populer ligler (yorumdan acip duzenleyebilirsin):
+      #   2   UEFA Champions League
+      #   3   UEFA Europa League
+      #   848 UEFA Conference League
+      #   39  Premier League (England)
+      #   140 La Liga (Spain)
+      #   135 Serie A (Italy)
+      #   78  Bundesliga (Germany)
+      #   61  Ligue 1 (France)
+      #   203 Super Lig (Turkey)
+      #   88  Eredivisie (Netherlands)
+      #   94  Primeira Liga (Portugal)
+      #   1   FIFA World Cup
+      #   4   UEFA Euro
+      #   5   UEFA Nations League
+      featured-league-ids: [1,2,3,848,203,204,205,206,551,552,553,554,1007,1027,39,78,140,135,61,94,88,144,145,10,667]
+  seo:
+    # Public frontend temel adresi - canonical URL'ler bununla kurulur.
+    site-url: ${SEO_SITE_URL:http://localhost:3000}
+    # SEO tarih gosteriminin saat dilimi.
+    timezone: Europe/Istanbul
+  storage:
+    # MinIO baglanti adresi (S3 API). Local: localhost; prod'da app icin http://minio:9000.
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ROOT_USER:minioadmin}
+    secret-key: ${MINIO_ROOT_PASSWORD:minioadmin}
+    bucket: ${MINIO_BUCKET:scorestv-media}
+    # Gorsellerin herkese acik servis edildigi temel adres.
+    public-url: ${STORAGE_PUBLIC_URL:http://localhost:9000/scorestv-media}
+  security:
+    jwt:
+      access-token-ttl: PT15M     # 15 dakika
+      refresh-token-ttl: P14D     # 14 gun
+    google:
+      # Google Cloud'daki OAuth client ID'leri (web/android/ios).
+      # NOT: ${VAR:default} placeholder icinde virgul "default value separator"
+      # olarak yorumlanir — bu yuzden YAML list syntax kullaniyoruz (Spring
+      # virgullu string default'ini parse edemez, YAML list'i dogru bind eder).
+      # Kabul edilen Google OAuth client id'leri (idToken aud kontrolu).
+      # 1. Admin/web client (admin paneli Google girisi) — ihtiyaten korunuyor.
+      # 2-4. Yeni Firebase projesi (scorestv-e889c): Android + iOS + Web client'lari.
+      #      Mobil serverClientId kullanmadigi icin token aud = platform client id
+      #      (Android'de Android, iOS'ta iOS client). Web ileride gerekebilir.
+      client-ids:
+        - 850334764490-nihi94238mnse9mr04i32qsd1b41913r.apps.googleusercontent.com
+        - 202204490934-9drjggq97fft8nrhqbio911m6aspgv3j.apps.googleusercontent.com
+        - 202204490934-2ll3r48acje0d64vmuacgkoj0qf4n5vu.apps.googleusercontent.com
+        - 202204490934-qthde1dld01aodqn930ioes4om69pofm.apps.googleusercontent.com
+  cors:
+    # Virgulle ayrilmis origin listesi. Prod'da CORS_ALLOWED_ORIGINS ile verilir.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  mail:
+    # Sifre sifirlama e-postasindaki baglantinin temel adresi (frontend sayfasi).
+    password-reset-url: ${PASSWORD_RESET_URL:http://localhost:3000/reset-password}

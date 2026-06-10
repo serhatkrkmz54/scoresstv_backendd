@@ -1,0 +1,28 @@
+meta {
+  name: Update Profile (Me)
+  type: http
+  seq: 7
+}
+
+put {
+  url: {{baseUrl}}/api/v1/auth/me
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "displayName": "Guncellenmis Ad",
+    "birthDate": "1998-03-15",
+    "country": "Almanya"
+  }
+}
+
+docs {
+  Oturum sahibinin kendi profilini gunceller (ad, dogum tarihi, ulke).
+  Gecerli access token gerekir. Cevapta hesaplanmis "age" alani da doner.
+}

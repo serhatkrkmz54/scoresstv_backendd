@@ -1,0 +1,20 @@
+meta {
+  name: Untitled 3
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/v1/leagues/uefa-sampiyonlar-ligi-2?lang=tr
+  body: none
+  auth: inherit
+}
+
+params:query {
+  lang: tr
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

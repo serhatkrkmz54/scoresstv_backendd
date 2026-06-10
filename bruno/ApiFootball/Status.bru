@@ -1,0 +1,28 @@
+meta {
+  name: Status
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/fixtures/live
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  API-Football entegrasyon iskeletinin smoke test'i.
+  Hesap, abonelik ve gunluk istek kotasi bilgisini doner.
+  
+  ADMIN yetkisi gerekir - once admin@scorestv.com ile Login calistir.
+  
+  On kosul: .env dosyasinda API_FOOTBALL_KEY tanimli olmali.
+  Anahtar yoksa 503 (SERVICE_UNAVAILABLE) doner.
+  
+  Not: API-Football /status cagrisi gunluk kotadan DUSMEZ,
+  bu yuzden guvenle tekrar tekrar cagrilabilir.
+}

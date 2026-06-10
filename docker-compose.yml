@@ -1,0 +1,158 @@
+name: scorestv-app
+
+services:
+  backend:
+    image: eclipse-temurin:21-jre-alpine
+    container_name: scorestv-backend
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      java
+      -Xms3g -Xmx3g
+      -XX:+UseG1GC
+      -XX:MaxGCPauseMillis=200
+      -XX:+HeapDumpOnOutOfMemoryError
+      -XX:HeapDumpPath=/app/heapdumps
+      -Djava.security.egd=file:/dev/./urandom
+      -Dspring.profiles.active=prod
+      -jar app.jar
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./backend/app.jar:/app/app.jar:ro
+      - ./backend/firebase-service-account.json:/app/firebase-service-account.json:ro
+      - ./data/heapdumps:/app/heapdumps
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 3G
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: scorestv-nginx
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./conf/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./conf/nginx/scorestv.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./conf/nginx/certs:/etc/nginx/certs:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./data/letsencrypt:/var/www/certbot
+      - ./data/nginx/logs:/var/log/nginx
+      - ./data/nginx/cache:/var/cache/nginx
+      - ./data/admin-spa:/usr/share/nginx/admin:ro
+    depends_on:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: scorestv-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./conf/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./conf/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./data/prometheus:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: scorestv-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: https://grafana.scorestv.com
+      GF_SERVER_DOMAIN: grafana.scorestv.com
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    env_file:
+      - .env
+    volumes:
+      - ./conf/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./conf/grafana/dashboards-config:/etc/grafana/provisioning/dashboards:ro
+      - ./conf/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:3.2.0
+    container_name: scorestv-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./conf/loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - ./data/loki:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  promtail:
+    image: grafana/promtail:3.2.0
+    container_name: scorestv-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./conf/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/var/log:ro
+    depends_on:
+      - loki
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: scorestv-node-exporter
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "127.0.0.1:9100:9100"
+
+networks:
+  default:
+    name: scorestv-app-net
+    driver: bridge

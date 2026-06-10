@@ -1,0 +1,258 @@
+package com.scorestv.user;
+
+import com.scorestv.common.ApiException;
+import com.scorestv.config.ScorestvProperties;
+import com.scorestv.security.GoogleTokenVerifier;
+import com.scorestv.security.JwtService;
+import com.scorestv.security.LoginAttemptService;
+import com.scorestv.user.dto.AuthResponse;
+import com.scorestv.user.dto.ChangePasswordRequest;
+import com.scorestv.user.dto.GoogleLoginRequest;
+import com.scorestv.user.dto.LoginRequest;
+import com.scorestv.user.dto.RegisterRequest;
+import com.scorestv.user.dto.TokenRequest;
+import com.scorestv.user.dto.UpdateProfileRequest;
+import com.scorestv.user.dto.UserResponse;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
+
+@Service
+public class AuthService {
+
+    private final UserRepository userRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
+    private final LoginAttemptService loginAttemptService;
+    private final GoogleTokenVerifier googleTokenVerifier;
+    private final Duration refreshTtl;
+
+    public AuthService(UserRepository userRepository,
+                       RefreshTokenRepository refreshTokenRepository,
+                       PasswordEncoder passwordEncoder,
+                       JwtService jwtService,
+                       LoginAttemptService loginAttemptService,
+                       GoogleTokenVerifier googleTokenVerifier,
+                       ScorestvProperties props) {
+        this.userRepository = userRepository;
+        this.refreshTokenRepository = refreshTokenRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
+        this.loginAttemptService = loginAttemptService;
+        this.googleTokenVerifier = googleTokenVerifier;
+        this.refreshTtl = props.security().jwt().refreshTokenTtl();
+    }
+
+    /** Herkese acik kayit. Yeni kullanici her zaman USER rolu ile olusur. */
+    @Transactional
+    public AuthResponse register(RegisterRequest req) {
+        String email = req.email().toLowerCase().trim();
+        if (userRepository.existsByEmail(email)) {
+            throw ApiException.conflict("Bu e-posta zaten kayıtlı");
+        }
+        User user = User.builder()
+                .email(email)
+                .password(passwordEncoder.encode(req.password()))
+                .displayName(req.displayName().trim())
+                .birthDate(req.birthDate())
+                .country(req.country().trim())
+                .role(Role.USER)
+                .enabled(true)
+                .build();
+        userRepository.save(user);
+        return issueTokens(user);
+    }
+
+    @Transactional
+    public AuthResponse login(LoginRequest req) {
+        String email = req.email().toLowerCase().trim();
+
+        long lockSeconds = loginAttemptService.lockSecondsRemaining(email);
+        if (lockSeconds > 0) {
+            long minutes = (lockSeconds / 60) + 1;
+            throw ApiException.tooManyRequests(
+                    "Çok fazla hatalı giriş denemesi. " + minutes
+                            + " dakika sonra tekrar deneyin.");
+        }
+
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user != null && user.getPassword() == null) {
+            throw ApiException.unauthorized(
+                    "Bu hesap Google ile oluşturulmuş. Lütfen Google ile giriş yapın.");
+        }
+        if (user == null || !passwordEncoder.matches(req.password(), user.getPassword())) {
+            loginAttemptService.recordFailure(email);
+            throw ApiException.unauthorized("E-posta veya şifre hatalı");
+        }
+        if (!user.isEnabled()) {
+            throw ApiException.unauthorized("Hesabınız devre dışı bırakılmıştır.");
+        }
+
+        loginAttemptService.recordSuccess(email);
+        return issueTokens(user);
+    }
+
+    /**
+     * Google ID token ile giris/kayit.
+     * - Daha once Google'a baglanmis kullanici varsa: dogrudan giris.
+     * - Ayni e-postayla local hesap varsa: o hesaba Google baglanir (linking).
+     * - Hicbiri yoksa: yeni kayit; bu durumda dogum tarihi + ulke zorunludur.
+     */
+    @Transactional
+    public AuthResponse loginWithGoogle(GoogleLoginRequest req) {
+        GoogleTokenVerifier.GoogleUser google = googleTokenVerifier.verify(req.idToken());
+        String email = google.email().toLowerCase().trim();
+
+        User user = userRepository.findByGoogleId(google.googleId()).orElse(null);
+        if (user == null) {
+            user = userRepository.findByEmail(email).orElse(null);
+            if (user != null) {
+                // Mevcut hesabi Google ile esle.
+                user.setGoogleId(google.googleId());
+                userRepository.save(user);
+            } else {
+                // Yeni Google kaydi - dogum tarihi ve ulke zorunlu.
+                if (req.birthDate() == null
+                        || req.country() == null || req.country().isBlank()) {
+                    throw ApiException.badRequest(
+                            "Google ile ilk kayıt için doğum tarihi ve ülke gereklidir.");
+                }
+                user = User.builder()
+                        .email(email)
+                        .displayName(resolveDisplayName(google, email))
+                        .googleId(google.googleId())
+                        .birthDate(req.birthDate())
+                        .country(req.country().trim())
+                        .role(Role.USER)
+                        .enabled(true)
+                        .build();
+                userRepository.save(user);
+            }
+        }
+
+        if (!user.isEnabled()) {
+            throw ApiException.unauthorized("Hesabınız devre dışı bırakılmıştır.");
+        }
+        return issueTokens(user);
+    }
+
+    private String resolveDisplayName(GoogleTokenVerifier.GoogleUser google, String email) {
+        String name = (google.name() != null && !google.name().isBlank())
+                ? google.name().trim() : email;
+        return name.length() > 100 ? name.substring(0, 100) : name;
+    }
+
+    /**
+     * Refresh token rotasyonu + reuse detection.
+     * Her kullanimda eski token iptal edilir, yeni cift uretilir. Iptal edilmis
+     * (kullanilmis) bir token tekrar sunulursa bu token'in calindigi anlamina
+     * gelebilir; bu durumda kullanicinin TUM oturumlari kapatilir.
+     *
+     * noRollbackFor: reuse durumunda once tum oturumlar iptal edilir, sonra
+     * hata firlatilir; istisna islemi geri almasin diye rollback kapatildi.
+     */
+    @Transactional(noRollbackFor = ApiException.class)
+    public AuthResponse refresh(TokenRequest req) {
+        RefreshToken token = refreshTokenRepository.findByToken(req.refreshToken())
+                .orElseThrow(() -> ApiException.unauthorized("Geçersiz refresh token"));
+
+        if (token.isRevoked()) {
+            // Kullanilmis bir token yeniden geldi -> olasi token hirsizligi.
+            refreshTokenRepository.revokeAllByUserId(token.getUserId());
+            throw ApiException.unauthorized(
+                    "Refresh token yeniden kullanıldı; güvenlik için tüm oturumlar "
+                            + "kapatıldı. Lütfen tekrar giriş yapın.");
+        }
+        if (token.getExpiresAt().isBefore(Instant.now())) {
+            throw ApiException.unauthorized("Refresh token süresi dolmuş");
+        }
+
+        User user = userRepository.findById(token.getUserId())
+                .orElseThrow(() -> ApiException.unauthorized("Kullanıcı bulunamadı!"));
+        token.setRevoked(true);
+        refreshTokenRepository.save(token);
+        return issueTokens(user);
+    }
+
+    @Transactional
+    public void logout(TokenRequest req) {
+        refreshTokenRepository.findByToken(req.refreshToken()).ifPresent(token -> {
+            token.setRevoked(true);
+            refreshTokenRepository.save(token);
+        });
+    }
+
+    @Transactional(readOnly = true)
+    public UserResponse currentUser(Long userId) {
+        return userRepository.findById(userId)
+                .map(UserResponse::from)
+                .orElseThrow(() -> ApiException.unauthorized("Kullanıcı bulunamadı!"));
+    }
+
+    /** Kullanicinin kendi profilini gunceller (ad, dogum tarihi, ulke). */
+    @Transactional
+    public UserResponse updateProfile(Long userId, UpdateProfileRequest req) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> ApiException.unauthorized("Kullanıcı bulunamadı"));
+        user.setDisplayName(req.displayName().trim());
+        user.setBirthDate(req.birthDate());
+        user.setCountry(req.country().trim());
+        return UserResponse.from(userRepository.save(user));
+    }
+
+    /**
+     * Kullanicinin sifresini degistirir. Google ile olusturulmus (sifresiz)
+     * hesaplarda calismaz. Basarili olunca guvenlik geregi diger tum oturumlar
+     * kapatilir ve cagriyi yapan istemciye yeni token cifti dondurulur.
+     */
+    @Transactional
+    public AuthResponse changePassword(Long userId, ChangePasswordRequest req) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> ApiException.unauthorized("Kullanıcı bulunamadı"));
+        if (user.getPassword() == null) {
+            throw ApiException.badRequest(
+                    "Bu hesap Google ile oluşturulmuş; şifresi yok, değiştirilemez.");
+        }
+        if (!passwordEncoder.matches(req.currentPassword(), user.getPassword())) {
+            throw ApiException.unauthorized("Mevcut şifre hatalı");
+        }
+        if (req.newPassword().equals(req.currentPassword())) {
+            throw ApiException.badRequest("Yeni şifre mevcut şifreyle aynı olamaz");
+        }
+        user.setPassword(passwordEncoder.encode(req.newPassword()));
+        userRepository.save(user);
+        // Guvenlik: sifre degisince mevcut tum refresh token'lar iptal edilir.
+        refreshTokenRepository.revokeAllByUserId(userId);
+        return issueTokens(user);
+    }
+
+    /** ADMIN: bir kullanicinin tum oturumlarini (refresh token'larini) sonlandirir. */
+    @Transactional
+    public int revokeAllSessions(Long userId) {
+        if (!userRepository.existsById(userId)) {
+            throw ApiException.notFound("Kullanıcı bulunamadı");
+        }
+        return refreshTokenRepository.revokeAllByUserId(userId);
+    }
+
+    private AuthResponse issueTokens(User user) {
+        String accessToken = jwtService.generateAccessToken(user);
+        RefreshToken refreshToken = RefreshToken.builder()
+                .token(UUID.randomUUID().toString())
+                .userId(user.getId())
+                .expiresAt(Instant.now().plus(refreshTtl))
+                .revoked(false)
+                .build();
+        refreshTokenRepository.save(refreshToken);
+        return AuthResponse.of(
+                accessToken,
+                refreshToken.getToken(),
+                jwtService.getAccessTtlSeconds(),
+                UserResponse.from(user));
+    }
+}

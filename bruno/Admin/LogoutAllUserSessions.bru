@@ -1,0 +1,22 @@
+meta {
+  name: Logout All User Sessions
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/users/2/logout-all
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  ADMIN: URL'deki "2" yerine hedef kullanicinin id'sini yaz.
+  O kullanicinin tum refresh token'larini iptal eder. Kullanici,
+  elindeki access token'in suresi dolunca (en fazla 15 dk) tamamen
+  cikis yapmis olur. Cevap: kac oturumun iptal edildigi.
+}

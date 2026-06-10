@@ -1,0 +1,28 @@
+meta {
+  name: Update Login Security
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{baseUrl}}/api/v1/admin/settings/login-security
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "maxFailedAttempts": 5,
+    "lockoutMinutes": 15
+  }
+}
+
+docs {
+  Brute-force ayarini gunceller: kac hatali denemeden sonra
+  kac dakika kilit uygulanacagi. ADMIN yetkisi gerekir.
+  Ornek: maxFailedAttempts=3, lockoutMinutes=30
+}
