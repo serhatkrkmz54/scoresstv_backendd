@@ -393,6 +393,20 @@ public class ImageMirrorService {
     }
 
     /**
+     * Harici görseli aynalar (indir+store) ve key döner — basketbol gibi diğer
+     * modüllerin {@link #mirror} mantığını yeniden kullanması için public giriş.
+     * Placeholder ise {@link #PLACEHOLDER}, hata ise {@code null} döner.
+     */
+    public String mirrorExternal(String sourceUrl, String folder, Long id) {
+        return mirror(sourceUrl, folder, id);
+    }
+
+    /** {@link #mirrorExternal} dönüşü placeholder sentinel'i mi? */
+    public boolean isPlaceholderKey(String key) {
+        return PLACEHOLDER.equals(key);
+    }
+
+    /**
      * Bir görseli kaynak URL'den indirip MinIO'ya yükler ve nesne anahtarını döner.
      * Başarısızlıkta {@code null} döner (loglanır) — varlık bir sonraki turda denenir.
      */

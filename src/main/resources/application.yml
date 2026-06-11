@@ -119,6 +119,50 @@ scorestv:
   # Tanimli degilse FCM gonderim devre disi (backend calismaya devam eder).
   firebase:
     service-account-path: ${FIREBASE_SERVICE_ACCOUNT_PATH:}
+
+  # ============================================================
+  # Bilyoner iddaa oranlari. enabled=false ise oran akisi tamamen kapali
+  # (fetch yok, match-detail'de odds=null). Bir sorun olursa BILYONER_ENABLED
+  # env'i false yapip aninda kapatabilirsin.
+  # affiliate-url: "Bilyoner'de oyna" butonunun acacagi tikla-git linki —
+  # Bilyoner Ortaklik (affiliate) programindan alinan takip linki buraya konur.
+  # ============================================================
+  bilyoner:
+    enabled: ${BILYONER_ENABLED:true}
+    api-url: ${BILYONER_API_URL:https://www.bilyoner.com/api/v3/mobile/aggregator/gamelist/all/v1?tabType=1&bulletinType=2}
+    affiliate-url: ${BILYONER_AFFILIATE_URL:https://www.bilyoner.com}
+    cache-seconds: ${BILYONER_CACHE_SECONDS:120}
+    kickoff-tolerance-minutes: ${BILYONER_KICKOFF_TOLERANCE:240}
+    # Tam otomasyon: snapshot bu aralikla (ms) arka planda tazelenir
+    # (BilyonerOddsJob — sadece enabled=true iken calisir).
+    refresh-ms: ${BILYONER_REFRESH_MS:60000}
+
+  # ============================================================
+  # Basketbol (API-Basketball v1) — football'dan TAMAMEN ayri modul.
+  # api-key football ile AYNI API-Sports anahtari (API_FOOTBALL_KEY).
+  # enabled=false ise sync/job hic calismaz. live-enabled ayrica canli
+  # skor periyodik cekimini acar.
+  # ============================================================
+  basketball:
+    enabled: ${BASKETBALL_ENABLED:true}
+    base-url: ${BASKETBALL_BASE_URL:https://v1.basketball.api-sports.io}
+    api-key: ${API_FOOTBALL_KEY:}
+    # Basketbol kendi dakikalik limitine sahip (footballdan BAGIMSIZ sayac).
+    # Ayri env ile ayarlanir; ileride basketbol limiti ayri artarsa bumple.
+    requests-per-minute: ${BASKETBALL_RPM:450}
+    timezone: Europe/Istanbul
+    today-cron: ${BASKETBALL_TODAY_CRON:0 */30 * * * *}
+    live-enabled: ${BASKETBALL_LIVE_ENABLED:true}
+    live-interval-seconds: ${BASKETBALL_LIVE_INTERVAL:15}
+    # Kayan pencere (football ile ayni mantik): ±7 gun. Gunluk window-cron tum
+    # pencereyi tarar; gecmis maclar finalize olur, gelecek fikstur dolar.
+    window-days-before: ${BASKETBALL_WINDOW_BEFORE:7}
+    window-days-after: ${BASKETBALL_WINDOW_AFTER:7}
+    window-cron: ${BASKETBALL_WINDOW_CRON:0 0 4 * * *}
+    # Ulke + lig referans seed cron (haftalik, Pazartesi 03:00).
+    reference-cron: ${BASKETBALL_REFERENCE_CRON:0 0 3 * * 1}
+    # Logo/bayrak aynalama (CDN) cron — saatlik :15.
+    image-mirror-cron: ${BASKETBALL_IMAGE_MIRROR_CRON:0 15 * * * *}
   api-football:
     base-url: https://v3.football.api-sports.io
     # Dakikalik API istek limiti. Tum istekler buna gore esit araliklarla seri
@@ -133,7 +177,7 @@ scorestv:
     #
     # Gunluk kota ApiQuotaTracker tarafindan otomatik izlenir; dakikalik
     # limit ise burada ayarlanir. Default Ultra plan icin guvenli.
-    requests-per-minute: ${API_FOOTBALL_RPM:400}
+    requests-per-minute: ${API_FOOTBALL_RPM:450}
   football:
     sync:
       # Zamanlanmis senkron isleri calissin mi (dev'de kapali tutulur).

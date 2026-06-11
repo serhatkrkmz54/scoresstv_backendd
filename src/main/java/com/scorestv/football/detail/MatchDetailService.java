@@ -107,6 +107,7 @@ public class MatchDetailService {
     private final PlayerPhotoResolver photoResolver;
     private final MatchDetailLazySync lazySync;
     private final com.scorestv.football.league.BracketBuilder bracketBuilder;
+    private final com.scorestv.bilyoner.BilyonerOddsService bilyonerOddsService;
     /**
      * Kendi proxy referansı — {@code loadCachedResponse}'a self-invocation
      * yerine proxy üstünden çağırmak için. Aksi halde Spring'in @Cacheable
@@ -132,6 +133,7 @@ public class MatchDetailService {
                               PlayerPhotoResolver photoResolver,
                               MatchDetailLazySync lazySync,
                               com.scorestv.football.league.BracketBuilder bracketBuilder,
+                              com.scorestv.bilyoner.BilyonerOddsService bilyonerOddsService,
                               @Lazy MatchDetailService self) {
         this.fixtureRepository = fixtureRepository;
         this.eventRepository = eventRepository;
@@ -150,6 +152,7 @@ public class MatchDetailService {
         this.photoResolver = photoResolver;
         this.lazySync = lazySync;
         this.bracketBuilder = bracketBuilder;
+        this.bilyonerOddsService = bilyonerOddsService;
         this.self = self;
     }
 
@@ -318,6 +321,9 @@ public class MatchDetailService {
                 matchSeason,
                 turkish);
 
+        // Bilyoner iddaa oranları — eşleşme yoksa veya özellik kapalıysa null.
+        var odds = bilyonerOddsService.forFixture(home, away, fixture.getKickoffAt());
+
         return new MatchDetailResponse(
                 fixture.getId(),
                 slug,
@@ -355,7 +361,8 @@ public class MatchDetailService {
                 prediction,
                 broadcasts,
                 bracket,
-                seo);
+                seo,
+                odds);
     }
 
     /** Sakatlık listesi — ev sahibi önce, deplasman sonra. Boş olabilir. */

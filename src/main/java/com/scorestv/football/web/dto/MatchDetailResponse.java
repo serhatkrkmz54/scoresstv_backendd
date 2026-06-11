@@ -85,7 +85,9 @@ public record MatchDetailResponse(
          * veya knockout fixture'ları yoksa {@code null}.
          */
         BracketView bracket,
-        MatchSeoResponse seo
+        MatchSeoResponse seo,
+        /** Bilyoner iddaa oranları; eşleşme yoksa veya özellik kapalıysa null. */
+        com.scorestv.bilyoner.MatchOdds odds
 ) implements Serializable {
 
     /** Stadyum detayı — özet listesinden daha zengin (kapasite + zemin). */

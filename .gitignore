@@ -11,8 +11,9 @@ firebase-service-account.json
 *.keystore
 *.jks
 conf/secrets/
+# application-prod.yml: yalnizca ${ENV} placeholder icerir (gercek sirlar .env'de),
+# o yuzden commit'lenir — deploy'da prod datasource/profil config'i gelsin.
 application-secrets.yml
-application-prod.yml
 application-local.yml
 
 # IDE

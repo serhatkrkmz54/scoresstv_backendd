@@ -55,6 +55,8 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/api/v1/fixtures", "/api/v1/fixtures/**").permitAll()
+                // Basketbol maclari — public (fikstur + canli skor).
+                .requestMatchers("/api/v1/basketball/**").permitAll()
                 // Lig detay sayfasi — public.
                 .requestMatchers("/api/v1/leagues", "/api/v1/leagues/**").permitAll()
                 // Takim detay sayfasi — public.
