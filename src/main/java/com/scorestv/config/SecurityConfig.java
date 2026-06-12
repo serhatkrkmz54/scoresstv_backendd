@@ -59,6 +59,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/basketball/**").permitAll()
                 // Lig detay sayfasi — public.
                 .requestMatchers("/api/v1/leagues", "/api/v1/leagues/**").permitAll()
+                .requestMatchers("/api/v1/countries", "/api/v1/countries/**").permitAll()
                 // Takim detay sayfasi — public.
                 .requestMatchers("/api/v1/teams", "/api/v1/teams/**").permitAll()
                 // Oyuncu detay sayfasi — public.

@@ -34,7 +34,32 @@ public record FootballProperties(
              * Liste boş olduğunda hiçbir lig öncelikli sayılmaz —
              * tamamen alfabetik düzene düşer.
              */
-            @DefaultValue({}) List<Long> featuredLeagueIds
+            @DefaultValue({}) List<Long> featuredLeagueIds,
+
+            /**
+             * Sol ray "Popüler Ligler" listesi — BU SIRAYLA gösterilecek
+             * API-Football lig ID'leri. Anasayfa fikstür sıralamasından
+             * (featuredLeagueIds) bağımsızdır; tamamen elle seçilir.
+             *
+             * <p>Yapılandırma: {@code application.yml} →
+             * {@code scorestv.football.serving.popular-league-ids}.
+             * Boşsa sol rayda popüler ligler bölümü görünmez.
+             */
+            @DefaultValue({}) List<Long> popularLeagueIds,
+
+            /**
+             * Sol ray "Ülkeler" listesi — BU SIRAYLA gösterilecek ülke ID'leri.
+             * {@code application.yml} → {@code scorestv.football.serving.popular-country-ids}.
+             * Boşsa sol rayda ülkeler bölümü görünmez.
+             */
+            @DefaultValue({}) List<Long> popularCountryIds,
+
+            /**
+             * Sol ray "Ülkeler" (milli takımlar) listesi — BU SIRAYLA gösterilecek
+             * takım ID'leri. Ülkeler sistemde takım (national=true) olarak tutulur.
+             * {@code application.yml} → {@code scorestv.football.serving.popular-team-ids}.
+             */
+            @DefaultValue({}) List<Long> popularTeamIds
     ) {
     }
 

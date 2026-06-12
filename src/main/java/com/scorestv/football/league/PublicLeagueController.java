@@ -3,6 +3,9 @@ package com.scorestv.football.league;
 import com.scorestv.common.ApiException;
 import com.scorestv.common.SlugUtil;
 import com.scorestv.football.web.dto.LeagueDetailResponse;
+import com.scorestv.football.web.dto.PopularLeagueView;
+
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,11 +32,26 @@ public class PublicLeagueController {
 
     private final LeagueDetailService service;
     private final LeagueTeamsService teamsService;
+    private final PopularLeaguesService popularLeaguesService;
 
     public PublicLeagueController(LeagueDetailService service,
-                                  LeagueTeamsService teamsService) {
+                                  LeagueTeamsService teamsService,
+                                  PopularLeaguesService popularLeaguesService) {
         this.service = service;
         this.teamsService = teamsService;
+        this.popularLeaguesService = popularLeaguesService;
+    }
+
+    /**
+     * Sol ray "Popüler Ligler" listesi (config'ten, elle seçilmiş).
+     * Not: "/popular" literal yolu, "/{slug}" pattern'ından önce eşleşir.
+     *
+     * @param lang "tr" → Türkçe ad/slug; aksi halde "en"
+     */
+    @GetMapping("/popular")
+    public List<PopularLeagueView> popular(
+            @RequestParam(required = false, defaultValue = "en") String lang) {
+        return popularLeaguesService.getPopular("tr".equalsIgnoreCase(lang));
     }
 
     @GetMapping("/{slug:[a-z0-9-]+}")

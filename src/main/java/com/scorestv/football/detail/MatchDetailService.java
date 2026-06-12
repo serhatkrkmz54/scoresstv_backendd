@@ -268,8 +268,8 @@ public class MatchDetailService {
         Venue venue = fixture.getVenue();
         League league = fixture.getLeague();
 
-        // Slug DAİMA İngilizce addan üretilir — URL'ler dilden bağımsızdır.
-        String slug = SlugUtil.fixtureSlug(home.getName(), away.getName(), fixture.getId());
+        // Slug dile göre lokalize (TR'de name_tr, yoksa orijinal). id ile çözülür.
+        String slug = SlugUtil.fixtureSlug(displayName(home, turkish), displayName(away, turkish), fixture.getId());
         String lang = turkish ? "tr" : "en";
         MatchSeoResponse seo = seoBuilder.build(fixture, lang);
 
@@ -460,7 +460,7 @@ public class MatchDetailService {
         League league = m.getLeague();
         return new H2hFixtureView(
                 m.getId(),
-                SlugUtil.fixtureSlug(home.getName(), away.getName(), m.getId()),
+                SlugUtil.fixtureSlug(displayName(home, turkish), displayName(away, turkish), m.getId()),
                 m.getKickoffAt(),
                 new H2hFixtureView.LeagueRef(
                         league.getId(),

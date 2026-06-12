@@ -241,6 +241,13 @@ scorestv:
       #   4   UEFA Euro
       #   5   UEFA Nations League
       featured-league-ids: [1,2,3,848,203,204,205,206,551,552,553,554,1007,1027,39,78,140,135,61,94,88,144,145,10,667]
+      # Sol ray "Popüler Ligler" listesi — buraya elle lig ID'lerini sırayla yaz.
+      # Örn: [203, 39, 140, 135, 78, 61, 2, 3, 848, 1]  (Süper Lig, PL, La Liga, ...)
+      popular-league-ids: [1,2,3,848,203,39,78,140,135,61]
+      # Sol ray "Ülkeler" listesi — buraya elle ülke ID'lerini sırayla yaz.
+      popular-country-ids: [157,60,49,56,21,16,79,115,129]
+      # Sol ray "Ülkeler" = milli takımlar. Takım (national team) ID'lerini sırayla yaz.
+      popular-team-ids: [777,25,10,768,9,27,1118,2,1,]
   seo:
     # Public frontend temel adresi - canonical URL'ler bununla kurulur.
     site-url: ${SEO_SITE_URL:http://localhost:3000}
@@ -278,4 +285,4 @@ scorestv:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   mail:
     # Sifre sifirlama e-postasindaki baglantinin temel adresi (frontend sayfasi).
-    password-reset-url: ${PASSWORD_RESET_URL:http://localhost:3000/reset-password}
+    password-reset-url: 

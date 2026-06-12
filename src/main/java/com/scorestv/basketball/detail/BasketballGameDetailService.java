@@ -120,9 +120,9 @@ public class BasketballGameDetailService {
      * cagride lazy sync tetiklenir.
      */
     public BasketballGameDetailResponse getById(Long id, boolean turkish, boolean forceRefresh) {
-        if (id == null) throw new ApiException(404, "Mac bulunamadi");
+        if (id == null) throw ApiException.notFound("Mac bulunamadi");
         BasketballGame game = gameRepo.findOneWithDetails(id)
-                .orElseThrow(() -> new ApiException(404, "Mac bulunamadi"));
+                .orElseThrow(() -> ApiException.notFound("Mac bulunamadi"));
 
         if (forceRefresh) {
             self.evictCache(id, turkish);
@@ -150,7 +150,7 @@ public class BasketballGameDetailService {
     @Transactional(readOnly = true)
     public BasketballGameDetailResponse loadCached(Long id, boolean turkish) {
         BasketballGame game = gameRepo.findOneWithDetails(id)
-                .orElseThrow(() -> new ApiException(404, "Mac bulunamadi"));
+                .orElseThrow(() -> ApiException.notFound("Mac bulunamadi"));
         return build(game, turkish);
     }
 
@@ -216,9 +216,9 @@ public class BasketballGameDetailService {
      */
     @Transactional(readOnly = true)
     public BasketballGameDetailResponse.SeoBundle getSeoById(Long id, boolean turkish) {
-        if (id == null) throw new ApiException(404, "Mac bulunamadi");
+        if (id == null) throw ApiException.notFound("Mac bulunamadi");
         BasketballGame game = gameRepo.findOneWithDetails(id)
-                .orElseThrow(() -> new ApiException(404, "Mac bulunamadi"));
+                .orElseThrow(() -> ApiException.notFound("Mac bulunamadi"));
         return seoBuilder.build(game, turkish ? "tr" : "en");
     }
 

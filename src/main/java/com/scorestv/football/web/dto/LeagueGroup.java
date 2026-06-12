@@ -22,7 +22,9 @@ public record LeagueGroup(
             String country,
             String countryFlag,
             /** Bu lig öne çıkarılan (senkron kapsamındaki) liglerden mi? */
-            boolean covered
+            boolean covered,
+            /** Lig sayfası URL slug'ı; dile göre ("super-lig-203" / "super-league-203"). */
+            String slug
     ) implements Serializable {
     }
 }

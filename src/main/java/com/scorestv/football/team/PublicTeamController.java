@@ -2,7 +2,10 @@ package com.scorestv.football.team;
 
 import com.scorestv.common.ApiException;
 import com.scorestv.common.SlugUtil;
+import com.scorestv.football.web.dto.PopularTeamView;
 import com.scorestv.football.web.dto.TeamDetailResponse;
+
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,9 +32,22 @@ import org.springframework.web.bind.annotation.RestController;
 public class PublicTeamController {
 
     private final TeamDetailService service;
+    private final PopularTeamsService popularTeamsService;
 
-    public PublicTeamController(TeamDetailService service) {
+    public PublicTeamController(TeamDetailService service,
+                               PopularTeamsService popularTeamsService) {
         this.service = service;
+        this.popularTeamsService = popularTeamsService;
+    }
+
+    /**
+     * Sol ray "Ülkeler" (milli takımlar) listesi — config'ten, elle seçilmiş.
+     * "/popular" literal yolu "/{slug}" pattern'ından önce eşleşir.
+     */
+    @GetMapping("/popular")
+    public List<PopularTeamView> popular(
+            @RequestParam(required = false, defaultValue = "en") String lang) {
+        return popularTeamsService.getPopular("tr".equalsIgnoreCase(lang));
     }
 
     @GetMapping("/{slug:[a-z0-9-]+}")

@@ -76,10 +76,10 @@ public class BasketballStandingsPageService {
      */
     public BasketballStandingsPageResponse getBySlug(String slug, String season, boolean turkish) {
         Long leagueId = SlugUtil.extractLeagueId(slug);
-        if (leagueId == null) throw new ApiException(404, "Lig bulunamadi");
+        if (leagueId == null) throw ApiException.notFound("Lig bulunamadi");
 
         BasketballLeague league = leagueRepo.findById(leagueId)
-                .orElseThrow(() -> new ApiException(404, "Lig bulunamadi"));
+                .orElseThrow(() -> ApiException.notFound("Lig bulunamadi"));
 
         // Sezon karari
         String resolvedSeason = season != null && !season.isBlank()
@@ -100,9 +100,9 @@ public class BasketballStandingsPageService {
     public BasketballStandingsPageResponse forceRefresh(String slug, String season,
                                                          boolean turkish) {
         Long leagueId = SlugUtil.extractLeagueId(slug);
-        if (leagueId == null) throw new ApiException(404, "Lig bulunamadi");
+        if (leagueId == null) throw ApiException.notFound("Lig bulunamadi");
         BasketballLeague league = leagueRepo.findById(leagueId)
-                .orElseThrow(() -> new ApiException(404, "Lig bulunamadi"));
+                .orElseThrow(() -> ApiException.notFound("Lig bulunamadi"));
         String resolvedSeason = season != null && !season.isBlank()
                 ? season : pickDefaultSeason(leagueId);
         if (resolvedSeason == null) return emptyPage(league, turkish);
@@ -143,7 +143,7 @@ public class BasketballStandingsPageService {
     public BasketballStandingsPageResponse loadCached(Long leagueId, String season,
                                                        boolean turkish) {
         BasketballLeague league = leagueRepo.findById(leagueId)
-                .orElseThrow(() -> new ApiException(404, "Lig bulunamadi"));
+                .orElseThrow(() -> ApiException.notFound("Lig bulunamadi"));
         return build(league, season, turkish);
     }
 

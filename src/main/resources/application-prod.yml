@@ -195,6 +195,8 @@ scorestv:
       - https://www.scorestv.com
       - https://admin.scorestv.com
       - https://api.scorestv.com
+      # GEÇİCİ — local geliştirme (web + WebSocket) için. Prod'a tam geçince kaldır.
+      - http://localhost:3000
 
   mail:
     password-reset-url: ${MAIL_PASSWORD_RESET_URL:https://scorestv.com/auth/reset-password}

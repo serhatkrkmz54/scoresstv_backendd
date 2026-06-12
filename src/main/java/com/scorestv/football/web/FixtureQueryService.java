@@ -234,8 +234,9 @@ public class FixtureQueryService {
         Team away = fixture.getAwayTeam();
         return new FixtureSummary(
                 fixture.getId(),
-                // Slug DAİMA İngilizce addan üretilir — URL'ler dilden bağımsız sabit kalır.
-                SlugUtil.fixtureSlug(home.getName(), away.getName(), fixture.getId()),
+                // Slug dile göre lokalize: TR'de name_tr (varsa), yoksa orijinal ad —
+                // ekranda görünen takım adıyla birebir aynı. id ile çözüldüğü için güvenli.
+                SlugUtil.fixtureSlug(displayName(home, turkish), displayName(away, turkish), fixture.getId()),
                 toLeagueRef(fixture.getLeague(), turkish),
                 messages.roundText(fixture.getRound(), turkish),
                 fixture.getKickoffAt(),
@@ -252,7 +253,11 @@ public class FixtureQueryService {
                 new FixtureSummary.Team(
                         away.getId(), displayName(away, turkish), teamLogo(away),
                         SlugUtil.teamSlug(displayName(away, turkish), away.getId())),
-                new FixtureSummary.Score(fixture.getHomeGoals(), fixture.getAwayGoals()),
+                new FixtureSummary.Score(
+                        fixture.getHomeGoals(), fixture.getAwayGoals(),
+                        period(fixture.getScoreHtHome(), fixture.getScoreHtAway()),
+                        period(fixture.getScoreEtHome(), fixture.getScoreEtAway()),
+                        period(fixture.getScorePenHome(), fixture.getScorePenAway())),
                 toVenue(fixture.getVenue(), turkish));
     }
 
@@ -286,7 +291,8 @@ public class FixtureQueryService {
                 leagueLogo(league),
                 countryName(league, country, turkish),
                 countryFlag(country),
-                league.isCovered());
+                league.isCovered(),
+                SlugUtil.leagueSlug(displayName(league, turkish), league.getId()));
     }
 
     /**
@@ -306,6 +312,13 @@ public class FixtureQueryService {
      * Bir varlığın görünen adı: dil "tr" ise ve Türkçe karşılığı (name_tr)
      * girilmişse Türkçe ad, aksi halde İngilizce kaynak ad.
      */
+    /** İY/UZ/PEN periyot skoru; iki değer de null ise null döner. */
+    private static FixtureSummary.Score.Period period(Integer home, Integer away) {
+        return (home == null && away == null)
+                ? null
+                : new FixtureSummary.Score.Period(home, away);
+    }
+
     private static String displayName(TranslatableName entity, boolean turkish) {
         if (turkish) {
             String tr = entity.getNameTr();

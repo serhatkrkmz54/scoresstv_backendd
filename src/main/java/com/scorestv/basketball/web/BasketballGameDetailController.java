@@ -46,7 +46,7 @@ public class BasketballGameDetailController {
             @PathVariable String slug,
             @RequestParam(name = "lang", required = false, defaultValue = "tr") String lang) {
         Long id = SlugUtil.extractGameId(slug);
-        if (id == null) throw new ApiException(404, "Mac bulunamadi");
+        if (id == null) throw ApiException.notFound("Mac bulunamadi");
         boolean turkish = "tr".equalsIgnoreCase(lang);
         return service.getById(id, turkish);
     }
@@ -57,7 +57,7 @@ public class BasketballGameDetailController {
             @PathVariable String slug,
             @RequestParam(name = "lang", required = false, defaultValue = "tr") String lang) {
         Long id = SlugUtil.extractGameId(slug);
-        if (id == null) throw new ApiException(404, "Mac bulunamadi");
+        if (id == null) throw ApiException.notFound("Mac bulunamadi");
         boolean turkish = "tr".equalsIgnoreCase(lang);
         return service.getSeoById(id, turkish);
     }
@@ -71,7 +71,7 @@ public class BasketballGameDetailController {
             @PathVariable String slug,
             @RequestParam(name = "lang", required = false, defaultValue = "tr") String lang) {
         Long id = SlugUtil.extractGameId(slug);
-        if (id == null) throw new ApiException(404, "Mac bulunamadi");
+        if (id == null) throw ApiException.notFound("Mac bulunamadi");
         boolean turkish = "tr".equalsIgnoreCase(lang);
         return service.getById(id, turkish, true);
     }

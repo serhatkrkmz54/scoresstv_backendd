@@ -47,8 +47,8 @@ public class LiveFixtureMapper {
         Team away = fixture.getAwayTeam();
         return new LiveFixturesResponse.LiveFixture(
                 fixture.getId(),
-                // Slug DAİMA İngilizce addan üretilir — URL'ler dilden bağımsız sabit kalır.
-                SlugUtil.fixtureSlug(home.getName(), away.getName(), fixture.getId()),
+                // Slug dile göre lokalize (TR'de name_tr, yoksa orijinal). id ile çözülür.
+                SlugUtil.fixtureSlug(displayName(home, turkish), displayName(away, turkish), fixture.getId()),
                 new LiveFixturesResponse.LeagueRef(
                         league.getId(),
                         displayName(league, turkish),
@@ -68,7 +68,11 @@ public class LiveFixtureMapper {
                 new FixtureSummary.Team(
                         away.getId(), displayName(away, turkish), logoUrl(away.getLogoKey()),
                         SlugUtil.teamSlug(displayName(away, turkish), away.getId())),
-                new FixtureSummary.Score(fixture.getHomeGoals(), fixture.getAwayGoals()));
+                new FixtureSummary.Score(
+                        fixture.getHomeGoals(), fixture.getAwayGoals(),
+                        period(fixture.getScoreHtHome(), fixture.getScoreHtAway()),
+                        period(fixture.getScoreEtHome(), fixture.getScoreEtAway()),
+                        period(fixture.getScorePenHome(), fixture.getScorePenAway())));
     }
 
     /** MinIO key varsa CDN URL'i; aksi halde null (hotlink yok). */
@@ -77,6 +81,13 @@ public class LiveFixtureMapper {
     }
 
     /** Dil "tr" ise ve Türkçe karşılığı girilmişse Türkçe ad; aksi halde İngilizce. */
+    /** İY/UZ/PEN periyot skoru; iki değer de null ise null döner. */
+    private static FixtureSummary.Score.Period period(Integer home, Integer away) {
+        return (home == null && away == null)
+                ? null
+                : new FixtureSummary.Score.Period(home, away);
+    }
+
     private static String displayName(TranslatableName entity, boolean turkish) {
         if (turkish) {
             String tr = entity.getNameTr();
