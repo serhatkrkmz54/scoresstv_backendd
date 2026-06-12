@@ -114,6 +114,24 @@ public final class SlugUtil {
     }
 
     /**
+     * Basketbol mac (game) slug'i — futbol fixture slug'inin esi, ayri isim
+     * kullanmamiz URL yapilarini ayri tutmak icin: web'de futbol fixture
+     * route'u {@code /mac/...} basketbol game route'u {@code /basketbol/...}
+     * olacak. Format birebir ayni.
+     *
+     * <pre>gameSlug("Denver Nuggets", "LA Lakers", 391053)
+     *   -> "denver-nuggets-vs-la-lakers-391053"</pre>
+     */
+    public static String gameSlug(String homeTeam, String awayTeam, long gameId) {
+        return fixtureSlug(homeTeam, awayTeam, gameId);
+    }
+
+    /** Basketbol game slug'indan id cikarir. Format ayni — paralel delegasyon. */
+    public static Long extractGameId(String slug) {
+        return extractTrailingId(slug);
+    }
+
+    /**
      * Lig detay slug'i: {@code {lig-adi}-{ligId}}. TR'de ad name_tr'den
      * gelmeli ("super-lig-203"), EN'de ham name'den ("super-league-203").
      */

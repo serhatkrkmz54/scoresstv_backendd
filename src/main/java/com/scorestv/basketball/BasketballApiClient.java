@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -98,6 +99,78 @@ public class BasketballApiClient {
         } catch (NumberFormatException ignore) {
             // header beklenmedik formatta — sessiz geç
         }
+    }
+
+    // ================================================================
+    // B-Faz2: Detay endpoint helper'lari. SyncService'ler bu metodlarla
+    // tip-guvenli sekilde cagri yapar. Hata yonetimi cagrida — bu metodlar
+    // ham response (empty list/null safe) doner.
+    // ================================================================
+
+    private static final ParameterizedTypeReference<BasketballApiResponse<BkGameDto>>
+            GAMES_TYPE = new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<BasketballApiResponse<List<BkStandingDto>>>
+            STANDINGS_TYPE = new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<BasketballApiResponse<BkGameTeamStatDto>>
+            GAME_TEAM_STATS_TYPE = new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<BasketballApiResponse<BkGamePlayerStatDto>>
+            GAME_PLAYER_STATS_TYPE = new ParameterizedTypeReference<>() {};
+
+    /**
+     * {@code /games?id=X} — tek mac detayli yanit (1 elemanli liste).
+     * Slug cozumu, refresh, lazy-sync icin.
+     */
+    public List<BkGameDto> fetchGameById(long gameId) {
+        var resp = get("/games", Map.of("id", gameId), GAMES_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /standings?league=X&season=Y} — puan durumu.
+     * <b>Onemli:</b> response yapisi {@code List<List<BkStandingDto>>} —
+     * her grup (NBA conference, EuroLeague Group A...) ayri alt-listedir.
+     * Caller flatten ile islemeli.
+     */
+    public List<List<BkStandingDto>> fetchStandings(long leagueId, String season) {
+        var resp = get("/standings",
+                Map.of("league", leagueId, "season", season),
+                STANDINGS_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /games/statistics/teams?id=X} — mac basina takim istatistikleri
+     * (2 satir: home + away).
+     */
+    public List<BkGameTeamStatDto> fetchGameTeamStats(long gameId) {
+        var resp = get("/games/statistics/teams",
+                Map.of("id", gameId), GAME_TEAM_STATS_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /games/statistics/players?id=X} — mac basina oyuncu istatistikleri
+     * (N satir: her takimdan starters + bench).
+     */
+    public List<BkGamePlayerStatDto> fetchGamePlayerStats(long gameId) {
+        var resp = get("/games/statistics/players",
+                Map.of("id", gameId), GAME_PLAYER_STATS_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /games/h2h?h2h=A-B} — iki takim arasi gecmis maclar.
+     * Yanit yapisi {@code /games} ile ayni; mevcut macin haricte tutulmasi
+     * caller'in sorumlulugu (futbol H2H paterni).
+     */
+    public List<BkGameDto> fetchH2h(long team1Id, long team2Id) {
+        var resp = get("/games/h2h",
+                Map.of("h2h", team1Id + "-" + team2Id),
+                GAMES_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
     }
 
     /** Dakikalık limiti korumak için istekleri eşit aralıklarla seri hale getirir. */

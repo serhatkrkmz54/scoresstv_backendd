@@ -28,13 +28,16 @@ public class BasketballStartupRunner {
 
     private final BasketballReferenceService reference;
     private final BasketballSyncService sync;
+    private final BasketballTeamSyncService teamSync;
     private final BasketballImageMirrorService imageMirror;
 
     public BasketballStartupRunner(BasketballReferenceService reference,
                                    BasketballSyncService sync,
+                                   BasketballTeamSyncService teamSync,
                                    BasketballImageMirrorService imageMirror) {
         this.reference = reference;
         this.sync = sync;
+        this.teamSync = teamSync;
         this.imageMirror = imageMirror;
     }
 
@@ -56,7 +59,15 @@ public class BasketballStartupRunner {
                 log.warn("Basketbol pencere sync (startup) tarih hata {}: {}", d, e.toString());
             }
         }
-        // 3) Logoları aynala (CDN'e taşı) — ilk açılışta görseller hazır olsun.
+        // 3) Takım kadrosu (lig+sezon junction) — onboarding "favori takım"
+        // akışı için kritik. Reference'tan currentSeason'ları öğrendikten sonra
+        // /teams çağrıları yapar (debounce: 12sa içinde sync'lenmiş atlar).
+        try {
+            teamSync.syncAllCurrentSeasons();
+        } catch (Exception e) {
+            log.warn("Basketbol team sync (startup) hata: {}", e.toString());
+        }
+        // 4) Logoları aynala (CDN'e taşı) — ilk açılışta görseller hazır olsun.
         try {
             imageMirror.mirrorAll();
         } catch (Exception e) {

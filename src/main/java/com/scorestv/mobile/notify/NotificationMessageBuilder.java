@@ -33,7 +33,7 @@ public class NotificationMessageBuilder {
     public NotificationMessage buildKickoffMessage(Fixture fixture) {
         return new NotificationMessage(
                 "▶ Maç başladı!",
-                "%s - %s ilk düdüğü çaldı".formatted(
+                "%s - %s maçında ilk düdük çaldı".formatted(
                         _name(fixture.getHomeTeam()),
                         _name(fixture.getAwayTeam())));
     }
@@ -51,6 +51,9 @@ public class NotificationMessageBuilder {
 
     /// Skor degisiminden ANINDA gol bildirimi. Golcu biliniyorsa eklenir;
     /// bilinmiyorsa skor-only (rekabet icin beklemeden hizli gonderim).
+    ///
+    /// A-Faz5 rotuş: dakika her durumda gosterilir — golcu null olsa bile
+    /// "12'" formatinda body'de yer alir (kart/penaltiyla tutarli).
     public NotificationMessage buildScoreGoal(
             Fixture fixture, String scorerName, Integer minute) {
         final String home = _name(fixture.getHomeTeam());
@@ -62,9 +65,13 @@ public class NotificationMessageBuilder {
                 : "⚽ GOL! %s - %s".formatted(home, away);
         final String body;
         if (scorerName != null && !scorerName.isBlank()) {
+            // Golcu + dakika (varsa): "Icardi 78'"
             body = minute != null
                     ? "%s %d'".formatted(scorerName, minute)
                     : scorerName;
+        } else if (minute != null) {
+            // Golcu yok ama dakika var: "12. dakika · Galatasaray - Fenerbahçe"
+            body = "%d'  •  %s - %s".formatted(minute, home, away);
         } else {
             body = "%s - %s".formatted(home, away);
         }

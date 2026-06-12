@@ -172,14 +172,19 @@ public class NotificationDispatcherService {
         // Skor-only — beklemeden ANINDA gonderilir (hiz oncelikli). Golcu bu
         // anda henuz DB'de degil (skor /fixtures?live=all'dan, golcu ayri /events
         // cagrisindan gelir); uygulamada saniyeler icinde WebSocket'le gorunur.
-        final var msg = messageBuilder.buildScoreGoal(fixture, null, null);
+        // A-Faz5 rotuş: o anki mac dakikasini (fixture.elapsed) gecirip
+        // title/body'de "12'" formatinda gostermek icin buildScoreGoal'a
+        // minute geciriyoruz. Golcu olmasa da dakika gorunur olur.
+        final Integer minute = fixture.getElapsed();
+        final var msg = messageBuilder.buildScoreGoal(fixture, null, minute);
         final Map<String, String> data = new HashMap<>();
         data.put("type", "gol");
         data.put("fixtureId", String.valueOf(fixtureId));
+        if (minute != null) data.put("eventMinute", String.valueOf(minute));
         final int sent = fcmMessaging.sendMulticast(
                 List.copyOf(tokens), msg.title(), msg.body(), data);
-        log.info("FCM skor-gol dispatch: fixtureId={} alici={} gonderildi={}",
-                fixtureId, tokens.size(), sent);
+        log.info("FCM skor-gol dispatch: fixtureId={} dakika={} alici={} gonderildi={}",
+                fixtureId, minute, tokens.size(), sent);
     }
 
     // ============================================================

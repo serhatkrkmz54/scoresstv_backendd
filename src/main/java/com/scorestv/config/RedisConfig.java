@@ -87,6 +87,12 @@ public class RedisConfig {
         caches.put(FootballCacheNames.LINEUPS, baseConfig(Duration.ofMinutes(15)));
         // Rankings (FIFA + UEFA) — gunluk tazelenir, evict ile aninda yansir.
         caches.put(FootballCacheNames.RANKINGS, baseConfig(Duration.ofHours(6)));
+        // B-Faz4: Basketbol mac detayi — canli maclarda WebSocket guncelleme
+        // de aldigi icin 30 sn kabul edilebilir gecikme.
+        caches.put("BASKETBALL_GAME_DETAIL", baseConfig(Duration.ofSeconds(30)));
+        // B-Faz6: Basketbol standings sayfasi — saatlik API guncellemesi,
+        // 5 dk client cache yeterli.
+        caches.put("BASKETBALL_STANDINGS_PAGE", baseConfig(Duration.ofMinutes(5)));
 
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(defaultConfig)

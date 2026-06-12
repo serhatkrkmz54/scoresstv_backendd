@@ -113,7 +113,13 @@ public class BasketballSyncService {
         }
     }
 
-    private int upsertAll(List<BkGameDto> games, boolean notify) {
+    /**
+     * Package-private — H2hSyncService gibi diger servisler ham
+     * {@link BkGameDto} listesini DB'ye yazmak icin cagirir. {@code notify=false}
+     * H2H gecmis maclari icin bildirim yaratmaz.
+     */
+    @Transactional
+    public int upsertAll(List<BkGameDto> games, boolean notify) {
         int n = 0;
         for (BkGameDto g : games) {
             if (upsert(g, notify)) n++;
@@ -187,6 +193,10 @@ public class BasketballSyncService {
         }
 
         final Long gameId = game.getId();
+        // A-Faz5: notif dispatcher takim takipci recipient'lari icin team id'leri
+        // de alir (lazy-init riski olmasin diye primitive geciriyoruz).
+        final Long homeTeamId = home.getId();
+        final Long awayTeamId = away.getId();
         final String homeName = home.getNameTr() != null && !home.getNameTr().isBlank()
                 ? home.getNameTr() : home.getName();
         final String awayName = away.getNameTr() != null && !away.getNameTr().isBlank()
@@ -204,14 +214,16 @@ public class BasketballSyncService {
                 && !oldLive
                 && !oldFinished) {
             game.setNotifiedStart(true);
-            notifications.dispatchStart(gameId, homeName, awayName);
+            notifications.dispatchStart(gameId, homeTeamId, awayTeamId,
+                    homeName, awayName);
         }
 
         // 2) Çeyrek sonu — sonu geçilen her çeyrek için (monotonik sayaç).
         int target = completedQuarters(newStatus);
         if (target > game.getLastNotifiedPeriod()) {
             for (int q = game.getLastNotifiedPeriod() + 1; q <= target && q <= 4; q++) {
-                notifications.dispatchPeriodEnd(gameId, homeName, awayName, q,
+                notifications.dispatchPeriodEnd(gameId, homeTeamId, awayTeamId,
+                        homeName, awayName, q,
                         game.getHomeTotal(), game.getAwayTotal());
             }
             game.setLastNotifiedPeriod(Math.min(target, 4));
@@ -220,7 +232,8 @@ public class BasketballSyncService {
         // 3) Maç bitti.
         if (!game.isNotifiedFinal() && FINISHED_STATUSES.contains(newStatus)) {
             game.setNotifiedFinal(true);
-            notifications.dispatchFinal(gameId, homeName, awayName,
+            notifications.dispatchFinal(gameId, homeTeamId, awayTeamId,
+                    homeName, awayName,
                     game.getHomeTotal(), game.getAwayTotal());
         }
     }
