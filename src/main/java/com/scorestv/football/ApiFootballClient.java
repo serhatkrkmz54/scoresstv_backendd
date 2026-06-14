@@ -1,6 +1,7 @@
 package com.scorestv.football;
 
 import com.scorestv.config.ScorestvProperties;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
@@ -13,27 +14,54 @@ import org.springframework.web.client.RestClientException;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 /**
- * API-Football v3 (api-sports.io) için tek giriş noktası olan HTTP istemcisi.
+ * API-Football v3 (api-sports.io) icin tek giris noktasi olan HTTP istemcisi.
  *
- * <p>Tüm endpoint servisleri bu sınıfın {@link #get} metodunu kullanır; böylece
- * kimlik doğrulama, zaman aşımı, <b>dakikalık hız sınırlama</b>, kota loglama ve
- * hata yönetimi tek yerde toplanır.
+ * <p>Tum endpoint servisleri bu sinifin {@link #get} metodunu kullanir; boylece
+ * kimlik dogrulama, zaman asimi, <b>oncelikli saniye-bazli hiz sinirlama</b>,
+ * kota loglama ve hata yonetimi tek yerde toplanir.
  *
- * <p>Hız sınırlama burada merkezîdir: tüm istekler {@code requests-per-minute}
- * ayarına göre eşit aralıklarla seri hale getirilir, dolayısıyla hiçbir senkron
- * dakikalık API limitini aşamaz.
+ * <h2>Hiz sinirlama mimarisi (token bucket)</h2>
+ * <p>API-Football'un Custom plani dakika kotasi gevsek (1200/dk), ancak
+ * <b>saniye-bazli burst guard</b> sikti — 1 saniyede 15+ paralel istek
+ * "Too many requests" hatasi tetikler. Bu yuzden istemci iki ayri kova
+ * tutar:
+ * <ul>
+ *   <li>{@link RequestPriority#LIVE} — kullanici-bekleyen veriler. Canli skor
+ *       guncellemesi, mac detay tab'lari, anasayfa fixture listesi. Saniyede
+ *       {@code liveTokensPerSecond} adet rezerv slot; lazy yoguntundan
+ *       etkilenmez.</li>
+ *   <li>{@link RequestPriority#LAZY} — arka plan senkronu. Squad, transfer,
+ *       trophy, sidelined, coach, takim/lig refresh. Saniyede
+ *       {@code lazyTokensPerSecond} adet; burst'te sirada bekler.</li>
+ * </ul>
  *
- * <p>API yalnızca GET isteklerini ve tek bir kimlik header'ini ({@code x-apisports-key})
- * kabul eder; istemci bu kurala uyacak şekilde sade tutulmuştur.
+ * <p>Kovalar her saniye {@link ScheduledExecutorService} ile yeniden dolar.
+ * Bos kovaya dusen istek bir sonraki saniye refill'ini bekler (en kotu durumda
+ * ~1 sn gecikme — token bucket dogal davranis).
+ *
+ * <h2>Path-based priority detection</h2>
+ * <p>Cagiranlar oncelik belirlememeli — istemci {@link #detectPriority(String)}
+ * ile path'ten otomatik karar verir. {@code /fixtures*} (canli/mac detay
+ * verisi) LIVE, diger her yol LAZY. Ozel durum gerekiyorsa
+ * {@link #get(String, Map, ParameterizedTypeReference, RequestPriority)}
+ * overload'i kullanilir.
+ *
+ * <p>API yalnizca GET isteklerini ve tek bir kimlik header'ini
+ * ({@code x-apisports-key}) kabul eder; istemci bu kurala uyacak sekilde sade
+ * tutulmustur.
  */
 @Component
 public class ApiFootballClient {
 
     private static final Logger log = LoggerFactory.getLogger(ApiFootballClient.class);
 
-    /** API-Football'un kabul ettiği tek kimlik doğrulama header'i. */
+    /** API-Football'un kabul ettigi tek kimlik dogrulama header'i. */
     private static final String API_KEY_HEADER = "x-apisports-key";
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
@@ -43,10 +71,29 @@ public class ApiFootballClient {
     private final boolean keyConfigured;
     private final ApiQuotaTracker quotaTracker;
 
-    /** İki istek arasındaki en az süre (ms) — dakikalık limiti aşmamak için. */
-    private final long minIntervalMs;
-    /** Son isteğin gönderildiği an (epoch ms); {@link #throttle()} tarafından korunur. */
-    private long lastRequestAt;
+    /** LIVE oncelikli istekler icin saniye-bazli kova (kullanici-bekleyen). */
+    private final Semaphore liveBucket;
+    /** LAZY oncelikli istekler icin saniye-bazli kova (arka plan sync). */
+    private final Semaphore lazyBucket;
+    /** Saniyede LIVE icin maks token sayisi (refill kapasitesi). */
+    private final int liveTokensPerSecond;
+    /** Saniyede LAZY icin maks token sayisi (refill kapasitesi). */
+    private final int lazyTokensPerSecond;
+    /** Kovalari her saniye yeniden dolduran arka plan ileti. */
+    private final ScheduledExecutorService bucketRefiller;
+
+    /**
+     * API-Football endpoint'lerine yapilan isteklerin onceligi.
+     * <ul>
+     *   <li>{@link #LIVE}: kullanici-bekleyen veriler (canli skor, mac detay,
+     *       anasayfa fixture). Garantili rezerv slot'a sahip; lazy istek dolup
+     *       tasarsa bile gecikme yasamaz.</li>
+     *   <li>{@link #LAZY}: arka plan senkronu (squad, transfer, trophy,
+     *       sidelined, lig refresh). Kalan kapasiteden yararlanir; burst'te
+     *       sirada bekler.</li>
+     * </ul>
+     */
+    public enum RequestPriority { LIVE, LAZY }
 
     public ApiFootballClient(ScorestvProperties properties,
                              ApiQuotaTracker quotaTracker) {
@@ -54,8 +101,10 @@ public class ApiFootballClient {
         ScorestvProperties.ApiFootball cfg = properties.apiFootball();
         this.keyConfigured = cfg.key() != null && !cfg.key().isBlank();
 
-        int perMinute = Math.max(1, cfg.requestsPerMinute());
-        this.minIntervalMs = 60_000L / perMinute;
+        this.liveTokensPerSecond = Math.max(1, cfg.liveTokensPerSecond());
+        this.lazyTokensPerSecond = Math.max(1, cfg.lazyTokensPerSecond());
+        this.liveBucket = new Semaphore(liveTokensPerSecond);
+        this.lazyBucket = new Semaphore(lazyTokensPerSecond);
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT);
@@ -69,36 +118,82 @@ public class ApiFootballClient {
         }
         this.restClient = builder.build();
 
+        this.bucketRefiller = Executors.newScheduledThreadPool(2, r -> {
+            Thread t = new Thread(r, "apifb-bucket-refill");
+            t.setDaemon(true);
+            return t;
+        });
+        // Saniye-burst guard'i engellemek icin smooth refill: tek seferde N
+        // token release etmek yerine, her 1000/N ms'de 1 token release ediyoruz.
+        // Boylece API-Football saniyenin basinda 8 paralel istek yerine her
+        // 125ms'de 1 istek goruyor — saniye-icin distribute edilmis akis.
+        long liveIntervalMs = Math.max(1L, 1000L / liveTokensPerSecond);
+        long lazyIntervalMs = Math.max(1L, 1000L / lazyTokensPerSecond);
+        bucketRefiller.scheduleAtFixedRate(
+                () -> refillSingle(liveBucket, liveTokensPerSecond),
+                liveIntervalMs, liveIntervalMs, TimeUnit.MILLISECONDS);
+        bucketRefiller.scheduleAtFixedRate(
+                () -> refillSingle(lazyBucket, lazyTokensPerSecond),
+                lazyIntervalMs, lazyIntervalMs, TimeUnit.MILLISECONDS);
+
         if (keyConfigured) {
-            log.info("ApiFootballClient hazır. baseUrl={} hız sınırı={} istek/dk (~{} ms aralık)",
-                    cfg.baseUrl(), perMinute, minIntervalMs);
+            int totalPerSec = liveTokensPerSecond + lazyTokensPerSecond;
+            log.info("ApiFootballClient hazir. baseUrl={} priority-aware token bucket: "
+                            + "LIVE={}/sn ({} ms aralik) LAZY={}/sn ({} ms aralik) "
+                            + "[toplam {}/sn ~ {}/dk]",
+                    cfg.baseUrl(),
+                    liveTokensPerSecond, liveIntervalMs,
+                    lazyTokensPerSecond, lazyIntervalMs,
+                    totalPerSec, totalPerSec * 60);
         } else {
-            log.warn("API-Football anahtarı tanımlı değil (API_FOOTBALL_KEY boş). "
-                    + "Futbol verisi çağrıları devre dışı; .env dosyasına anahtarı ekleyin.");
+            log.warn("API-Football anahtari tanimli degil (API_FOOTBALL_KEY bos). "
+                    + "Futbol verisi cagrilari devre disi; .env dosyasina anahtari ekleyin.");
         }
     }
 
     /**
-     * API-Football'da bir endpoint'i GET ile çağırır ve ortak yanıt zarfını döner.
+     * Refill bucket'lari uygulama kapanirken durdur. Spring shutdown sirasinda
+     * cagrilir; daemon thread olsa bile temiz cikis icin gereklidir.
+     */
+    @PreDestroy
+    void shutdown() {
+        bucketRefiller.shutdownNow();
+    }
+
+    /**
+     * API-Football'da bir endpoint'i GET ile cagirir ve ortak yanit zarfini doner.
      *
-     * <p>Çağrı, dakikalık limiti aşmamak için {@link #throttle()} ile geciktirilebilir.
+     * <p>Oncelik path'ten otomatik turetilir: {@code /fixtures*} → LIVE,
+     * diger her yol → LAZY. Cagiran tarafi bilmek zorunda degildir.
      *
-     * @param path        endpoint yolu, başında "/" ile (örn. "/status", "/leagues")
-     * @param queryParams sorgu parametreleri; boş olabilir ({@code Map.of()}).
-     *                    Değeri {@code null} olan parametreler atlanır.
-     * @param typeRef     beklenen yanıt tipi
-     * @param <T>         {@code response} alanının tipi
-     * @return başarılı yanıt zarfı (hata içermez)
-     * @throws ApiFootballException yapılandırma, bağlantı, kota veya sağlayıcı hatasında
+     * @param path        endpoint yolu, basinda "/" ile (orn. "/status", "/leagues")
+     * @param queryParams sorgu parametreleri; bos olabilir ({@code Map.of()}).
+     *                    Degeri {@code null} olan parametreler atlanir.
+     * @param typeRef     beklenen yanit tipi
+     * @param <T>         {@code response} alaninin tipi
+     * @return basarili yanit zarfi (hata icermez)
+     * @throws ApiFootballException yapilandirma, baglanti, kota veya saglayici hatasinda
      */
     public <T> ApiFootballResponse<T> get(String path,
                                           Map<String, ?> queryParams,
                                           ParameterizedTypeReference<ApiFootballResponse<T>> typeRef) {
+        return get(path, queryParams, typeRef, detectPriority(path));
+    }
+
+    /**
+     * Acikca priority belirten overload. Path-based detect'in dogru karar
+     * vermedigi nadir durumlar icin (orn. lazy job'un /fixtures'tan veri
+     * cekmesi gerektiginde) kullanilir.
+     */
+    public <T> ApiFootballResponse<T> get(String path,
+                                          Map<String, ?> queryParams,
+                                          ParameterizedTypeReference<ApiFootballResponse<T>> typeRef,
+                                          RequestPriority priority) {
         if (!keyConfigured) {
             throw ApiFootballException.notConfigured(
-                    "Futbol veri sağlayıcısı yapılandırılmamış.");
+                    "Futbol veri saglayicisi yapilandirilmamis.");
         }
-        throttle();
+        acquireToken(priority);
 
         ResponseEntity<ApiFootballResponse<T>> entity;
         try {
@@ -117,9 +212,9 @@ public class ApiFootballClient {
                     .retrieve()
                     .toEntity(typeRef);
         } catch (RestClientException ex) {
-            log.error("API-Football çağrısı başarısız: path={} hata={}", path, ex.getMessage());
+            log.error("API-Football cagrisi basarisiz: path={} hata={}", path, ex.getMessage());
             throw ApiFootballException.upstream(
-                    "Futbol veri sağlayıcısına ulaşılamadı.");
+                    "Futbol veri saglayicisina ulasilamadi.");
         }
 
         logQuota(path, entity.getHeaders());
@@ -127,7 +222,7 @@ public class ApiFootballClient {
         ApiFootballResponse<T> body = entity.getBody();
         if (body == null) {
             throw ApiFootballException.upstream(
-                    "Futbol veri sağlayıcısından boş yanıt alındı.");
+                    "Futbol veri saglayicisindan bos yanit alindi.");
         }
         if (body.hasErrors()) {
             throw classifyError(path, body.errorText());
@@ -136,26 +231,53 @@ public class ApiFootballClient {
     }
 
     /**
-     * İstekleri dakikalık limite göre eşit aralıklarla seri hale getirir.
-     *
-     * <p>{@code synchronized}: eşzamanlı çağıranlar (başlangıç senkronu + admin
-     * tetiklemesi aynı anda) tek küresel sıraya girer; böylece toplam hız hiçbir
-     * koşulda {@code requests-per-minute}'ü aşmaz.
+     * Oncelik kovasindan bir token alir. Kova bossa bir sonraki saniye refill'ini
+     * bekler (en kotu durumda ~1 sn gecikme). LIVE ve LAZY kovalar bagimsiz
+     * Semaphore'lar oldugu icin priority arasinda head-of-line blocking yoktur.
      */
-    private synchronized void throttle() {
-        long waitMs = (lastRequestAt + minIntervalMs) - System.currentTimeMillis();
-        if (waitMs > 0) {
-            try {
-                Thread.sleep(waitMs);
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-            }
+    private void acquireToken(RequestPriority priority) {
+        Semaphore bucket = (priority == RequestPriority.LIVE) ? liveBucket : lazyBucket;
+        try {
+            bucket.acquire();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw ApiFootballException.upstream(
+                    "Istek sira bekleme sirasinda kesildi.");
         }
-        lastRequestAt = System.currentTimeMillis();
     }
 
     /**
-     * Yanıt header'larındaki kalan kota bilgisini hem {@link ApiQuotaTracker}'a
+     * Token-basi smooth refill — bir kovaya bir token release eder, ama
+     * sadece kapasite altinda ise. Dolu kovada no-op.
+     *
+     * <p>Saniye-basi tek refill yerine her 1000/N ms'de 1 token vermek API'nin
+     * saniye-burst guard'ini engeller: 8 paralel istek yerine her 125ms'de
+     * 1 istek goruyor. Dakika kotasi yine N×60 olarak korunur.
+     */
+    private void refillSingle(Semaphore bucket, int maxCapacity) {
+        if (bucket.availablePermits() < maxCapacity) {
+            bucket.release(1);
+        }
+    }
+
+    /**
+     * Path'ten priority cikarir. Kural:
+     * <ul>
+     *   <li>{@code /fixtures} ve {@code /fixtures/*} → LIVE
+     *       (canli skor, events, statistics, lineups, players, headtohead)</li>
+     *   <li>diger her yol → LAZY (background sync)</li>
+     * </ul>
+     */
+    private RequestPriority detectPriority(String path) {
+        if (path == null) return RequestPriority.LAZY;
+        if (path.equals("/fixtures") || path.startsWith("/fixtures/")) {
+            return RequestPriority.LIVE;
+        }
+        return RequestPriority.LAZY;
+    }
+
+    /**
+     * Yanit header'larindaki kalan kota bilgisini hem {@link ApiQuotaTracker}'a
      * push eder hem de loglar. Tracker degerleri merkezi karar mekanizmasinda
      * (SyncQueueWorker adaptif yavaslama, lazy sync atlamasi) kullanilir.
      */
@@ -165,7 +287,7 @@ public class ApiFootballClient {
         if (dailyRemaining == null) {
             return;
         }
-        log.info("API-Football kota [{}]: günlük kalan {}/{}, dakikalık kalan {}/{}",
+        log.info("API-Football kota [{}]: gunluk kalan {}/{}, dakikalik kalan {}/{}",
                 path,
                 dailyRemaining,
                 headers.getFirst("x-ratelimit-requests-limit"),
@@ -173,15 +295,16 @@ public class ApiFootballClient {
                 headers.getFirst("X-RateLimit-Limit"));
     }
 
-    /** {@code errors} alanı dolu geldiğinde uygun istisnayı üretir. */
+    /** {@code errors} alani dolu geldiginde uygun istisnayi uretir. */
     private ApiFootballException classifyError(String path, String detail) {
-        log.warn("API-Football hata döndürdü: path={} errors={}", path, detail);
+        log.warn("API-Football hata dondurdu: path={} errors={}", path, detail);
         String lower = detail.toLowerCase();
-        if (lower.contains("limit") || lower.contains("quota") || lower.contains("rate")) {
+        if (lower.contains("limit") || lower.contains("quota") || lower.contains("rate")
+                || lower.contains("maximum")) {
             return ApiFootballException.quotaExceeded(
-                    "Futbol veri sağlayıcısının istek kotası doldu. Lütfen daha sonra tekrar deneyin.");
+                    "Futbol veri saglayicisinin istek kotasi doldu. Lutfen daha sonra tekrar deneyin.");
         }
         return ApiFootballException.upstream(
-                "Futbol veri sağlayıcısı isteği reddetti.");
+                "Futbol veri saglayicisi istegi reddetti.");
     }
 }

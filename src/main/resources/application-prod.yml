@@ -182,7 +182,16 @@ scorestv:
   api-football:
     base-url: https://v3.football.api-sports.io
     key: ${API_FOOTBALL_KEY}
-    requests-per-minute: ${API_FOOTBALL_RPM:400}
+    # requests-per-minute: eski throttle alani (artik kullanilmaz).
+    # Yeni priority-aware token bucket asagidaki iki alandan kontrol edilir.
+    requests-per-minute: ${API_FOOTBALL_RPM:1200}
+    # Priority-aware saniye-bazli token bucket (Custom600 plani icin tuned):
+    # LIVE  (canli skor + mac detay /fixtures*)  : 8/sn rezerv  → ~480/dk
+    # LAZY  (arka plan sync — squad/transfer/...): 4/sn paylasilan → ~240/dk
+    # Toplam ~720/dk, plan limiti 1200/dk altinda burst-guard guvenli.
+    # 429 alirsan: API_FOOTBALL_LIVE_TPS=6 + API_FOOTBALL_LAZY_TPS=3 dene.
+    live-tokens-per-second: ${API_FOOTBALL_LIVE_TPS:8}
+    lazy-tokens-per-second: ${API_FOOTBALL_LAZY_TPS:4}
 
   football:
     sync:

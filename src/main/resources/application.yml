@@ -165,19 +165,26 @@ scorestv:
     image-mirror-cron: ${BASKETBALL_IMAGE_MIRROR_CRON:0 15 * * * *}
   api-football:
     base-url: https://v3.football.api-sports.io
-    # Dakikalik API istek limiti. Tum istekler buna gore esit araliklarla seri
-    # hale getirilir (ApiFootballClient.throttle synchronized) — yanit
-    # header'indaki X-RateLimit-Limit degerinin biraz altina ayarla.
+    # Priority-aware saniye-bazli token bucket. API-Football'un Custom plani
+    # dakika kotasi gevsek (1200/dk) ama saniye-burst guard sikti — 15+
+    # paralel istek "Too many requests" tetikler. Iki ayri kova:
     #
-    # Plan referansi:
-    #   Free  : 100/dk, 100/gun       — RPM=80
-    #   Pro   : 300/dk, 1000/gun      — RPM=250
-    #   Ultra : 450/dk, 75000/gun     — RPM=400 (mevcut plan)
-    #   Mega  : 900/dk, 150000+/gun   — RPM=800 (gelecek plan)
+    #   live-tokens-per-second  : Kullanici-bekleyen (/fixtures*) icin rezerv
+    #                             slot. Score-triggered + lazy yogun olsa bile
+    #                             canli skor gecikmez.
+    #   lazy-tokens-per-second  : Arka plan sync (squad, transfer, sidelined,
+    #                             trophy, coach, lig refresh) icin kapasite.
+    #                             Burst durumunda burada beklenir.
     #
-    # Gunluk kota ApiQuotaTracker tarafindan otomatik izlenir; dakikalik
-    # limit ise burada ayarlanir. Default Ultra plan icin guvenli.
+    # Onerilen degerler plan basina:
+    #   Ultra   : LIVE=4 LAZY=2  (toplam 6/sn ~ 360/dk, 75k/gun ile uyumlu)
+    #   Custom600: LIVE=8 LAZY=4  (toplam 12/sn ~ 720/dk, burst-guard guvenli)
+    #
+    # requests-per-minute: eski throttle icin tutulan tarihi alan, artik
+    # kullanilmaz (token bucket replaced). Backward compat icin korunmustur.
     requests-per-minute: ${API_FOOTBALL_RPM:450}
+    live-tokens-per-second: ${API_FOOTBALL_LIVE_TPS:4}
+    lazy-tokens-per-second: ${API_FOOTBALL_LAZY_TPS:2}
   football:
     sync:
       # Zamanlanmis senkron isleri calissin mi (dev'de kapali tutulur).

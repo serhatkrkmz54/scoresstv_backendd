@@ -19,8 +19,27 @@ public record ScorestvProperties(
     public record ApiFootball(
             String baseUrl,
             String key,
-            /** Dakikalik API istek limiti; tum istekler buna gore esit araliklarla seri hale getirilir. */
-            @DefaultValue("250") int requestsPerMinute
+            /**
+             * Dakikalik API istek limiti — eski throttle icin tutulan tarihi alan.
+             * Yeni priority-aware token bucket {@link #liveTokensPerSecond} ve
+             * {@link #lazyTokensPerSecond} araciligiyla calistigi icin bu deger
+             * artik kullanilmaz; geriye donuk uyumluluk icin korunmustur.
+             */
+            @DefaultValue("250") int requestsPerMinute,
+            /**
+             * LIVE oncelikli istekler icin saniyede ayrilan token sayisi.
+             * Kullanici-bekleyen endpoint'ler ({@code /fixtures}, {@code /fixtures/*})
+             * bu kovayi kullanir. Garantili rezerv slot — lazy yogunlugundan
+             * etkilenmez. Custom600 plani icin onerilen: 8.
+             */
+            @DefaultValue("8") int liveTokensPerSecond,
+            /**
+             * LAZY oncelikli istekler (arka plan senkronu) icin saniyede ayrilan
+             * token sayisi. {@code /teams}, {@code /squads}, {@code /transfers},
+             * {@code /sidelined}, {@code /trophies}, {@code /coachs} vb.
+             * Burst durumunda burada sira beklenir; live etkilenmez. Onerilen: 4.
+             */
+            @DefaultValue("4") int lazyTokensPerSecond
     ) {}
 
     public record Security(
