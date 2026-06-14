@@ -52,5 +52,43 @@ public enum SyncJobType {
      * yazilir. Onboarding'de favori takim secimi bu junction'dan beslenir.
      * Payload: {leagueId, season}.
      */
-    LEAGUE_TEAMS_SYNC
+    LEAGUE_TEAMS_SYNC,
+
+    // ============================================================
+    // Basketbol job tipleri (futbol enum'larindan tamamen ayri executor
+    // dispatch icin BASKETBALL_ prefix).
+    // ============================================================
+
+    /**
+     * Bir basketbol ligi icin full info + sezonlar sync.
+     * {@code /leagues?id=X}. Payload: {@code {leagueId}}.
+     */
+    BASKETBALL_LEAGUE_INFO_SYNC,
+
+    /**
+     * Bir basketbol ligi + sezon icin top players (3 kategori) + master
+     * tablo + sezon stat sync. {@code /players?league=X&season=Y} sayfali
+     * cagri. Payload: {@code {leagueId, season}}.
+     */
+    BASKETBALL_LEAGUE_TOP_PLAYERS_SYNC,
+
+    /**
+     * Bir basketbol oyuncusu icin profil + sezon istatistik sync.
+     * {@code /players?id=X&season=Y}. Payload: {@code {playerId, leagueId,
+     * season}} (leagueId opsiyonel).
+     */
+    BASKETBALL_PLAYER_PROFILE_SYNC,
+
+    /**
+     * Bir basketbol takimi icin tam profil sync.
+     * {@code /teams?id=X}. Payload: {@code {teamId}}.
+     */
+    BASKETBALL_TEAM_PROFILE_SYNC,
+
+    /**
+     * Bir basketbol takimi + lig + sezon icin sezon istatistikleri sync.
+     * {@code /teams/statistics?team=X&league=Y&season=Z}.
+     * Payload: {@code {teamId, leagueId, season}}.
+     */
+    BASKETBALL_TEAM_STATS_SYNC
 }

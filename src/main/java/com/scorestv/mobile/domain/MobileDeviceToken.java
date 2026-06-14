@@ -43,4 +43,13 @@ public class MobileDeviceToken extends BaseEntity {
     /** Cihaz son ne zaman aktif oldu (her POST cagrisinda guncellenir). */
     @Column(name = "last_seen_at", nullable = false)
     private Instant lastSeenAt;
+
+    /**
+     * Master "Tum bildirimleri kapat" toggle. Default TRUE (acik).
+     * Kullanici Profil > "Bildirimler" satirindan kapatinca PATCH
+     * {@code /api/v1/mobile/device-tokens/notifications-enabled} ile FALSE
+     * yapilir. NotificationDispatcher push gondermeden once filter eder.
+     */
+    @Column(name = "notifications_enabled", nullable = false)
+    private boolean notificationsEnabled = true;
 }

@@ -70,4 +70,24 @@ public class MobileDeviceTokenService {
         repository.deleteByFcmToken(fcmToken);
         log.info("Gecersiz FCM token silindi: {}", fcmToken);
     }
+
+    /**
+     * Master "Tum bildirimleri kapat/ac" toggle. Mobile Profil ekrani
+     * cagirir. Token bulunamazsa false doner — caller 404 yapabilir.
+     */
+    @Transactional
+    public boolean setNotificationsEnabled(String fcmToken, boolean enabled) {
+        MobileDeviceToken existing =
+                repository.findByFcmToken(fcmToken.trim()).orElse(null);
+        if (existing == null) {
+            log.debug("setNotificationsEnabled: token bulunamadi {}", fcmToken);
+            return false;
+        }
+        existing.setNotificationsEnabled(enabled);
+        existing.setLastSeenAt(Instant.now());
+        repository.save(existing);
+        log.info("Device {} notifications {}",
+                existing.getId(), enabled ? "ACILDI" : "KAPATILDI");
+        return true;
+    }
 }

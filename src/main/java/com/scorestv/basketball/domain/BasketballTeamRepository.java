@@ -5,11 +5,18 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface BasketballTeamRepository extends JpaRepository<BasketballTeam, Long> {
 
     /** Henüz aynalanmamış (logoKey boş) ama API logosu olan takımlar — image mirror. */
     List<BasketballTeam> findTop200ByLogoKeyIsNullAndLogoIsNotNull();
+
+    /** Slug ile arama — public team endpoint slug-based URL kullanir. */
+    Optional<BasketballTeam> findBySlug(String slug);
+
+    /** DailyBasketballTeamRefreshJob covered takimlari gunluk tazeler. */
+    List<BasketballTeam> findByCoveredTrue();
 
     /**
      * Bir basketbol liginde (opsiyonel sezon filtresi) oynamış DISTINCT takımlar.

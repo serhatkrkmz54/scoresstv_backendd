@@ -27,7 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -81,10 +80,13 @@ public class BasketballStandingsPageService {
         BasketballLeague league = leagueRepo.findById(leagueId)
                 .orElseThrow(() -> ApiException.notFound("Lig bulunamadi"));
 
-        // Sezon karari
-        String resolvedSeason = season != null && !season.isBlank()
+        // Sezon karari — normalizer bazi liglerde "2026" istegini "2025-2026"'a
+        // (veya tersi) cevirir, ligin gercek seasonsJson'una gore.
+        String rawSeason = season != null && !season.isBlank()
                 ? season
                 : pickDefaultSeason(leagueId);
+        String resolvedSeason = com.scorestv.basketball.BasketballSeasonNormalizer
+                .normalize(rawSeason, league.getSeasonsJson());
         if (resolvedSeason == null) {
             // Hic sezon yok — bos sayfa doner
             return emptyPage(league, turkish);
@@ -103,8 +105,10 @@ public class BasketballStandingsPageService {
         if (leagueId == null) throw ApiException.notFound("Lig bulunamadi");
         BasketballLeague league = leagueRepo.findById(leagueId)
                 .orElseThrow(() -> ApiException.notFound("Lig bulunamadi"));
-        String resolvedSeason = season != null && !season.isBlank()
+        String rawSeason2 = season != null && !season.isBlank()
                 ? season : pickDefaultSeason(leagueId);
+        String resolvedSeason = com.scorestv.basketball.BasketballSeasonNormalizer
+                .normalize(rawSeason2, league.getSeasonsJson());
         if (resolvedSeason == null) return emptyPage(league, turkish);
 
         self.evictCache(leagueId, resolvedSeason, turkish);

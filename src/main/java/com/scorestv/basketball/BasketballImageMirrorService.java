@@ -2,6 +2,8 @@ package com.scorestv.basketball;
 
 import com.scorestv.basketball.domain.BasketballLeague;
 import com.scorestv.basketball.domain.BasketballLeagueRepository;
+import com.scorestv.basketball.domain.BasketballPlayer;
+import com.scorestv.basketball.domain.BasketballPlayerRepository;
 import com.scorestv.basketball.domain.BasketballTeam;
 import com.scorestv.basketball.domain.BasketballTeamRepository;
 import com.scorestv.football.image.ImageMirrorService;
@@ -29,21 +31,25 @@ public class BasketballImageMirrorService {
     private final ImageMirrorService mirror;
     private final BasketballTeamRepository teamRepo;
     private final BasketballLeagueRepository leagueRepo;
+    private final BasketballPlayerRepository playerRepo;
 
     public BasketballImageMirrorService(ImageMirrorService mirror,
                                         BasketballTeamRepository teamRepo,
-                                        BasketballLeagueRepository leagueRepo) {
+                                        BasketballLeagueRepository leagueRepo,
+                                        BasketballPlayerRepository playerRepo) {
         this.mirror = mirror;
         this.teamRepo = teamRepo;
         this.leagueRepo = leagueRepo;
+        this.playerRepo = playerRepo;
     }
 
     public int mirrorAll() {
         int t = mirrorTeamLogos();
         int l = mirrorLeagueLogos();
         int f = mirrorLeagueFlags();
-        log.info("Basketbol image mirror: {} takım, {} lig, {} bayrak", t, l, f);
-        return t + l + f;
+        int p = mirrorPlayerPhotos();
+        log.info("Basketbol image mirror: {} takım, {} lig, {} bayrak, {} oyuncu", t, l, f, p);
+        return t + l + f + p;
     }
 
     public int mirrorTeamLogos() {
@@ -109,6 +115,39 @@ public class BasketballImageMirrorService {
                 } else if (key != null) {
                     lg.setCountryFlagKey(key);
                     leagueRepo.save(lg);
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Oyuncu fotograflarini MinIO'ya aynalar. Profile sync ({@link
+     * BasketballPlayerUpserter#upsertFromProfile}) {@code photo} URL'ini
+     * yazar, {@code photoKey} bos kalir; bu metod ardindan calisip key'i
+     * doldurur. Placeholder/cozulemeyen URL'ler null'a cevrilir.
+     *
+     * <p>Daily image mirror job tarafindan covered ligler senkronu sonrasi
+     * cagrilir.
+     */
+    public int mirrorPlayerPhotos() {
+        int n = 0;
+        Set<Long> attempted = new HashSet<>();
+        while (true) {
+            List<BasketballPlayer> batch =
+                    playerRepo.findTop200ByPhotoKeyIsNullAndPhotoIsNotNull();
+            batch.removeIf(x -> attempted.contains(x.getId()));
+            if (batch.isEmpty()) break;
+            for (BasketballPlayer p : batch) {
+                attempted.add(p.getId());
+                String key = mirror.mirrorExternal(p.getPhoto(), "basketball-players", p.getId());
+                if (mirror.isPlaceholderKey(key)) {
+                    p.setPhoto(null);
+                    playerRepo.save(p);
+                } else if (key != null) {
+                    p.setPhotoKey(key);
+                    playerRepo.save(p);
                     n++;
                 }
             }

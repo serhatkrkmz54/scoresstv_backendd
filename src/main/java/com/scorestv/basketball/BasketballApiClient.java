@@ -113,11 +113,29 @@ public class BasketballApiClient {
     private static final ParameterizedTypeReference<BasketballApiResponse<List<BkStandingDto>>>
             STANDINGS_TYPE = new ParameterizedTypeReference<>() {};
 
+    private static final ParameterizedTypeReference<BasketballApiResponse<String>>
+            STAGE_GROUP_TYPE = new ParameterizedTypeReference<>() {};
+
     private static final ParameterizedTypeReference<BasketballApiResponse<BkGameTeamStatDto>>
             GAME_TEAM_STATS_TYPE = new ParameterizedTypeReference<>() {};
 
     private static final ParameterizedTypeReference<BasketballApiResponse<BkGamePlayerStatDto>>
             GAME_PLAYER_STATS_TYPE = new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<BasketballApiResponse<BkLeagueDto>>
+            LEAGUES_TYPE = new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<BasketballApiResponse<BkPlayerDto>>
+            PLAYERS_TYPE = new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<BasketballApiResponse<BkTeamDto>>
+            TEAMS_TYPE = new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<BasketballApiResponse<BkTeamStatisticsDto>>
+            TEAM_STATS_TYPE = new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<BasketballApiResponse<BkRosterPlayerDto>>
+            ROSTER_TYPE = new ParameterizedTypeReference<>() {};
 
     /**
      * {@code /games?id=X} — tek mac detayli yanit (1 elemanli liste).
@@ -133,12 +151,81 @@ public class BasketballApiClient {
      * <b>Onemli:</b> response yapisi {@code List<List<BkStandingDto>>} —
      * her grup (NBA conference, EuroLeague Group A...) ayri alt-listedir.
      * Caller flatten ile islemeli.
+     *
+     * <p><b>Defansif:</b> Bazi liglerde API {@code errors: ["No data..."]}
+     * dondurur ve response shape farkli olabilir. Bu durumda parse hatasi
+     * almak yerine bos liste donulur — caller bos cevap gibi davranir.
+     * Doc: bazi ligler stage/group parametresi gerektirir; o uclar simdilik
+     * destekli degil.
      */
     public List<List<BkStandingDto>> fetchStandings(long leagueId, String season) {
-        var resp = get("/standings",
-                Map.of("league", leagueId, "season", season),
-                STANDINGS_TYPE);
-        return resp == null ? List.of() : resp.responseOrEmpty();
+        return fetchStandings(leagueId, season, null, null);
+    }
+
+    /**
+     * {@code /standings?league=X&season=Y&stage=Z&group=W} — opsiyonel stage
+     * ve group filtreleri. NBA gibi liglerde "Regular Season" + "Playoffs"
+     * ayri stage'ler, her birinin kendi standings'i var. Caller tum stage'leri
+     * cekmek istiyorsa {@link #fetchStandingsStages} ile listeleri alip
+     * her stage icin ayri cagri yapar.
+     */
+    public List<List<BkStandingDto>> fetchStandings(long leagueId, String season,
+                                                     String stage, String group) {
+        try {
+            var params = new java.util.HashMap<String, Object>();
+            params.put("league", leagueId);
+            params.put("season", season);
+            if (stage != null && !stage.isBlank()) params.put("stage", stage);
+            if (group != null && !group.isBlank()) params.put("group", group);
+            var resp = get("/standings", params, STANDINGS_TYPE);
+            if (resp == null) return List.of();
+            if (resp.hasErrors()) {
+                log.debug("Standings errors league={} season={} stage={} group={}: {}",
+                        leagueId, season, stage, group, resp.errors());
+                return List.of();
+            }
+            return resp.responseOrEmpty();
+        } catch (Exception e) {
+            throw e;
+        }
+    }
+
+    /**
+     * {@code /standings/stages?league=X&season=Y} — bir lig + sezon icin
+     * gecerli stage isimleri (orn. "NBA - Regular Season", "NBA - Playoffs").
+     * Standings sync'i once bunlari cekip her stage icin ayri /standings cagrir.
+     */
+    public List<String> fetchStandingsStages(long leagueId, String season) {
+        try {
+            var resp = get("/standings/stages",
+                    Map.of("league", leagueId, "season", season),
+                    STAGE_GROUP_TYPE);
+            if (resp == null || resp.hasErrors()) return List.of();
+            return resp.responseOrEmpty();
+        } catch (Exception e) {
+            log.debug("Standings stages cagri hata league={} season={}: {}",
+                    leagueId, season, e.toString());
+            return List.of();
+        }
+    }
+
+    /**
+     * {@code /standings/groups?league=X&season=Y} — bir lig + sezon icin
+     * gecerli group isimleri (orn. "Eastern Conference", "Western Conference",
+     * "Group A"). Bazi liglerde stage yerine group ile bolunur.
+     */
+    public List<String> fetchStandingsGroups(long leagueId, String season) {
+        try {
+            var resp = get("/standings/groups",
+                    Map.of("league", leagueId, "season", season),
+                    STAGE_GROUP_TYPE);
+            if (resp == null || resp.hasErrors()) return List.of();
+            return resp.responseOrEmpty();
+        } catch (Exception e) {
+            log.debug("Standings groups cagri hata league={} season={}: {}",
+                    leagueId, season, e.toString());
+            return List.of();
+        }
     }
 
     /**
@@ -171,6 +258,165 @@ public class BasketballApiClient {
                 Map.of("h2h", team1Id + "-" + team2Id),
                 GAMES_TYPE);
         return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /leagues?id=X} — tek lig full info (seasons array + ulke + coverage).
+     * Lig detay sayfasi acilisinda seasons dropdown beslemesi + covered
+     * tazeleme job'i icin.
+     */
+    public List<BkLeagueDto> fetchLeagueById(long leagueId) {
+        var resp = get("/leagues", Map.of("id", leagueId), LEAGUES_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /leagues?country=X} — bir ulkedeki tum ligler. Reference seed
+     * ve country picker icin. Sezon listesi dahil.
+     */
+    public List<BkLeagueDto> fetchLeaguesByCountry(String countryName) {
+        var resp = get("/leagues", Map.of("country", countryName), LEAGUES_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /players?id=X&season=Y} — tek oyuncu profil + sezonluk istatistikler.
+     * Player detay sayfasi + master tablo doldurma icin.
+     */
+    public List<BkPlayerDto> fetchPlayerById(long playerId, String season) {
+        var resp = get("/players",
+                Map.of("id", playerId, "season", season), PLAYERS_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /players?league=X&season=Y&page=N} — bir lig + sezondaki tum
+     * oyuncular (sayfali). Top players (scorers/rebounders/assists) sync'i
+     * tum sayfalari toplar, in-memory siralar, top 10'u DB'ye yazar.
+     *
+     * <p>Sayfa basina ~20 oyuncu doner; NBA gibi 500+ oyunculu liglerde 25+
+     * sayfa olabilir. Caller donguyle ilerler, bos sayfa veya null cevapta
+     * durur.
+     *
+     * @param page 1-based sayfa numarasi
+     */
+    public List<BkPlayerDto> fetchPlayersByLeagueSeason(
+            long leagueId, String season, int page) {
+        var resp = get("/players",
+                Map.of("league", leagueId, "season", season, "page", page),
+                PLAYERS_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /games?league=X&season=Y} — bir lig + sezondaki tum maclar.
+     * Lig detay sayfasinin "Fikstur" tab'i icin.
+     */
+    public List<BkGameDto> fetchGamesByLeagueSeason(long leagueId, String season) {
+        var resp = get("/games",
+                Map.of("league", leagueId, "season", season),
+                GAMES_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /teams?id=X} — tek takim full profil (ulke, founded, code, venue).
+     * Takim detay sayfasi acilisi + DailyBasketballTeamRefreshJob icin.
+     */
+    public List<BkTeamDto> fetchTeamProfile(long teamId) {
+        var resp = get("/teams", Map.of("id", teamId), TEAMS_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /teams?league=X&season=Y&id=Z} — bir takimin belirli lig+sezon
+     * baglaminda fetch'i. Cold-start senaryosunda kullanilir (junction
+     * tablo bossa).
+     */
+    public List<BkTeamDto> fetchTeamInLeagueSeason(long teamId, long leagueId,
+                                                     String season) {
+        var resp = get("/teams",
+                Map.of("id", teamId, "league", leagueId, "season", season),
+                TEAMS_TYPE);
+        return resp == null ? List.of() : resp.responseOrEmpty();
+    }
+
+    /**
+     * {@code /teams/statistics?team=X&league=Y&season=Z} — bir takimin belirli
+     * lig+sezondaki ozet istatistikleri (W/L, ortalamalar, ev/deplasman).
+     *
+     * <p>Yanit: tek nesne (liste degil). API resp wrapper'i list bekledigi icin
+     * burada tek elemanli liste donulur — caller {@code getFirst()} ile alir.
+     *
+     * <p>Bazi yanitlarda "response: {}" sekilde gelir; bu durumda parse hatasi
+     * almak yerine null nesneli liste donulur.
+     */
+    /**
+     * {@code /statistics?team=X&league=Y&season=Z} — yanit {@code response}
+     * alani TEK OBJEKT (liste degil). {@link BasketballApiResponse} List<T>
+     * bekledigi icin burada Map olarak parse edip elle convert ediyoruz.
+     */
+    public java.util.Optional<BkTeamStatisticsDto> fetchTeamStatistics(
+            long teamId, long leagueId, String season) {
+        throttle();
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> raw = http.get()
+                    .uri(b -> b.path("/statistics")
+                            .queryParam("team", teamId)
+                            .queryParam("league", leagueId)
+                            .queryParam("season", season)
+                            .build())
+                    .retrieve()
+                    .body(Map.class);
+            if (raw == null) return java.util.Optional.empty();
+            Object errors = raw.get("errors");
+            if (errors instanceof java.util.List<?> el && !el.isEmpty()) {
+                log.debug("Team statistics errors team={} league={} season={}: {}",
+                        teamId, leagueId, season, el);
+                return java.util.Optional.empty();
+            }
+            Object responseField = raw.get("response");
+            if (!(responseField instanceof Map<?, ?>)) {
+                return java.util.Optional.empty();
+            }
+            BkTeamStatisticsDto dto = STATS_MAPPER.convertValue(
+                    responseField, BkTeamStatisticsDto.class);
+            return java.util.Optional.ofNullable(dto);
+        } catch (Exception e) {
+            log.debug("Team statistics cagri hata team={} league={} season={}: {}",
+                    teamId, leagueId, season, e.toString());
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** Local JSON mapper — Spring ObjectMapper bean'i ile cakismadan parse. */
+    private static final com.fasterxml.jackson.databind.ObjectMapper STATS_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /**
+     * {@code /players?team=X&season=Y} — bir takimin sezon kadrosu.
+     *
+     * <p>Yanit yapisi {@code /players?id=X}'den tamamen farkli — minimal
+     * field'lar (id, name, number, country, position, age). Bu yuzden
+     * {@link BkRosterPlayerDto} ayri tasarlandi.
+     *
+     * <p>Bazi liglerde 20-25 oyuncu doner; bos liste edilebilir hata yerine
+     * cevap olarak gelir.
+     */
+    public java.util.List<BkRosterPlayerDto> fetchRosterByTeamSeason(
+            long teamId, String season) {
+        try {
+            var resp = get("/players",
+                    Map.of("team", teamId, "season", season),
+                    ROSTER_TYPE);
+            if (resp == null || resp.hasErrors()) return java.util.List.of();
+            return resp.responseOrEmpty();
+        } catch (Exception e) {
+            log.debug("Roster fetch hata team={} season={}: {}",
+                    teamId, season, e.toString());
+            return java.util.List.of();
+        }
     }
 
     /** Dakikalık limiti korumak için istekleri eşit aralıklarla seri hale getirir. */

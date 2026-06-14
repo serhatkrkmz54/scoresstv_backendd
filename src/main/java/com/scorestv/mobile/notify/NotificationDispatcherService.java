@@ -58,6 +58,44 @@ public class NotificationDispatcherService {
     private final FixtureRepository fixtureRepository;
     private final FixtureEventRepository fixtureEventRepository;
 
+    /**
+     * Cift bildirim onleme memo'su. Key formati:
+     *   "{fixtureId}:{type}:{teamId}:{score-or-minute}"
+     * Value: gonderim epoch_ms. Ayni anahtar son {@link #DEDUP_TTL_MS} icinde
+     * varsa skip — LiveTickerService bir skor degisimini iki tick'te gorse
+     * veya FixtureEventsLiveProcessor ayni event'i yeniden islese tekrar push
+     * gitmez.
+     *
+     * <p>Map process-ici (clustered ortamda her node ayri memo) — bizim
+     * single-app deployment'imizda yeterli. Cluster gerekirse Redis bazli
+     * dedup.
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> _dedupMemo =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long DEDUP_TTL_MS = 120_000L; // 2 dakika
+
+    /** Son N ms icinde ayni key icin push gonderildi mi? */
+    private boolean _isRecentlySent(String key) {
+        Long lastAt = _dedupMemo.get(key);
+        if (lastAt == null) return false;
+        long age = System.currentTimeMillis() - lastAt;
+        if (age < DEDUP_TTL_MS) return true;
+        // TTL gectir — temizle ve tekrar gonderebiliriz
+        _dedupMemo.remove(key);
+        return false;
+    }
+
+    /** Push gonderildi olarak isaretle + memo'yu basit sekilde budamayi dene. */
+    private void _markSent(String key) {
+        _dedupMemo.put(key, System.currentTimeMillis());
+        // Lightweight cleanup: memo 500 entry'i gectiyse expired olanlari sil
+        if (_dedupMemo.size() > 500) {
+            long now = System.currentTimeMillis();
+            _dedupMemo.entrySet().removeIf(
+                    e -> now - e.getValue() > DEDUP_TTL_MS);
+        }
+    }
+
     public NotificationDispatcherService(
             UserNotificationPrefRepository prefRepository,
             DeviceMatchSubscriptionRepository matchSubRepository,
@@ -103,6 +141,21 @@ public class NotificationDispatcherService {
 
         final Long teamId = event.getTeam() != null ? event.getTeam().getId() : null;
         if (teamId == null) return;
+
+        // Cift bildirim guardu: ayni fixture + type + teamId + dakika icin
+        // son 120sn'de push gonderildiyse skip. Event listener bazen ayni
+        // event'i yeniden isler (idempotency icin event_id unique constraint
+        // olmadigi durumlarda).
+        final String evDedupKey = String.format("ev:%d:%s:%d:%d:%d",
+                fixture.getId(), mobileType, teamId,
+                event.getTimeElapsed() == null ? 0 : event.getTimeElapsed(),
+                event.getId() == null ? 0L : event.getId());
+        if (_isRecentlySent(evDedupKey)) {
+            log.info("Event push SKIP (dedup) fixtureId={} key={}",
+                    fixture.getId(), evDedupKey);
+            return;
+        }
+        _markSent(evDedupKey);
 
         // 1) Takim takibinden gelen recipient'lar (user_notification_prefs)
         final List<UserNotificationPref> teamRecipients =
@@ -156,6 +209,21 @@ public class NotificationDispatcherService {
                 fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
 
+        // Cift bildirim guardu: ayni mac + ayni skor + ayni dakika icin son
+        // 120sn'de push gonderildiyse skip. LiveTickerService bazen ayni skor
+        // degisimini iki tick'te (5sn ara) goruyor — kullanici 2-3 push aliyor.
+        final String dedupKey = String.format("goal:%d:%d:%d-%d",
+                fixtureId,
+                scoringTeamId == null ? 0L : scoringTeamId,
+                fixture.getGoalsHome() == null ? 0 : fixture.getGoalsHome(),
+                fixture.getGoalsAway() == null ? 0 : fixture.getGoalsAway());
+        if (_isRecentlySent(dedupKey)) {
+            log.info("Skor-gol push SKIP (dedup) fixtureId={} key={}",
+                    fixtureId, dedupKey);
+            return;
+        }
+        _markSent(dedupKey);
+
         // Alicilar: gol atan takim takipcileri ("gol" acik) + favori-mac aboneleri.
         final Set<String> tokens = new LinkedHashSet<>();
         if (scoringTeamId != null) {
@@ -198,6 +266,15 @@ public class NotificationDispatcherService {
         final Fixture fixture =
                 fixtureRepository.findById(fixtureArg.getId()).orElse(null);
         if (fixture == null) return;
+
+        // Cift bildirim guardu — LiveTickerService NS→1H gecisini bazen iki
+        // tick'te goruyor.
+        final String koKey = "kickoff:" + fixture.getId();
+        if (_isRecentlySent(koKey)) {
+            log.info("Kickoff push SKIP (dedup) fixtureId={}", fixture.getId());
+            return;
+        }
+        _markSent(koKey);
         _dispatchMatchStatus(fixture, "basladi");
     }
 
@@ -208,6 +285,17 @@ public class NotificationDispatcherService {
     @Async
     @Transactional(readOnly = true)
     public void dispatchFinal(Fixture fixtureArg) {
+        // dispatchFinal body asagida — dedup en uste eklenir.
+        // (Mevcut implementasyon korunur — sadece guard.)
+        if (fixtureArg != null) {
+            final String fnKey = "final:" + fixtureArg.getId();
+            if (_isRecentlySent(fnKey)) {
+                log.info("Final push SKIP (dedup) fixtureId={}",
+                        fixtureArg.getId());
+                return;
+            }
+            _markSent(fnKey);
+        }
         if (!fcmMessaging.isEnabled() || fixtureArg == null) return;
         final Fixture fixture =
                 fixtureRepository.findById(fixtureArg.getId()).orElse(null);

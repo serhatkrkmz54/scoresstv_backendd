@@ -308,4 +308,11 @@ public class AutoEnqueueScheduler {
                     added, batch.size());
         }
     }
+
+    // Basketbol covered ligler gunluk tazeleme:
+    //   {@code DailyBasketballLeagueRefreshJob} (futbol patternine paralel)
+    //   tarafindan dogrudan inline cagri ile yapilir. Burada queue tabanli
+    //   enqueue yok — duplicate'i onlemek icin. Queue tabanli LEAGUE_TEAMS_SYNC
+    //   gibi enqueue isleri admin / on-demand cagrilar icin SyncJobExecutor'da
+    //   dispatch edilmeye devam eder.
 }

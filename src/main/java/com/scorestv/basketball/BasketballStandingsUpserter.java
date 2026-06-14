@@ -97,22 +97,28 @@ public class BasketballStandingsUpserter {
                 s.setGroupName(groupName);
                 s.setPosition(dto.position());
 
-                if (dto.won() != null) {
-                    s.setWonAll(dto.won().all());
-                    s.setWonHome(dto.won().home());
-                    s.setWonAway(dto.won().away());
-                    s.setWonPercentage(dto.won().percentage());
-                }
-                if (dto.lost() != null) {
-                    s.setLostAll(dto.lost().all());
-                    s.setLostHome(dto.lost().home());
-                    s.setLostAway(dto.lost().away());
-                    s.setLostPercentage(dto.lost().percentage());
-                }
-                if (dto.games() != null && dto.games().played() != null) {
-                    s.setGamesPlayedAll(dto.games().played().all());
-                    s.setGamesPlayedHome(dto.games().played().home());
-                    s.setGamesPlayedAway(dto.games().played().away());
+                // API shape: games.win = {total, percentage}, games.lose = ayni.
+                // Eski "won"/"lost" ust seviye field'lari kaldirildi.
+                if (dto.games() != null) {
+                    // win bloku -> wonAll + wonPercentage
+                    if (dto.games().win() != null) {
+                        s.setWonAll(dto.games().win().total());
+                        s.setWonPercentage(dto.games().win().percentage());
+                    }
+                    // lose bloku -> lostAll + lostPercentage
+                    if (dto.games().lose() != null) {
+                        s.setLostAll(dto.games().lose().total());
+                        s.setLostPercentage(dto.games().lose().percentage());
+                    }
+                    // played: Number (int) veya Map ({all,home,away}) olabilir
+                    Object played = dto.games().played();
+                    if (played instanceof Number n) {
+                        s.setGamesPlayedAll(n.intValue());
+                    } else if (played instanceof java.util.Map<?, ?> m) {
+                        s.setGamesPlayedAll(asInt(m.get("all")));
+                        s.setGamesPlayedHome(asInt(m.get("home")));
+                        s.setGamesPlayedAway(asInt(m.get("away")));
+                    }
                 }
                 if (dto.points() != null) {
                     s.setPointsFor(dto.points().pointsFor());
@@ -126,5 +132,16 @@ public class BasketballStandingsUpserter {
             }
         }
         return written;
+    }
+
+    /** Defansif int conversion — Map'ten gelen Object'i Integer'a cevirir. */
+    private static Integer asInt(Object v) {
+        if (v == null) return null;
+        if (v instanceof Number n) return n.intValue();
+        try {
+            return Integer.parseInt(v.toString().trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }

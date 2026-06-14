@@ -1,5 +1,10 @@
 package com.scorestv.football.queue;
 
+import com.scorestv.basketball.BasketballLeaguesSyncService;
+import com.scorestv.basketball.BasketballPlayerProfileSyncService;
+import com.scorestv.basketball.BasketballTeamProfileSyncService;
+import com.scorestv.basketball.BasketballTeamStatisticsSyncService;
+import com.scorestv.basketball.BasketballTopPlayersSyncService;
 import com.scorestv.football.sync.CoachesSyncService;
 import com.scorestv.football.sync.PlayerCareerTeamsSyncService;
 import com.scorestv.football.sync.PlayerProfileSyncService;
@@ -50,6 +55,13 @@ public class SyncJobExecutor {
     // Bulk league players dump — yeniden enqueue icin
     private final SyncQueueService queueService;
 
+    // Basketbol sync servisleri
+    private final BasketballLeaguesSyncService basketballLeaguesSyncService;
+    private final BasketballTopPlayersSyncService basketballTopPlayersSyncService;
+    private final BasketballPlayerProfileSyncService basketballPlayerProfileSyncService;
+    private final BasketballTeamProfileSyncService basketballTeamProfileSyncService;
+    private final BasketballTeamStatisticsSyncService basketballTeamStatisticsSyncService;
+
     public SyncJobExecutor(SquadSyncService squadSyncService,
                            TransfersSyncService transfersSyncService,
                            CoachesSyncService coachesSyncService,
@@ -61,7 +73,12 @@ public class SyncJobExecutor {
                            StandingsSyncService standingsSyncService,
                            TopPlayersSyncService topPlayersSyncService,
                            TeamSyncService teamSyncService,
-                           SyncQueueService queueService) {
+                           SyncQueueService queueService,
+                           BasketballLeaguesSyncService basketballLeaguesSyncService,
+                           BasketballTopPlayersSyncService basketballTopPlayersSyncService,
+                           BasketballPlayerProfileSyncService basketballPlayerProfileSyncService,
+                           BasketballTeamProfileSyncService basketballTeamProfileSyncService,
+                           BasketballTeamStatisticsSyncService basketballTeamStatisticsSyncService) {
         this.squadSyncService = squadSyncService;
         this.transfersSyncService = transfersSyncService;
         this.coachesSyncService = coachesSyncService;
@@ -74,6 +91,11 @@ public class SyncJobExecutor {
         this.topPlayersSyncService = topPlayersSyncService;
         this.teamSyncService = teamSyncService;
         this.queueService = queueService;
+        this.basketballLeaguesSyncService = basketballLeaguesSyncService;
+        this.basketballTopPlayersSyncService = basketballTopPlayersSyncService;
+        this.basketballPlayerProfileSyncService = basketballPlayerProfileSyncService;
+        this.basketballTeamProfileSyncService = basketballTeamProfileSyncService;
+        this.basketballTeamStatisticsSyncService = basketballTeamStatisticsSyncService;
     }
 
     /**
@@ -119,6 +141,36 @@ public class SyncJobExecutor {
                     asLong(p, "leagueId"), asInt(p, "season"));
 
             case LEAGUE_PLAYERS_DUMP -> executeLeaguePlayersDump(p);
+
+            // ---- Basketbol ----
+            case BASKETBALL_LEAGUE_INFO_SYNC -> {
+                var saved = basketballLeaguesSyncService.syncLeagueInfo(
+                        asLong(p, "leagueId"));
+                yield saved != null ? 1 : 0;
+            }
+            case BASKETBALL_LEAGUE_TOP_PLAYERS_SYNC ->
+                basketballTopPlayersSyncService.syncLeagueSeason(
+                        asLong(p, "leagueId"), asString(p, "season"));
+            case BASKETBALL_PLAYER_PROFILE_SYNC -> {
+                var saved = basketballPlayerProfileSyncService.syncProfile(
+                        asLong(p, "playerId"),
+                        asLong(p, "leagueId"),
+                        asString(p, "season"));
+                yield saved != null ? 1 : 0;
+            }
+            case BASKETBALL_TEAM_PROFILE_SYNC -> {
+                var saved = basketballTeamProfileSyncService.syncProfile(
+                        asLong(p, "teamId"), true);
+                yield saved.isPresent() ? 1 : 0;
+            }
+            case BASKETBALL_TEAM_STATS_SYNC -> {
+                var saved = basketballTeamStatisticsSyncService.sync(
+                        asLong(p, "teamId"),
+                        asLong(p, "leagueId"),
+                        asString(p, "season"),
+                        true);
+                yield saved.isPresent() ? 1 : 0;
+            }
         };
     }
 
@@ -152,5 +204,11 @@ public class SyncJobExecutor {
         if (v == null) return null;
         if (v instanceof Number n) return n.intValue();
         return Integer.parseInt(v.toString());
+    }
+
+    /** Basketbol sezonlari "2024-2025" formatinda string — tip-guvenli getter. */
+    private static String asString(Map<String, Object> p, String key) {
+        Object v = p.get(key);
+        return v == null ? null : v.toString();
     }
 }

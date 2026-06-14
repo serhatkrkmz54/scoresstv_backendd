@@ -4,9 +4,12 @@ import com.scorestv.mobile.service.MobileDeviceTokenService;
 import com.scorestv.mobile.web.dto.DeviceTokenResponse;
 import com.scorestv.mobile.web.dto.RegisterDeviceTokenRequest;
 import jakarta.validation.Valid;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -33,5 +36,20 @@ public class MobileDeviceTokenController {
     public DeviceTokenResponse register(
             @Valid @RequestBody RegisterDeviceTokenRequest req) {
         return service.registerOrUpdate(req);
+    }
+
+    /**
+     * Master "Tum bildirimleri kapat/ac" toggle.
+     *
+     * <p>Mobile Profil > "Bildirimler" satirindan cagrilir.
+     * {@code enabled=false} → NotificationDispatcher push gondermez.
+     */
+    @PatchMapping("/notifications-enabled")
+    public ResponseEntity<Void> setNotificationsEnabled(
+            @RequestParam String fcmToken,
+            @RequestParam boolean enabled) {
+        boolean updated = service.setNotificationsEnabled(fcmToken, enabled);
+        return updated ? ResponseEntity.noContent().build()
+                       : ResponseEntity.notFound().build();
     }
 }

@@ -59,6 +59,24 @@ public interface BasketballGameRepository extends JpaRepository<BasketballGame, 
     List<BasketballGame> findByIdsWithDetails(@Param("ids") Collection<Long> ids);
 
     /**
+     * B-Faz10: Bir pencere icinde yeni biten maclar — FinishedGameFinalSync
+     * job'i icin. {@code statusShort in (FT, AOT)} ve {@code startAt} verilen
+     * pencerede; sirali eski → yeni.
+     */
+    @Query("""
+            select g from BasketballGame g
+            join fetch g.league
+            join fetch g.homeTeam
+            join fetch g.awayTeam
+            where g.statusShort in ('FT', 'AOT')
+              and g.startAt >= :from
+              and g.startAt < :until
+            order by g.startAt asc
+            """)
+    List<BasketballGame> findRecentlyFinished(@Param("from") Instant from,
+                                                @Param("until") Instant until);
+
+    /**
      * B-Faz6: Bir ligin oynanmis/oynanacak maclarindaki distinct sezonlar —
      * yeni → eski. Standings cold-start oldugunda sezon discover icin.
      */
@@ -87,4 +105,97 @@ public interface BasketballGameRepository extends JpaRepository<BasketballGame, 
                                   @Param("t2") Long t2,
                                   @Param("currentId") Long currentId,
                                   Pageable pageable);
+
+    /**
+     * C-Faz2: Lig + sezon icin yeniden eskiye N adet bitmis veya canli mac.
+     * Lig detay sayfasi "Son Maclar" widget'i. Statu filtresi yok —
+     * geleceginki bilet kalitesini disladigimiz icin {@code startAt < now}.
+     */
+    @Query("""
+            select g from BasketballGame g
+            join fetch g.league
+            join fetch g.homeTeam
+            join fetch g.awayTeam
+            where g.league.id = :leagueId
+              and g.season = :season
+              and g.startAt < CURRENT_TIMESTAMP
+            order by g.startAt desc
+            """)
+    List<BasketballGame> findRecentByLeagueSeason(@Param("leagueId") Long leagueId,
+                                                    @Param("season") String season,
+                                                    Pageable pageable);
+
+    /**
+     * C-Faz2: Lig + sezon icin kronoljik N adet yaklasik mac.
+     * Lig detay sayfasi "Yaklasan Maclar" widget'i. Statu filtresi yok —
+     * gelecekteki tum maclar (NS, TBD, postponed, vs.) dahil.
+     */
+    @Query("""
+            select g from BasketballGame g
+            join fetch g.league
+            join fetch g.homeTeam
+            join fetch g.awayTeam
+            where g.league.id = :leagueId
+              and g.season = :season
+              and g.startAt >= CURRENT_TIMESTAMP
+            order by g.startAt asc
+            """)
+    List<BasketballGame> findUpcomingByLeagueSeason(@Param("leagueId") Long leagueId,
+                                                      @Param("season") String season,
+                                                      Pageable pageable);
+
+    /**
+     * D-Faz2: Bir takimin lig + sezonda oynanmis maclari (recent — yeniden eskiye).
+     * Home veya away farketmez; takim detayinin "Fikstur" tab'inde son maclar.
+     */
+    @Query("""
+            select g from BasketballGame g
+            join fetch g.league
+            join fetch g.homeTeam
+            join fetch g.awayTeam
+            where (g.homeTeam.id = :teamId or g.awayTeam.id = :teamId)
+              and (:leagueId is null or g.league.id = :leagueId)
+              and (:season is null or g.season = :season)
+              and g.startAt < CURRENT_TIMESTAMP
+            order by g.startAt desc
+            """)
+    List<BasketballGame> findRecentByTeam(@Param("teamId") Long teamId,
+                                            @Param("leagueId") Long leagueId,
+                                            @Param("season") String season,
+                                            Pageable pageable);
+
+    /**
+     * D-Faz2: Bir takimin lig + sezonda yaklasik maclari (upcoming — eskiden yeniye).
+     */
+    @Query("""
+            select g from BasketballGame g
+            join fetch g.league
+            join fetch g.homeTeam
+            join fetch g.awayTeam
+            where (g.homeTeam.id = :teamId or g.awayTeam.id = :teamId)
+              and (:leagueId is null or g.league.id = :leagueId)
+              and (:season is null or g.season = :season)
+              and g.startAt >= CURRENT_TIMESTAMP
+            order by g.startAt asc
+            """)
+    List<BasketballGame> findUpcomingByTeam(@Param("teamId") Long teamId,
+                                              @Param("leagueId") Long leagueId,
+                                              @Param("season") String season,
+                                              Pageable pageable);
+
+    /**
+     * D-Faz2: Cold-start fallback — bir takim hangi (lig, sezon) ciftinde
+     * son zamanlarda oynamis? En guncel record once doner. Detay sayfasinda
+     * junction tablo bossa kullanilir.
+     */
+    @Query("""
+            select g.league.id, g.season from BasketballGame g
+            where (g.homeTeam.id = :teamId or g.awayTeam.id = :teamId)
+              and g.league.id is not null
+              and g.season is not null
+            group by g.league.id, g.season
+            order by max(g.startAt) desc
+            """)
+    List<Object[]> findTeamLeagueSeasonPairs(@Param("teamId") Long teamId,
+                                              Pageable pageable);
 }
