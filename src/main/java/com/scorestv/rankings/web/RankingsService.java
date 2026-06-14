@@ -52,10 +52,11 @@ public class RankingsService {
     // ============================================================
 
     @Cacheable(value = FootballCacheNames.RANKINGS,
-            key = "'fifa-' + (#confederation == null ? 'all' : #confederation) "
-                + "+ '-' + (#search == null ? '' : #search)")
+            key = "'fifa-' + (#p0 == null ? 'all' : #p0) "
+                + "+ '-' + (#p1 == null ? '' : #p1) "
+                + "+ '-' + (#p2 ? 'tr' : 'en')")
     @Transactional(readOnly = true)
-    public FifaRankingResponse fifaRanking(String confederation, String search) {
+    public FifaRankingResponse fifaRanking(String confederation, String search, boolean turkish) {
         List<FifaRanking> all = (confederation != null && !confederation.isBlank())
                 ? fifaRepository.findByConfederationOrderByRankAsc(
                         confederation.trim().toUpperCase(Locale.ROOT))
@@ -85,11 +86,15 @@ public class RankingsService {
         // → Country.name ile esle.
         Map<String, String> flagByName = new HashMap<>();
         Map<String, String> iso2ByName = new HashMap<>();
+        Map<String, String> nameTrByName = new HashMap<>();
         for (Country c : countryRepository.findAll()) {
             if (c.getName() == null) continue;
             String key = c.getName().toLowerCase(Locale.ROOT);
             if (c.getFlagUrl() != null) flagByName.put(key, c.getFlagUrl());
             if (c.getCode() != null) iso2ByName.put(key, c.getCode());
+            if (turkish && c.getNameTr() != null && !c.getNameTr().isBlank()) {
+                nameTrByName.put(key, c.getNameTr());
+            }
         }
 
         List<FifaRankingResponse.Row> rows = all.stream()
@@ -120,12 +125,15 @@ public class RankingsService {
                         }
                     }
 
+                    String displayName = turkish && key != null
+                            ? nameTrByName.getOrDefault(key, r.getTeamName())
+                            : r.getTeamName();
                     return new FifaRankingResponse.Row(
                             r.getRank(),
                             r.getPrevRank(),
                             r.getMovement(),
                             r.getTeamId(),
-                            r.getTeamName(),
+                            displayName,
                             r.getCountryCode(),
                             r.getConfederation(),
                             r.getConfederationId(),
@@ -229,12 +237,13 @@ public class RankingsService {
     // ============================================================
 
     @Cacheable(value = FootballCacheNames.RANKINGS,
-            key = "'uefa-club-' + (#season == null ? 'cur' : #season) "
-                + "+ '-' + (#country == null ? 'all' : #country) "
-                + "+ '-' + (#search == null ? '' : #search)")
+            key = "'uefa-club-' + (#p0 == null ? 'cur' : #p0) "
+                + "+ '-' + (#p1 == null ? 'all' : #p1) "
+                + "+ '-' + (#p2 == null ? '' : #p2) "
+                + "+ '-' + (#p3 ? 'tr' : 'en')")
     @Transactional(readOnly = true)
     public UefaClubRankingResponse uefaClubRanking(
-            Integer season, String country, String search) {
+            Integer season, String country, String search, boolean turkish) {
         Integer effectiveSeason = season != null
                 ? season
                 : uefaClubRepository.findLatestTargetSeasonYear();
@@ -266,25 +275,39 @@ public class RankingsService {
                 .max(Instant::compareTo)
                 .orElse(null);
 
+        Map<String, String> clubCountryNameTr = new HashMap<>();
+        if (turkish) {
+            for (Country c : countryRepository.findAll()) {
+                if (c.getName() == null || c.getNameTr() == null || c.getNameTr().isBlank()) continue;
+                clubCountryNameTr.put(c.getName().toLowerCase(Locale.ROOT), c.getNameTr());
+            }
+        }
         List<UefaClubRankingResponse.Row> rows = all.stream()
-                .map(r -> new UefaClubRankingResponse.Row(
-                        r.getRank(),
-                        r.getClubId(),
-                        r.getClubName(),
-                        r.getClubShortName(),
-                        r.getClubOfficialName(),
-                        r.getTeamCode(),
-                        r.getLogoUrl(),
-                        r.getBigLogoUrl(),
-                        r.getMediumLogoUrl(),
-                        r.getCountryCode(),
-                        r.getCountryName(),
-                        r.getTotalPoints(),
-                        r.getTrend(),
-                        r.getNumberOfMatches(),
-                        r.getNumberOfTeams(),
-                        r.getBaseSeasonYear(),
-                        r.getSeasonRankingsJson()))
+                .map(r -> {
+                    String cName = r.getCountryName();
+                    if (turkish && cName != null) {
+                        String tr = clubCountryNameTr.get(cName.toLowerCase(Locale.ROOT));
+                        if (tr != null) cName = tr;
+                    }
+                    return new UefaClubRankingResponse.Row(
+                            r.getRank(),
+                            r.getClubId(),
+                            r.getClubName(),
+                            r.getClubShortName(),
+                            r.getClubOfficialName(),
+                            r.getTeamCode(),
+                            r.getLogoUrl(),
+                            r.getBigLogoUrl(),
+                            r.getMediumLogoUrl(),
+                            r.getCountryCode(),
+                            cName,
+                            r.getTotalPoints(),
+                            r.getTrend(),
+                            r.getNumberOfMatches(),
+                            r.getNumberOfTeams(),
+                            r.getBaseSeasonYear(),
+                            r.getSeasonRankingsJson());
+                })
                 .collect(Collectors.toList());
 
         return new UefaClubRankingResponse(
@@ -296,10 +319,11 @@ public class RankingsService {
     // ============================================================
 
     @Cacheable(value = FootballCacheNames.RANKINGS,
-            key = "'uefa-country-' + (#season == null ? 'cur' : #season) "
-                + "+ '-' + (#search == null ? '' : #search)")
+            key = "'uefa-country-' + (#p0 == null ? 'cur' : #p0) "
+                + "+ '-' + (#p1 == null ? '' : #p1) "
+                + "+ '-' + (#p2 ? 'tr' : 'en')")
     @Transactional(readOnly = true)
-    public UefaCountryRankingResponse uefaCountryRanking(Integer season, String search) {
+    public UefaCountryRankingResponse uefaCountryRanking(Integer season, String search, boolean turkish) {
         Integer effectiveSeason = season != null
                 ? season
                 : uefaCountryRepository.findLatestTargetSeasonYear();
@@ -329,20 +353,34 @@ public class RankingsService {
                 .max(Instant::compareTo)
                 .orElse(null);
 
+        Map<String, String> countryNameTr = new HashMap<>();
+        if (turkish) {
+            for (Country c : countryRepository.findAll()) {
+                if (c.getName() == null || c.getNameTr() == null || c.getNameTr().isBlank()) continue;
+                countryNameTr.put(c.getName().toLowerCase(Locale.ROOT), c.getNameTr());
+            }
+        }
         List<UefaCountryRankingResponse.Row> rows = all.stream()
-                .map(r -> new UefaCountryRankingResponse.Row(
-                        r.getRank(),
-                        r.getCountryUefaId(),
-                        r.getCountryName(),
-                        r.getCountryCode(),
-                        r.getLogoUrl(),
-                        r.getBigLogoUrl(),
-                        r.getMediumLogoUrl(),
-                        r.getTotalPoints(),
-                        r.getTrend(),
-                        r.getNumberOfMatches(),
-                        r.getNumberOfTeams(),
-                        r.getSeasonRankingsJson()))
+                .map(r -> {
+                    String cName = r.getCountryName();
+                    if (turkish && cName != null) {
+                        String tr = countryNameTr.get(cName.toLowerCase(Locale.ROOT));
+                        if (tr != null) cName = tr;
+                    }
+                    return new UefaCountryRankingResponse.Row(
+                            r.getRank(),
+                            r.getCountryUefaId(),
+                            cName,
+                            r.getCountryCode(),
+                            r.getLogoUrl(),
+                            r.getBigLogoUrl(),
+                            r.getMediumLogoUrl(),
+                            r.getTotalPoints(),
+                            r.getTrend(),
+                            r.getNumberOfMatches(),
+                            r.getNumberOfTeams(),
+                            r.getSeasonRankingsJson());
+                })
                 .collect(Collectors.toList());
 
         return new UefaCountryRankingResponse(

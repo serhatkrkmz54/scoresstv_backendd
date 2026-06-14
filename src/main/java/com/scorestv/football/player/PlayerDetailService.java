@@ -203,30 +203,68 @@ public class PlayerDetailService {
 
     private TeamRef resolveCurrentTeam(Long playerId, List<PlayerCareerTeam> careerTeams,
                                        boolean turkish) {
-        // 1) DB stats'tan en son sezonun takimi
+        // "Mevcut takim" widget'i KULUP takimini tercih eder. Milli takim
+        // sadece oyuncunun hicbir kulup kaydi yoksa kullanilir (amator
+        // milli takim uyesi edge case).
+        //
+        // Ornek: Fabinho 2026 sezonunda sadece Brezilya icin oynamis (Dunya
+        // Kupasi + Dostluk). Al-Ittihad FC en son 2025 sezonu. Widget
+        // Al-Ittihad'i gostermeli — milli takim degil.
+        //
+        // Algoritma:
+        // 1) DB stats'ta en yeni sezondan baslayip GERIYE dogru tara —
+        //    ilk bulunan KULUP takimini sec
+        // 2) Yoksa career_teams'te en yeni kulup sezonu (yine kulup oncelikli)
+        // 3) Hicbir kulup yoksa milli takim fallback
+
+        // 1) DB stats — kulup oncelikli, sezon sezon geri tara
         List<Integer> seasonYears = statRepository.findSeasonYearsByPlayer(playerId);
-        if (!seasonYears.isEmpty()) {
-            Integer latest = seasonYears.get(0);
+        Team fallbackNational = null;
+        for (Integer year : seasonYears) {
             List<PlayerSeasonStat> stats =
-                    statRepository.findByPlayerIdAndSeason(playerId, latest);
-            if (!stats.isEmpty()) {
-                Team t = stats.get(0).getTeam();
-                return toTeamRef(t, turkish);
-            }
-        }
-        // 2) Fallback: career_teams'te en yeni sezona sahip takim
-        Team latest = null;
-        int latestYear = Integer.MIN_VALUE;
-        for (PlayerCareerTeam ct : careerTeams) {
-            if (ct.getSeasons() == null) continue;
-            for (Integer y : ct.getSeasons()) {
-                if (y != null && y > latestYear) {
-                    latestYear = y;
-                    latest = ct.getTeam();
+                    statRepository.findByPlayerIdAndSeason(playerId, year);
+            for (PlayerSeasonStat s : stats) {
+                Team t = s.getTeam();
+                if (t == null) continue;
+                if (!t.isNational()) {
+                    return toTeamRef(t, turkish);
+                }
+                if (fallbackNational == null) {
+                    fallbackNational = t; // en yeni milli takim — fallback
                 }
             }
         }
-        return latest != null ? toTeamRef(latest, turkish) : null;
+
+        // 2) career_teams fallback — kulup oncelikli, en yeni sezon
+        Team latestClub = null;
+        int latestClubYear = Integer.MIN_VALUE;
+        Team latestAny = null;
+        int latestAnyYear = Integer.MIN_VALUE;
+        for (PlayerCareerTeam ct : careerTeams) {
+            if (ct.getSeasons() == null) continue;
+            Team t = ct.getTeam();
+            if (t == null) continue;
+            for (Integer y : ct.getSeasons()) {
+                if (y == null) continue;
+                if (y > latestAnyYear) {
+                    latestAnyYear = y;
+                    latestAny = t;
+                }
+                if (!t.isNational() && y > latestClubYear) {
+                    latestClubYear = y;
+                    latestClub = t;
+                }
+            }
+        }
+        if (latestClub != null) {
+            return toTeamRef(latestClub, turkish);
+        }
+
+        // 3) Hicbir kulup kaydi yok — milli takim fallback (stats > career_teams)
+        if (fallbackNational != null) {
+            return toTeamRef(fallbackNational, turkish);
+        }
+        return latestAny != null ? toTeamRef(latestAny, turkish) : null;
     }
 
     private TeamRef toTeamRef(Team t, boolean turkish) {

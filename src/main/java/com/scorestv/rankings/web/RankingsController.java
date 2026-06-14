@@ -12,12 +12,10 @@ import org.springframework.web.bind.annotation.RestController;
  * Public rankings endpoint'leri.
  *
  * <ul>
- *   <li>{@code GET /api/v1/rankings/fifa?confederation=&search=} — FIFA milli</li>
- *   <li>{@code GET /api/v1/rankings/uefa/clubs?season=&country=&search=} — UEFA kulup</li>
- *   <li>{@code GET /api/v1/rankings/uefa/countries?season=&search=} — UEFA milli</li>
+ *   <li>{@code GET /api/v1/rankings/fifa?confederation=&search=&lang=}</li>
+ *   <li>{@code GET /api/v1/rankings/uefa/clubs?season=&country=&search=&lang=}</li>
+ *   <li>{@code GET /api/v1/rankings/uefa/countries?season=&search=&lang=}</li>
  * </ul>
- *
- * <p>Tum endpointler public — security config'de permitAll.
  */
 @RestController
 @RequestMapping("/api/v1/rankings")
@@ -29,28 +27,28 @@ public class RankingsController {
         this.service = service;
     }
 
-    /** FIFA Erkek Milli Takim Siralamasi. */
     @GetMapping("/fifa")
     public FifaRankingResponse fifa(
             @RequestParam(required = false) String confederation,
-            @RequestParam(required = false) String search) {
-        return service.fifaRanking(confederation, search);
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false, defaultValue = "en") String lang) {
+        return service.fifaRanking(confederation, search, "tr".equalsIgnoreCase(lang));
     }
 
-    /** UEFA Kulup Katsayisi. */
     @GetMapping("/uefa/clubs")
     public UefaClubRankingResponse uefaClubs(
             @RequestParam(required = false) Integer season,
             @RequestParam(required = false) String country,
-            @RequestParam(required = false) String search) {
-        return service.uefaClubRanking(season, country, search);
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false, defaultValue = "en") String lang) {
+        return service.uefaClubRanking(season, country, search, "tr".equalsIgnoreCase(lang));
     }
 
-    /** UEFA Milli Takim Katsayisi. */
     @GetMapping("/uefa/countries")
     public UefaCountryRankingResponse uefaCountries(
             @RequestParam(required = false) Integer season,
-            @RequestParam(required = false) String search) {
-        return service.uefaCountryRanking(season, search);
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false, defaultValue = "en") String lang) {
+        return service.uefaCountryRanking(season, search, "tr".equalsIgnoreCase(lang));
     }
 }

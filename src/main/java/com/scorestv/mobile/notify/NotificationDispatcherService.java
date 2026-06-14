@@ -215,8 +215,8 @@ public class NotificationDispatcherService {
         final String dedupKey = String.format("goal:%d:%d:%d-%d",
                 fixtureId,
                 scoringTeamId == null ? 0L : scoringTeamId,
-                fixture.getGoalsHome() == null ? 0 : fixture.getGoalsHome(),
-                fixture.getGoalsAway() == null ? 0 : fixture.getGoalsAway());
+                fixture.getHomeGoals() == null ? 0 : fixture.getHomeGoals(),
+                fixture.getAwayGoals() == null ? 0 : fixture.getAwayGoals());
         if (_isRecentlySent(dedupKey)) {
             log.info("Skor-gol push SKIP (dedup) fixtureId={} key={}",
                     fixtureId, dedupKey);

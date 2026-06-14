@@ -8,6 +8,8 @@ import com.scorestv.search.events.EntityIndexedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -51,14 +53,34 @@ public class PlayerUpserter {
     }
 
     /**
-     * Bir oyuncuyu upsert eder. Sessizce hata yutmaz — caller transaction'ina
-     * dahil olur. ID null veya isim null ise atlanir.
+     * Bir oyuncuyu upsert eder. ID null veya isim null ise atlanir.
+     *
+     * <p><b>Race-safe:</b> REQUIRES_NEW ile ayri tx — paralel worker'lar ayni
+     * playerId icin yarisirsa bir tanesi DataIntegrityViolation alir; outer
+     * (player_season_stats yazan) tx etkilenmez. Yutulan exception sadece
+     * "another tx wrote this player first" durumu — veri kaybi yok.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void upsert(Long playerId, String playerName, String photoUrl) {
         if (playerId == null || playerName == null || playerName.isBlank()) {
             return;
         }
+        try {
+            doUpsert(playerId, playerName, photoUrl);
+        } catch (DataIntegrityViolationException dup) {
+            // Paralel race — baska worker once yazdi. Player'i tek seferlik
+            // refresh edip foto URL'sini guncellemeye calis (best-effort).
+            try {
+                doUpsert(playerId, playerName, photoUrl);
+            } catch (DataIntegrityViolationException ignored) {
+                // Vazgec — bir sonraki sync turunda hidratasyon yine denenecek.
+            }
+        }
+    }
+
+    /** Asil upsert mantigi — caller try/catch ile race-safe sarar. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void doUpsert(Long playerId, String playerName, String photoUrl) {
         Player player = playerRepository.findById(playerId).orElseGet(Player::new);
         boolean isNew = player.getId() == null;
         player.setId(playerId);
