@@ -17,16 +17,24 @@ spring:
     password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      # AGRESIF POOL — 8vCPU app + 8vCPU db, bol kaynak
-      maximum-pool-size: 30
-      minimum-idle: 10
-      connection-timeout: 5000
-      idle-timeout: 300000
-      max-lifetime: 1200000
-      leak-detection-threshold: 60000
+      # 10k user hedefi icin tuned. Tum degerler env override edilebilir
+      # (JAR rebuild gerektirmez — sadece .env + docker compose restart).
+      #
+      # Sizing:
+      #   max-pool=50      → 8vCPU DB icin guvenli tavan ((8*2)+1=17 baseline)
+      #   min-idle=15      → cold start sonrasi hizli ramp-up
+      #   conn-timeout=10s → peak'te 5s'lik 503 firtinasini onler
+      #   idle/lifetime    → Hetzner internal network stabil, default oran
+      #   leak=60s         → uzun tx'leri yakalar (job'larda kritik)
+      maximum-pool-size: ${HIKARI_MAX_POOL:50}
+      minimum-idle: ${HIKARI_MIN_IDLE:15}
+      connection-timeout: ${HIKARI_CONNECTION_TIMEOUT:10000}
+      idle-timeout: ${HIKARI_IDLE_TIMEOUT:300000}
+      max-lifetime: ${HIKARI_MAX_LIFETIME:1200000}
+      leak-detection-threshold: ${HIKARI_LEAK_DETECTION:60000}
+      validation-timeout: ${HIKARI_VALIDATION_TIMEOUT:3000}
       pool-name: scorestv-hikari
       auto-commit: false
-      validation-timeout: 3000
 
   jpa:
     hibernate:
@@ -61,10 +69,12 @@ spring:
       connect-timeout: 3000ms
       lettuce:
         pool:
-          max-active: 32
-          max-idle: 16
-          min-idle: 4
-          max-wait: 2000ms
+          # 10k user icin tepe Redis cagrisi ~5-10k/s. Lettuce async, ama
+          # peak'te min-idle dusuk olursa cold-connect cezasi var.
+          max-active: ${REDIS_MAX_ACTIVE:64}
+          max-idle: ${REDIS_MAX_IDLE:32}
+          min-idle: ${REDIS_MIN_IDLE:8}
+          max-wait: ${REDIS_MAX_WAIT:2000ms}
 
   cache:
     type: redis
@@ -79,15 +89,18 @@ spring:
       enabled: true
 
 # --- Embedded Tomcat ---
+# Virtual threads (spring.threads.virtual.enabled=true) acik iken Tomcat
+# thread sayisi artik istek concurrency limiti DEGIL — sadece carrier pool
+# tavani. Asagidaki degerler bol bol yetiyor, env ile override edilebilir.
 server:
   port: 8080
   tomcat:
     threads:
-      max: 400                  # 8 vCPU * 50 thread guvenli tavan
-      min-spare: 50
-    accept-count: 200
-    max-connections: 10000
-    connection-timeout: 20000
+      max: ${TOMCAT_THREADS_MAX:400}
+      min-spare: ${TOMCAT_THREADS_MIN:50}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:200}
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:10000}
+    connection-timeout: ${TOMCAT_CONNECTION_TIMEOUT:20000}
     accesslog:
       enabled: false            # nginx access log yeter
   compression:
