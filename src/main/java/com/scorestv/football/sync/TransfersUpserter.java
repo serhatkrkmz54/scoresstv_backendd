@@ -48,7 +48,10 @@ public class TransfersUpserter {
         int written = 0;
         int skipped = 0;
         for (TransferApiDto item : items) {
-            if (item == null || item.player() == null || item.player().id() == null) {
+            // player_name NOT NULL kolonu: API isim gondermezse hem transfers
+            // hem player master yazilamaz — bu oyuncunun tum transferlerini atla.
+            if (item == null || item.player() == null || item.player().id() == null
+                    || item.player().name() == null || item.player().name().isBlank()) {
                 continue;
             }
             Long playerId = item.player().id();

@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -41,6 +42,13 @@ public class ApiQuotaTracker {
     private final AtomicInteger minuteRemaining = new AtomicInteger(-1);
     private final AtomicReference<Instant> lastUpdatedAt = new AtomicReference<>();
     private final AtomicLong totalRequestsSinceStart = new AtomicLong(0);
+    /**
+     * 429 (rate limit) sonrasi global cooldown'in bitis ani (epoch ms).
+     * 0 = cooldown yok. {@link ApiFootballClient} bu sure boyunca tum cagrilari
+     * reddeder; boylece firewall blok riski olan "429 sonrasi hammer'lama"
+     * onlenir (bkz. api-football ratelimit dokumantasyonu).
+     */
+    private final AtomicLong cooldownUntilEpochMs = new AtomicLong(0);
 
     /**
      * Yanit header'larindan kotayi gunceller. Beklenmedik degerler (null, parse
@@ -99,6 +107,30 @@ public class ApiQuotaTracker {
 
     public long getTotalRequestsSinceStart() {
         return totalRequestsSinceStart.get();
+    }
+
+    /**
+     * 429 sonrasi global cooldown baslatir. Mevcut cooldown daha uzun ise
+     * kisaltilmaz (max korunur). null/sifir/negatif sure yok sayilir.
+     */
+    public void startCooldown(Duration duration) {
+        if (duration == null || duration.isZero() || duration.isNegative()) {
+            return;
+        }
+        long until = System.currentTimeMillis() + duration.toMillis();
+        cooldownUntilEpochMs.accumulateAndGet(until, Math::max);
+        log.warn("API-Football cooldown baslatildi: ~{} sn (429 rate limit)",
+                duration.toSeconds());
+    }
+
+    /** Cooldown bitene kadar kalan ms; aktif degilse 0. */
+    public long cooldownRemainingMillis() {
+        return Math.max(0L, cooldownUntilEpochMs.get() - System.currentTimeMillis());
+    }
+
+    /** Su an 429 cooldown'i aktif mi? */
+    public boolean isInCooldown() {
+        return cooldownRemainingMillis() > 0;
     }
 
     /**

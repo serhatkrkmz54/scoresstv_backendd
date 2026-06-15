@@ -36,6 +36,9 @@ public record FifaRankingResponse(
             BigDecimal prevPoints,
             Integer ratedMatches,
             /** Country tablosundan teamName ile join sonucu — null olabilir. */
-            String flagUrl
+            String flagUrl,
+            /** DB Country eslesmesi varsa /ulke linki icin slug; yoksa null
+             *  (frontend bu durumda link vermez). */
+            String countrySlug
     ) implements Serializable {}
 }

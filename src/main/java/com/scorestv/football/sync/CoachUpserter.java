@@ -6,10 +6,13 @@ import com.scorestv.football.domain.CoachCareerRepository;
 import com.scorestv.football.domain.CoachRepository;
 import com.scorestv.football.sync.dto.CoachApiDto;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Coach master tablo + career history upsert/replace.
@@ -32,7 +35,11 @@ public class CoachUpserter {
         this.careerRepository = careerRepository;
     }
 
-    @Transactional
+    // REQUIRES_NEW: her coach kendi tx'inde upsert edilir. Boylece bir coach'un
+    // hatasi (dup career, master race) cagiran CoachesSyncService.syncByTeam
+    // tx'ini KIRLETMEZ; aksi halde ilk hatadan sonra kalan tum coach'larin
+    // sorgulari 25P02 (current transaction is aborted) verirdi.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void upsert(CoachApiDto dto) {
         if (dto == null || dto.id() == null) {
             return;
@@ -69,8 +76,18 @@ public class CoachUpserter {
         // Career REPLACE
         careerRepository.deleteByCoachId(coach.getId());
         if (dto.career() != null) {
+            // uq_coach_career_unique (coach_id, team_id, start_date): API ayni
+            // anahtari kariyer listesinde tekrar dondurebiliyor. Dup'i parti
+            // icinde ele — yoksa ikinci insert 23505 verip tx'i kirletirdi.
+            Set<String> seen = new HashSet<>();
             for (CoachApiDto.CareerEntry entry : dto.career()) {
                 if (entry == null) continue;
+                Long teamId = entry.team() != null ? entry.team().id() : null;
+                LocalDate start = parseDate(entry.start());
+                if (teamId != null && start != null
+                        && !seen.add(teamId + "|" + start)) {
+                    continue;
+                }
                 CoachCareer c = new CoachCareer();
                 c.setCoach(coach);
                 if (entry.team() != null) {
@@ -78,7 +95,7 @@ public class CoachUpserter {
                     c.setTeamName(entry.team().name());
                     c.setTeamLogo(entry.team().logo());
                 }
-                c.setStartDate(parseDate(entry.start()));
+                c.setStartDate(start);
                 c.setEndDate(parseDate(entry.end()));
                 careerRepository.save(c);
             }

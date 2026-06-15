@@ -73,11 +73,16 @@ public class UefaCountryRankingSyncService {
                     || r.totalPoints() == null) {
                 continue;
             }
+            // country_name NOT NULL: iki isim alani da bossa uyeyi atla (yoksa 23502).
+            String countryName = info.displayName() != null
+                    ? info.displayName() : info.countryName();
+            if (countryName == null || countryName.isBlank()) {
+                continue;
+            }
 
             UefaCountryRanking entity = new UefaCountryRanking();
             entity.setCountryUefaId(info.id());
-            entity.setCountryName(info.displayName() != null
-                    ? info.displayName() : info.countryName());
+            entity.setCountryName(countryName);
             entity.setCountryCode(info.countryCode() != null ? info.countryCode() : "");
             entity.setLogoUrl(info.logoUrl());
             entity.setBigLogoUrl(info.bigLogoUrl());

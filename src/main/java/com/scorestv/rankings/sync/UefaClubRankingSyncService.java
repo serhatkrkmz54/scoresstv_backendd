@@ -82,11 +82,16 @@ public class UefaClubRankingSyncService {
                     || r.totalPoints() == null) {
                 continue;
             }
+            // club_name NOT NULL: iki isim alani da bossa uyeyi atla (yoksa 23502).
+            String clubName = info.displayName() != null
+                    ? info.displayName() : info.internationalName();
+            if (clubName == null || clubName.isBlank()) {
+                continue;
+            }
 
             UefaClubRanking entity = new UefaClubRanking();
             entity.setClubId(info.id());
-            entity.setClubName(info.displayName() != null
-                    ? info.displayName() : info.internationalName());
+            entity.setClubName(clubName);
             entity.setClubShortName(info.displayNameShort());
             entity.setClubOfficialName(info.displayOfficialName());
             entity.setTeamCode(info.teamCode() != null

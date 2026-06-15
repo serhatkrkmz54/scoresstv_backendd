@@ -11,6 +11,10 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
+
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 
 import java.time.Duration;
 import java.util.Map;
@@ -66,6 +70,8 @@ public class ApiFootballClient {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(15);
+    /** Retry-After header'i gelmezse 429 sonrasi uygulanacak varsayilan cooldown. */
+    private static final Duration DEFAULT_429_COOLDOWN = Duration.ofSeconds(10);
 
     private final RestClient restClient;
     private final boolean keyConfigured;
@@ -193,6 +199,15 @@ public class ApiFootballClient {
             throw ApiFootballException.notConfigured(
                     "Futbol veri saglayicisi yapilandirilmamis.");
         }
+        // 429 sonrasi global cooldown aktifse istegi HEMEN reddet — agi hic
+        // dokunma. Boylece "429 aldiktan sonra hammer'lama → IP/key blok"
+        // riski engellenir (api-football ratelimit dokumantasyonu).
+        long cooldownMs = quotaTracker.cooldownRemainingMillis();
+        if (cooldownMs > 0) {
+            throw ApiFootballException.quotaExceeded(
+                    "Futbol veri saglayicisi rate limit cooldown aktif ("
+                            + cooldownMs + " ms kaldi).");
+        }
         acquireToken(priority);
 
         ResponseEntity<ApiFootballResponse<T>> entity;
@@ -211,6 +226,22 @@ public class ApiFootballClient {
                     })
                     .retrieve()
                     .toEntity(typeRef);
+        } catch (RestClientResponseException ex) {
+            // HTTP hata statusu (4xx/5xx). 429'u OZEL ele: cooldown baslat ve
+            // quotaExceeded firlat ki SyncQueueWorker rate-limit backoff'una dussun.
+            if (ex.getStatusCode().value() == 429) {
+                Duration retryAfter = parseRetryAfter(ex.getResponseHeaders());
+                quotaTracker.startCooldown(
+                        retryAfter != null ? retryAfter : DEFAULT_429_COOLDOWN);
+                log.warn("API-Football 429 (rate limit): path={} retryAfter={}",
+                        path, retryAfter);
+                throw ApiFootballException.quotaExceeded(
+                        "Futbol veri saglayicisi rate limit (429 Too Many Requests).");
+            }
+            log.error("API-Football HTTP hata: path={} status={} hata={}",
+                    path, ex.getStatusCode().value(), ex.getMessage());
+            throw ApiFootballException.upstream(
+                    "Futbol veri saglayicisi istegi reddetti.");
         } catch (RestClientException ex) {
             log.error("API-Football cagrisi basarisiz: path={} hata={}", path, ex.getMessage());
             throw ApiFootballException.upstream(
@@ -301,10 +332,41 @@ public class ApiFootballClient {
         String lower = detail.toLowerCase();
         if (lower.contains("limit") || lower.contains("quota") || lower.contains("rate")
                 || lower.contains("maximum")) {
+            // HTTP 200 + body errors.rateLimit durumu — cooldown'i burada da baslat.
+            quotaTracker.startCooldown(DEFAULT_429_COOLDOWN);
             return ApiFootballException.quotaExceeded(
                     "Futbol veri saglayicisinin istek kotasi doldu. Lutfen daha sonra tekrar deneyin.");
         }
         return ApiFootballException.upstream(
                 "Futbol veri saglayicisi istegi reddetti.");
+    }
+
+    /**
+     * {@code Retry-After} header'ini {@link Duration}'a cevirir. Hem saniye
+     * (orn. {@code "120"}) hem HTTP-date formatini destekler. Yok/parse
+     * edilemezse {@code null} doner.
+     */
+    private static Duration parseRetryAfter(HttpHeaders headers) {
+        if (headers == null) {
+            return null;
+        }
+        String value = headers.getFirst("Retry-After");
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        value = value.trim();
+        try {
+            long seconds = Long.parseLong(value);
+            return seconds > 0 ? Duration.ofSeconds(seconds) : null;
+        } catch (NumberFormatException ignore) {
+            try {
+                ZonedDateTime when = ZonedDateTime.parse(
+                        value, DateTimeFormatter.RFC_1123_DATE_TIME);
+                Duration d = Duration.between(ZonedDateTime.now(), when);
+                return d.isNegative() ? null : d;
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
     }
 }

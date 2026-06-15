@@ -77,6 +77,10 @@ public class SecurityConfig {
                 // Yorum listesi — public okuma (POST/DELETE auth gerekli;
                 // default authenticated() onlari koruyor).
                 .requestMatchers(HttpMethod.GET, "/api/v1/comments/**").permitAll()
+                // Iletisim formu — public POST. Admin listeleme
+                // /api/v1/admin/contact ise anyRequest().authenticated() +
+                // @PreAuthorize("hasRole('ADMIN')") ile korunur.
+                .requestMatchers(HttpMethod.POST, "/api/v1/contact").permitAll()
                 // Admin SPA — statik dosyalar + SPA route'lari herkese acik
                 // (auth UI tarafinda yapilir, API endpointleri zaten JWT korumali).
                 .requestMatchers("/admin", "/admin/**").permitAll()

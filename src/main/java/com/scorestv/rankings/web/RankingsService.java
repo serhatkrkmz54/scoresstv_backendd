@@ -1,5 +1,6 @@
 package com.scorestv.rankings.web;
 
+import com.scorestv.common.SlugUtil;
 import com.scorestv.football.FootballCacheNames;
 import com.scorestv.football.domain.Country;
 import com.scorestv.football.domain.CountryRepository;
@@ -87,11 +88,16 @@ public class RankingsService {
         Map<String, String> flagByName = new HashMap<>();
         Map<String, String> iso2ByName = new HashMap<>();
         Map<String, String> nameTrByName = new HashMap<>();
+        // DB Country eslesmesi olan satirlar icin /ulke linki slug'i.
+        Map<String, String> slugByName = new HashMap<>();
         for (Country c : countryRepository.findAll()) {
             if (c.getName() == null) continue;
             String key = c.getName().toLowerCase(Locale.ROOT);
             if (c.getFlagUrl() != null) flagByName.put(key, c.getFlagUrl());
             if (c.getCode() != null) iso2ByName.put(key, c.getCode());
+            if (c.getId() != null) {
+                slugByName.put(key, SlugUtil.slugify(c.getName()) + "-" + c.getId());
+            }
             if (turkish && c.getNameTr() != null && !c.getNameTr().isBlank()) {
                 nameTrByName.put(key, c.getNameTr());
             }
@@ -128,6 +134,8 @@ public class RankingsService {
                     String displayName = turkish && key != null
                             ? nameTrByName.getOrDefault(key, r.getTeamName())
                             : r.getTeamName();
+                    // DB Country eslesmesi varsa /ulke linki slug'i; yoksa null.
+                    String countrySlug = key != null ? slugByName.get(key) : null;
                     return new FifaRankingResponse.Row(
                             r.getRank(),
                             r.getPrevRank(),
@@ -140,7 +148,8 @@ public class RankingsService {
                             r.getTotalPoints(),
                             r.getPrevPoints(),
                             r.getRatedMatches(),
-                            flag);
+                            flag,
+                            countrySlug);
                 })
                 .collect(Collectors.toList());
 

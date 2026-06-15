@@ -13,8 +13,10 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Bir kocun kupalarini API'den ceker + REPLACE pattern ile DB'ye yazar.
@@ -53,21 +55,24 @@ public class CoachTrophiesSyncService {
         }
         Coach coachRef = coachRepository.getReferenceById(coachId);
         int written = 0;
+        Set<String> seen = new HashSet<>();
         for (TrophyApiDto item : items) {
             if (item == null) continue;
+            String league = item.league() != null ? item.league() : "Unknown";
+            // uq_coach_trophies_unique (coach_id, league, season, place): API
+            // ayni kupayi tekrar dondurebiliyor. Dup'i parti icinde ele — yoksa
+            // ikinci insert 23505 verip tx'i kirletir, kalan satirlar 25P02 duser.
+            if (!seen.add(league + "|" + item.season() + "|" + item.place())) {
+                continue;
+            }
             CoachTrophy t = new CoachTrophy();
             t.setCoach(coachRef);
-            t.setLeague(item.league() != null ? item.league() : "Unknown");
+            t.setLeague(league);
             t.setCountry(item.country());
             t.setSeason(item.season());
             t.setPlace(item.place());
-            try {
-                trophyRepository.save(t);
-                written++;
-            } catch (RuntimeException ex) {
-                log.debug("Trophy duplicate (UNIQUE): coachId={} league={} season={} place={}",
-                        coachId, item.league(), item.season(), item.place());
-            }
+            trophyRepository.save(t);
+            written++;
         }
         log.info("Coach trophies sync: coachId={} — {} kupa yazildi", coachId, written);
         return written;

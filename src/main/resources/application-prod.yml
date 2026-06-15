@@ -83,6 +83,10 @@ spring:
     time-zone: ${SPRING_JACKSON_TIME_ZONE:Europe/Istanbul}
     deserialization:
       fail-on-unknown-properties: false
+      # API-Football bazi endpoint'lerde (orn. /teams/statistics) veri yoksa
+      # obje yerine bos dizi ("response": []) doner. Bu bayrak [] -> null
+      # cevirir; aksi halde Jackson objeye map edemeyip RestClientException atar.
+      accept-empty-array-as-null-object: true
 
   threads:
     virtual:

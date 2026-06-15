@@ -60,7 +60,9 @@ public class FixtureEventsUpserter {
 
         int written = 0;
         for (EventApiDto item : items) {
-            if (item == null || item.time() == null || item.time().elapsed() == null) {
+            // type NOT NULL kolonu: API tipi bos gonderirse insert 23502 verir.
+            if (item == null || item.type() == null
+                    || item.time() == null || item.time().elapsed() == null) {
                 continue;
             }
             FixtureEvent event = new FixtureEvent();

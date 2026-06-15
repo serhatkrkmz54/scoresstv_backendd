@@ -53,7 +53,10 @@ public class TopPlayersUpserter {
         int rank = 1;
         int written = 0;
         for (TopPlayerApiDto item : items) {
-            if (item == null || item.player() == null || item.player().id() == null) {
+            // player_name NOT NULL kolonu: isim bos gelirse insert 23502 verip
+            // @Transactional replace tx'ini kirletir, kalan satirlar 25P02 duser.
+            if (item == null || item.player() == null || item.player().id() == null
+                    || item.player().name() == null || item.player().name().isBlank()) {
                 continue;
             }
             LeagueTopPlayer row = toEntity(leagueRef, season, category, rank, item);

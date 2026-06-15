@@ -43,38 +43,51 @@ public class PlayerUpserter {
     private final PlayerRepository playerRepository;
     private final ApplicationEventPublisher events;
     private final SyncQueueService queueService;
+    /**
+     * Kendine referans — {@link #doUpsert}'i Spring proxy uzerinden cagirmak
+     * icin gerekli. Self-invocation'da @Transactional(REQUIRES_NEW) devreye
+     * GIRMEZ; proxy uzerinden cagirinca girer. @Lazy ile kurulum-sirasi
+     * dongusu kirilir.
+     */
+    private final PlayerUpserter self;
 
     public PlayerUpserter(PlayerRepository playerRepository,
                           ApplicationEventPublisher events,
-                          @Lazy SyncQueueService queueService) {
+                          @Lazy SyncQueueService queueService,
+                          @Lazy PlayerUpserter self) {
         this.playerRepository = playerRepository;
         this.events = events;
         this.queueService = queueService;
+        this.self = self;
     }
 
     /**
      * Bir oyuncuyu upsert eder. ID null veya isim null ise atlanir.
      *
-     * <p><b>Race-safe:</b> REQUIRES_NEW ile ayri tx — paralel worker'lar ayni
-     * playerId icin yarisirsa bir tanesi DataIntegrityViolation alir; outer
-     * (player_season_stats yazan) tx etkilenmez. Yutulan exception sadece
-     * "another tx wrote this player first" durumu — veri kaybi yok.
+     * <p><b>Race-safe:</b> asil yazma {@link #doUpsert} icinde REQUIRES_NEW ile
+     * AYRI bir tx'te yapilir; bu metot {@code self} proxy'si uzerinden cagirir
+     * ki REQUIRES_NEW gercekten devreye girsin. Paralel worker'lar ayni
+     * playerId icin yarisirsa biri DataIntegrityViolation alir. Bu istisna
+     * REQUIRES_NEW SINIRININ DISINDA yakalanir — o tx temiz rollback olur,
+     * cagiran (outer) tx etkilenmez. Yutulan exception sadece "baska tx bu
+     * player'i once yazdi" durumudur, veri kaybi yoktur.
+     *
+     * <p><b>Not (eski hata):</b> onceki surum istisnayi yeni tx'in ICINDE
+     * yakalayip ayni — artik abort olmus — tx'te tekrar deniyordu. Postgres
+     * abort durumdaki bir tx'te her sorguya {@code 25P02 (current transaction
+     * is aborted)} doner; loglardaki 25P02 seli buradan geliyordu. Tekrar
+     * deneme kaldirildi.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void upsert(Long playerId, String playerName, String photoUrl) {
         if (playerId == null || playerName == null || playerName.isBlank()) {
             return;
         }
         try {
-            doUpsert(playerId, playerName, photoUrl);
+            self.doUpsert(playerId, playerName, photoUrl);
         } catch (DataIntegrityViolationException dup) {
-            // Paralel race — baska worker once yazdi. Player'i tek seferlik
-            // refresh edip foto URL'sini guncellemeye calis (best-effort).
-            try {
-                doUpsert(playerId, playerName, photoUrl);
-            } catch (DataIntegrityViolationException ignored) {
-                // Vazgec — bir sonraki sync turunda hidratasyon yine denenecek.
-            }
+            // Paralel race — baska worker ayni playerId'yi once yazdi. REQUIRES_NEW
+            // tx'i temiz rollback oldu; yapilacak bir sey yok. Bir sonraki sync
+            // turunda (veya saatlik hidratasyon cron'unda) yine denenir.
         }
     }
 

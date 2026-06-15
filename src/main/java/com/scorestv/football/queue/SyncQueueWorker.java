@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -110,6 +111,11 @@ public class SyncQueueWorker {
             fixedDelayString = "${scorestv.football.sync.queue-worker-delay-ms:2000}",
             timeUnit = TimeUnit.MILLISECONDS)
     public void tick() {
+        // 429 cooldown aktifse hic is alma — kisa rate-limit penceresinde job'lari
+        // bos yere 5dk backoff'a atmaktansa worker'i tamamen duraklat.
+        if (quotaTracker.isInCooldown()) {
+            return;
+        }
         int maxPriority = maxAllowedPriority();
         if (maxPriority <= 0) {
             // Kota tukenmis — tamamen dur
@@ -193,7 +199,11 @@ public class SyncQueueWorker {
     }
 
     private static boolean isRateLimit(ApiException ex) {
-        // ApiFootballClient'in firlattigi: HTTP 429 veya "rate limit" lafzi
+        // Once status: ApiFootballException.quotaExceeded HTTP 429 tasir — mesaj
+        // sanitize edilmis olsa bile bu yakalanir (asil hatanin kaynagi buydu).
+        if (ex.getStatus() == HttpStatus.TOO_MANY_REQUESTS) {
+            return true;
+        }
         if (ex.getMessage() == null) return false;
         String msg = ex.getMessage().toLowerCase();
         return msg.contains("rate limit") || msg.contains("too many requests")
