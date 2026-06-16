@@ -47,15 +47,18 @@ public class CommentService {
     private final FixtureCommentLikeRepository likeRepository;
     private final FixtureRepository fixtureRepository;
     private final UserRepository userRepository;
+    private final CommentWordFilter wordFilter;
 
     public CommentService(FixtureCommentRepository commentRepository,
                           FixtureCommentLikeRepository likeRepository,
                           FixtureRepository fixtureRepository,
-                          UserRepository userRepository) {
+                          UserRepository userRepository,
+                          CommentWordFilter wordFilter) {
         this.commentRepository = commentRepository;
         this.likeRepository = likeRepository;
         this.fixtureRepository = fixtureRepository;
         this.userRepository = userRepository;
+        this.wordFilter = wordFilter;
     }
 
     public enum SortMode { NEWEST, POPULAR }
@@ -148,6 +151,11 @@ public class CommentService {
     @Transactional
     public CommentView create(Long fixtureId, Long userId,
                               CommentCreateRequest req) {
+        // Kelime filtresi — yasakli ifade varsa yorum yayinlanmaz (web + mobil).
+        if (wordFilter.containsBanned(req.content())) {
+            throw ApiException.badRequest(
+                    "Yorumunuz uygunsuz ifade içerdiği için yayınlanamadı.");
+        }
         Fixture fixture = fixtureRepository.findById(fixtureId)
                 .orElseThrow(() -> ApiException.notFound("Mac bulunamadi."));
         User user = userRepository.findById(userId)
