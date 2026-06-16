@@ -17,13 +17,16 @@ public interface FixtureCommentRepository extends JpaRepository<FixtureComment, 
     @Query("""
             SELECT c FROM FixtureComment c
             JOIN FETCH c.user u
-            WHERE c.fixture.id = :fixtureId
+            WHERE c.matchId = :matchId
+              AND c.sport = :sport
               AND c.deleted = false
               AND c.parent IS NULL
             ORDER BY c.createdAt DESC
             """)
     Slice<FixtureComment> findTopLevelNewest(
-            @Param("fixtureId") Long fixtureId, Pageable pageable);
+            @Param("matchId") Long matchId,
+            @Param("sport") String sport,
+            Pageable pageable);
 
     /**
      * Top-level yorumlari begeni sayisina gore (en cok begenilen once); tie
@@ -33,14 +36,17 @@ public interface FixtureCommentRepository extends JpaRepository<FixtureComment, 
             SELECT c FROM FixtureComment c
             JOIN FETCH c.user u
             LEFT JOIN FixtureCommentLike l ON l.comment.id = c.id
-            WHERE c.fixture.id = :fixtureId
+            WHERE c.matchId = :matchId
+              AND c.sport = :sport
               AND c.deleted = false
               AND c.parent IS NULL
             GROUP BY c.id, u.id
             ORDER BY COUNT(l) DESC, c.createdAt DESC
             """)
     Slice<FixtureComment> findTopLevelPopular(
-            @Param("fixtureId") Long fixtureId, Pageable pageable);
+            @Param("matchId") Long matchId,
+            @Param("sport") String sport,
+            Pageable pageable);
 
     /**
      * Verilen parent id'lerin altindaki tum yanitlari getir — en eski once
@@ -60,7 +66,7 @@ public interface FixtureCommentRepository extends JpaRepository<FixtureComment, 
      * Macin toplam aktif yorum sayisi (top-level + replies).
      * Tab badge gostergesi icin.
      */
-    long countByFixtureIdAndDeletedFalse(Long fixtureId);
+    long countByMatchIdAndSportAndDeletedFalse(Long matchId, String sport);
 
     /**
      * Verilen yorum id listesinin her birine kullanicinin begeni atmis olup

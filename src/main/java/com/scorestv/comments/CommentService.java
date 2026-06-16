@@ -4,8 +4,6 @@ import com.scorestv.comments.dto.CommentCreateRequest;
 import com.scorestv.comments.dto.CommentPageResponse;
 import com.scorestv.comments.dto.CommentView;
 import com.scorestv.common.ApiException;
-import com.scorestv.football.domain.Fixture;
-import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.user.Role;
 import com.scorestv.user.User;
 import com.scorestv.user.UserRepository;
@@ -45,18 +43,15 @@ public class CommentService {
 
     private final FixtureCommentRepository commentRepository;
     private final FixtureCommentLikeRepository likeRepository;
-    private final FixtureRepository fixtureRepository;
     private final UserRepository userRepository;
     private final CommentWordFilter wordFilter;
 
     public CommentService(FixtureCommentRepository commentRepository,
                           FixtureCommentLikeRepository likeRepository,
-                          FixtureRepository fixtureRepository,
                           UserRepository userRepository,
                           CommentWordFilter wordFilter) {
         this.commentRepository = commentRepository;
         this.likeRepository = likeRepository;
-        this.fixtureRepository = fixtureRepository;
         this.userRepository = userRepository;
         this.wordFilter = wordFilter;
     }
@@ -68,19 +63,19 @@ public class CommentService {
      * Anonim icin currentUserId null verilir.
      */
     @Transactional(readOnly = true)
-    public CommentPageResponse list(Long fixtureId, Long currentUserId,
+    public CommentPageResponse list(Long matchId, String sport, Long currentUserId,
                                     int page, int size, SortMode sort) {
         Slice<FixtureComment> slice = (sort == SortMode.POPULAR)
                 ? commentRepository.findTopLevelPopular(
-                        fixtureId, PageRequest.of(page, size))
+                        matchId, sport, PageRequest.of(page, size))
                 : commentRepository.findTopLevelNewest(
-                        fixtureId, PageRequest.of(page, size, Sort.unsorted()));
+                        matchId, sport, PageRequest.of(page, size, Sort.unsorted()));
 
         List<FixtureComment> topLevels = slice.getContent();
         if (topLevels.isEmpty()) {
             return new CommentPageResponse(
                     List.of(),
-                    commentRepository.countByFixtureIdAndDeletedFalse(fixtureId),
+                    commentRepository.countByMatchIdAndSportAndDeletedFalse(matchId, sport),
                     false);
         }
 
@@ -119,7 +114,8 @@ public class CommentService {
                 })
                 .toList();
 
-        long totalCount = commentRepository.countByFixtureIdAndDeletedFalse(fixtureId);
+        long totalCount =
+                commentRepository.countByMatchIdAndSportAndDeletedFalse(matchId, sport);
         return new CommentPageResponse(items, totalCount, slice.hasNext());
     }
 
@@ -149,20 +145,19 @@ public class CommentService {
      * thread korunur.
      */
     @Transactional
-    public CommentView create(Long fixtureId, Long userId,
+    public CommentView create(Long matchId, String sport, Long userId,
                               CommentCreateRequest req) {
         // Kelime filtresi — yasakli ifade varsa yorum yayinlanmaz (web + mobil).
         if (wordFilter.containsBanned(req.content())) {
             throw ApiException.badRequest(
                     "Yorumunuz uygunsuz ifade içerdiği için yayınlanamadı.");
         }
-        Fixture fixture = fixtureRepository.findById(fixtureId)
-                .orElseThrow(() -> ApiException.notFound("Mac bulunamadi."));
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ApiException.unauthorized("Kullanici bulunamadi."));
 
         FixtureComment c = new FixtureComment();
-        c.setFixture(fixture);
+        c.setMatchId(matchId);
+        c.setSport(sport);
         c.setUser(user);
         c.setContent(req.content().trim());
 

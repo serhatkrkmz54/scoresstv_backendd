@@ -1,6 +1,5 @@
 package com.scorestv.comments;
 
-import com.scorestv.football.domain.Fixture;
 import com.scorestv.user.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -34,9 +33,17 @@ public class FixtureComment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "fixture_id", nullable = false)
-    private Fixture fixture;
+    /**
+     * Maç id'si — futbolda Fixture id, basketbolda BasketballGame id. Artık
+     * doğrudan Fixture'a FK DEĞİL (sport ile birlikte hangi maça ait olduğu
+     * belirlenir). Kolon adı geriye uyum için "fixture_id" kaldı.
+     */
+    @Column(name = "fixture_id", nullable = false)
+    private Long matchId;
+
+    /** Hangi spor: "FOOTBALL" veya "BASKETBALL". */
+    @Column(name = "sport", nullable = false, length = 20)
+    private String sport;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)

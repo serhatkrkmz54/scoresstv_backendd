@@ -43,29 +43,55 @@ public class PublicCommentController {
      * @param sort "newest" (default) veya "popular" (en cok begenilen once)
      */
     @GetMapping("/fixtures/{fixtureId}")
-    public CommentPageResponse list(
+    public CommentPageResponse listFootball(
             @PathVariable Long fixtureId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "30") int size,
             @RequestParam(defaultValue = "newest") String sort,
             @AuthenticationPrincipal CurrentUser currentUser) {
+        return doList("FOOTBALL", fixtureId, page, size, sort, currentUser);
+    }
+
+    /** Bir basketbol macinin yorumlari. */
+    @GetMapping("/basketball/{gameId}")
+    public CommentPageResponse listBasketball(
+            @PathVariable Long gameId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size,
+            @RequestParam(defaultValue = "newest") String sort,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        return doList("BASKETBALL", gameId, page, size, sort, currentUser);
+    }
+
+    private CommentPageResponse doList(String sport, Long matchId, int page, int size,
+                                       String sort, CurrentUser currentUser) {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(size, DEFAULT_PAGE_SIZE * 3));
         Long userId = currentUser != null ? currentUser.id() : null;
         CommentService.SortMode mode = "popular".equalsIgnoreCase(sort)
                 ? CommentService.SortMode.POPULAR
                 : CommentService.SortMode.NEWEST;
-        return service.list(fixtureId, userId, safePage, safeSize, mode);
+        return service.list(matchId, sport, userId, safePage, safeSize, mode);
     }
 
-    /** Yeni yorum olustur (auth gerekli). */
+    /** Yeni futbol yorumu (auth gerekli). */
     @PostMapping("/fixtures/{fixtureId}")
     @ResponseStatus(HttpStatus.CREATED)
-    public CommentView create(
+    public CommentView createFootball(
             @PathVariable Long fixtureId,
             @Valid @RequestBody CommentCreateRequest req,
             @AuthenticationPrincipal CurrentUser currentUser) {
-        return service.create(fixtureId, currentUser.id(), req);
+        return service.create(fixtureId, "FOOTBALL", currentUser.id(), req);
+    }
+
+    /** Yeni basketbol yorumu (auth gerekli). */
+    @PostMapping("/basketball/{gameId}")
+    @ResponseStatus(HttpStatus.CREATED)
+    public CommentView createBasketball(
+            @PathVariable Long gameId,
+            @Valid @RequestBody CommentCreateRequest req,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        return service.create(gameId, "BASKETBALL", currentUser.id(), req);
     }
 
     /** Yorum sil (sahibi veya admin, auth gerekli). */
