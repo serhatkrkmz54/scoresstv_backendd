@@ -13,12 +13,16 @@ public record UserResponse(
         Role role,
         LocalDate birthDate,
         Integer age,
-        String country
+        String country,
+        // Yerel sifresi var mi? Google ile olusturulan hesaplarda password null
+        // olur; istemci "Sifre Degistir" bolumunu buna gore gosterir/gizler.
+        boolean hasPassword
 ) {
     public static UserResponse from(User user) {
         Integer age = user.getBirthDate() != null
                 ? Period.between(user.getBirthDate(), LocalDate.now()).getYears()
                 : null;
+        boolean hasPassword = user.getPassword() != null && !user.getPassword().isBlank();
         return new UserResponse(
                 user.getId(),
                 user.getEmail(),
@@ -26,7 +30,8 @@ public record UserResponse(
                 user.getRole(),
                 user.getBirthDate(),
                 age,
-                user.getCountry()
+                user.getCountry(),
+                hasPassword
         );
     }
 }
