@@ -163,6 +163,19 @@ scorestv:
     reference-cron: ${BASKETBALL_REFERENCE_CRON:0 0 3 * * 1}
     # Logo/bayrak aynalama (CDN) cron — saatlik :15.
     image-mirror-cron: ${BASKETBALL_IMAGE_MIRROR_CRON:0 15 * * * *}
+  # ============================================================
+  # Highlightly maç özeti/highlight entegrasyonu (soccer.highlightly.net).
+  # Anahtar yalnız sunucuda (x-rapidapi-key). enabled=false iken hiç çağrı yok.
+  # Açmak için: HIGHLIGHTLY_ENABLED=true + HIGHLIGHTLY_API_KEY=...
+  # ============================================================
+  highlightly:
+    enabled: ${HIGHLIGHTLY_ENABLED:true}
+    base-url: ${HIGHLIGHTLY_BASE_URL:https://soccer.highlightly.net}
+    api-key: ${HIGHLIGHTLY_API_KEY:5ea9656d-99ff-4995-9188-c98969cae270}
+    timezone: ${HIGHLIGHTLY_TIMEZONE:Etc/UTC}
+    limit: ${HIGHLIGHTLY_LIMIT:8}
+    cache-ttl-minutes: ${HIGHLIGHTLY_CACHE_TTL:360}
+    empty-cache-ttl-minutes: ${HIGHLIGHTLY_EMPTY_CACHE_TTL:30}
   api-football:
     base-url: https://v3.football.api-sports.io
     # Priority-aware saniye-bazli token bucket. API-Football'un Custom plani

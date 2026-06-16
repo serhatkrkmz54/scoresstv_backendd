@@ -77,6 +77,8 @@ public class SecurityConfig {
                 // Yorum listesi — public okuma (POST/DELETE auth gerekli;
                 // default authenticated() onlari koruyor).
                 .requestMatchers(HttpMethod.GET, "/api/v1/comments/**").permitAll()
+                // Maç highlight/özet — public okuma (Highlightly proxy).
+                .requestMatchers(HttpMethod.GET, "/api/v1/highlights/**").permitAll()
                 // Iletisim formu — public POST. Admin listeleme
                 // /api/v1/admin/contact ise anyRequest().authenticated() +
                 // @PreAuthorize("hasRole('ADMIN')") ile korunur.
