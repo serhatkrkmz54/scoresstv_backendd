@@ -22,6 +22,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * Highlightly'den highlight'ları çeker. Yalnızca BİTEN maçlar için sonuç döner
  * (highlight'lar maç sonrası gelir). Free plan kotasını korumak için fixture
  * bazında TTL cache uygulanır.
+ *
+ * <p>Geo: Highlightly bir maç için birden çok kaynaktan (youtube, streamin...)
+ * highlight döner; bazıları belli ülkelerde coğrafi engelli olur. Ham liste +
+ * geo verisi (allowed/blocked) ülkeden bağımsız cache'lenir; isteğe göre
+ * kullanıcının ülkesinde OYNAYABİLECEĞİ highlight'lar {@code embeddable=true}
+ * işaretlenip öne sıralanır. Böylece istemci "ülkenizde kullanılamıyor" iframe'i
+ * yerine oynayabilir kaynağı gömer, engellileri yedeğe (tarayıcıda aç) düşürür.
  */
 @Service
 public class HighlightsService {
@@ -43,8 +50,61 @@ public class HighlightsService {
         this.props = props;
     }
 
+    /**
+     * Bir fixture'ın highlight'larını, isteği yapan kullanıcının ülkesine göre
+     * gömülebilirlik hesaplayarak döner. {@code country} ISO-3166 alfa-2
+     * (ör. "TR"); null/boş olabilir.
+     */
     @Transactional(readOnly = true)
-    public List<HighlightView> forFixture(Long fixtureId) {
+    public List<HighlightView> forFixture(Long fixtureId, String country) {
+        List<GeoHighlight> base = baseList(fixtureId);
+        if (base.isEmpty()) return List.of();
+
+        String cc = (country == null || country.isBlank())
+                ? null : country.trim().toUpperCase();
+
+        List<HighlightView> out = new ArrayList<>(base.size());
+        for (GeoHighlight g : base) {
+            boolean embeddable = g.baseEmbeddable() && canPlay(g.allowed(), g.blocked(), cc);
+            out.add(HighlightView.of(g.dto(), embeddable));
+        }
+        // Oynayabilir (embeddable) olanları öne al — sıralama kararlı.
+        out.sort((a, b) -> Boolean.compare(b.embeddable(), a.embeddable()));
+        return out;
+    }
+
+    /**
+     * Kullanıcının ülkesinde bu highlight oynar mı?
+     * <ul>
+     *   <li>Ülke biliniyorsa: engelli listesinde değil VE (izinli liste boş ya da
+     *       izinli listede) ise oynar.</li>
+     *   <li>Ülke bilinmiyorsa: yalnız kısıtsız (allowed/blocked boş — her yerde
+     *       açık) olanları oynar say. Böylece "ülkenizde yok" iframe'i çıkmaz.</li>
+     * </ul>
+     */
+    private static boolean canPlay(List<String> allowed, List<String> blocked, String cc) {
+        boolean hasAllowed = allowed != null && !allowed.isEmpty();
+        boolean hasBlocked = blocked != null && !blocked.isEmpty();
+        if (cc == null) {
+            return !hasAllowed && !hasBlocked;
+        }
+        if (hasBlocked && contains(blocked, cc)) return false;
+        if (hasAllowed && !contains(allowed, cc)) return false;
+        return true;
+    }
+
+    private static boolean contains(List<String> list, String cc) {
+        for (String s : list) {
+            if (s != null && cc.equalsIgnoreCase(s.trim())) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Ülkeden bağımsız ham liste (her highlight için base embeddable + geo
+     * allowed/blocked). Cache'li — geo çağrıları yalnız cache dolarken yapılır.
+     */
+    private List<GeoHighlight> baseList(Long fixtureId) {
         if (!props.enabled()) return List.of();
 
         CacheEntry cached = cache.get(fixtureId);
@@ -71,39 +131,47 @@ public class HighlightsService {
                 .ofInstant(f.getKickoffAt(), ZoneId.of(props.timezone()))
                 .toString(); // YYYY-MM-DD
 
-        List<HighlightView> views = new ArrayList<>();
+        List<GeoHighlight> items = new ArrayList<>();
         for (HighlightlyHighlightDto d : client.fetchHighlights(date, home, away)) {
             if (d.url() == null || d.url().isBlank()) continue;
 
-            boolean embeddable = false;
+            boolean baseEmbeddable = false;
+            List<String> allowed = List.of();
             List<String> blocked = List.of();
             // Yalnız embedUrl'i olanlar için geo-restriction sorgula (ücretli plan).
             if (d.embedUrl() != null && !d.embedUrl().isBlank() && d.id() != null) {
                 HighlightlyGeoRestrictionDto geo = client.fetchGeoRestriction(d.id());
                 if (geo != null) {
-                    embeddable = Boolean.TRUE.equals(geo.embeddable());
+                    baseEmbeddable = Boolean.TRUE.equals(geo.embeddable());
+                    allowed = geo.allowedCountries() != null
+                            ? geo.allowedCountries() : List.of();
                     blocked = geo.blockedCountries() != null
                             ? geo.blockedCountries() : List.of();
                 } else {
-                    // geo çağrısı yapılamadı — embedUrl var, iyimser gömülebilir
-                    // say; oynatıcı + 'tarayıcıda aç' yedeği geo'yu yine halleder.
-                    embeddable = true;
+                    // geo çağrısı yapılamadı — embedUrl var, gömülebilir say ama
+                    // kısıtsız olarak (allowed/blocked boş). Ülke bilinmezse yine
+                    // güvenli; biliniyorsa kısıt yok kabul edilir.
+                    baseEmbeddable = true;
                 }
             }
-            views.add(HighlightView.of(d, embeddable, blocked));
+            items.add(new GeoHighlight(d, baseEmbeddable, allowed, blocked));
         }
 
-        return putAndReturn(fixtureId, views);
+        return putAndReturn(fixtureId, items);
     }
 
-    private List<HighlightView> putAndReturn(Long fixtureId, List<HighlightView> views) {
-        long ttlMin = views.isEmpty()
+    private List<GeoHighlight> putAndReturn(Long fixtureId, List<GeoHighlight> items) {
+        long ttlMin = items.isEmpty()
                 ? props.emptyCacheTtlMinutes()
                 : props.cacheTtlMinutes();
         cache.put(fixtureId, new CacheEntry(
-                views, Instant.now().plus(Duration.ofMinutes(ttlMin))));
-        return views;
+                items, Instant.now().plus(Duration.ofMinutes(ttlMin))));
+        return items;
     }
 
-    private record CacheEntry(List<HighlightView> data, Instant expiresAt) {}
+    /** Ülkeden bağımsız ham highlight + geo verisi (cache içi). */
+    private record GeoHighlight(HighlightlyHighlightDto dto, boolean baseEmbeddable,
+                                List<String> allowed, List<String> blocked) {}
+
+    private record CacheEntry(List<GeoHighlight> data, Instant expiresAt) {}
 }

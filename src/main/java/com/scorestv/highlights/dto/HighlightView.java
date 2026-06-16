@@ -1,14 +1,12 @@
 package com.scorestv.highlights.dto;
 
-import java.util.List;
-
 /**
  * İstemcilere dönen sade highlight modeli.
  *
- * <p>{@code embeddable}: embedUrl uygulama içinde (iframe/WebView) gömülebilir
- * mi (ücretli plan geo-restrictions ile belirlenir; çağrı yapılamazsa embedUrl
- * varsa iyimser true). {@code blockedCountries}: gömme/izleme engelli ülke
- * kodları (istemci isterse kullanıcı ülkesine göre yedeğe düşebilir).
+ * <p>{@code embeddable}: bu highlight'ın embedUrl'i, isteği yapan kullanıcının
+ * ÜLKESİNDE uygulama içinde (iframe/WebView) oynatılabilir mi — backend
+ * geo-restrictions (allowed/blocked) + kullanıcı ülkesi ile hesaplar. false ise
+ * istemci küçük-resim/"tarayıcıda aç" yedeğine düşer.
  */
 public record HighlightView(
         Long id,
@@ -18,16 +16,11 @@ public record HighlightView(
         String imgUrl,
         String source,
         String type,
-        boolean embeddable,
-        List<String> blockedCountries
+        boolean embeddable
 ) {
-    public static HighlightView of(HighlightlyHighlightDto d,
-                                   boolean embeddable,
-                                   List<String> blockedCountries) {
+    public static HighlightView of(HighlightlyHighlightDto d, boolean embeddable) {
         return new HighlightView(
                 d.id(), d.title(), d.url(), d.embedUrl(),
-                d.imgUrl(), d.source(), d.type(),
-                embeddable,
-                blockedCountries == null ? List.of() : blockedCountries);
+                d.imgUrl(), d.source(), d.type(), embeddable);
     }
 }
