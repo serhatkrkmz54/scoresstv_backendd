@@ -179,6 +179,21 @@ public class PlayerDetailLazySync {
         }
     }
 
+    /**
+     * Fire-and-forget — veri DB'de zaten varken response'u BEKLETMEDEN arka
+     * planda tazeler. Sync sonrasi cache evict → bir sonraki istek taze gorur.
+     */
+    @Async
+    public void ensureForAsync(Long playerId, Integer requestedSeason, Integer currentSeason) {
+        try {
+            ensureFor(playerId, requestedSeason, currentSeason);
+            evictPlayerCache(playerId);
+        } catch (RuntimeException ex) {
+            log.warn("Async oyuncu ensure hatasi: playerId={} season={} — {}",
+                    playerId, requestedSeason, ex.getMessage());
+        }
+    }
+
     /** Auto-cover: ilk ziyarette covered=true → DailyPlayerRefreshJob girer. */
     @Transactional
     public void markCoveredIfNeeded(Player player) {

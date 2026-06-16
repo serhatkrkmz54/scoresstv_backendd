@@ -24,4 +24,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
 
     /** Kapsamli (covered=true) takimlar — DailyTeamRefreshJob bunu kullanir. */
     List<Team> findByCoveredTrue();
+
+    /** Milli takimlar (national=true) — FIFA siralamasi isim eslestirmesi icin. */
+    List<Team> findByNationalTrue();
 }

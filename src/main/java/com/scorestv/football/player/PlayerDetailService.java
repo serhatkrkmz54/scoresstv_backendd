@@ -107,7 +107,16 @@ public class PlayerDetailService {
 
     public PlayerDetailResponse getById(Long playerId, Integer requestedSeason, boolean turkish) {
         Integer currentSeason = resolvePlayerCurrentSeason(playerId);
-        lazySync.ensureFor(playerId, requestedSeason, currentSeason);
+        // Veri ZATEN dolu (profil + kariyer var) → tazelemeyi arka planda yap,
+        // response'u BEKLETME. Ince/eksik (kariyer yok) veya yepyeni ise yine
+        // senkron blokla — boylece kullaniciya hicbir zaman eksik sayfa gitmez.
+        boolean rich = playerRepository.existsById(playerId)
+                && careerTeamRepository.countByPlayerId(playerId) > 0;
+        if (rich) {
+            lazySync.ensureForAsync(playerId, requestedSeason, currentSeason);
+        } else {
+            lazySync.ensureFor(playerId, requestedSeason, currentSeason);
+        }
         return self.loadCachedResponse(playerId, requestedSeason, turkish);
     }
 

@@ -81,6 +81,8 @@ public class SecurityConfig {
                 // /api/v1/admin/contact ise anyRequest().authenticated() +
                 // @PreAuthorize("hasRole('ADMIN')") ile korunur.
                 .requestMatchers(HttpMethod.POST, "/api/v1/contact").permitAll()
+                // Sitemap listeleme uclari — public (SEO).
+                .requestMatchers("/api/v1/sitemap", "/api/v1/sitemap/**").permitAll()
                 // Admin SPA — statik dosyalar + SPA route'lari herkese acik
                 // (auth UI tarafinda yapilir, API endpointleri zaten JWT korumali).
                 .requestMatchers("/admin", "/admin/**").permitAll()

@@ -4,6 +4,8 @@ import com.scorestv.common.SlugUtil;
 import com.scorestv.football.FootballCacheNames;
 import com.scorestv.football.domain.Country;
 import com.scorestv.football.domain.CountryRepository;
+import com.scorestv.football.domain.Team;
+import com.scorestv.football.domain.TeamRepository;
 import com.scorestv.rankings.domain.FifaRanking;
 import com.scorestv.rankings.domain.FifaRankingRepository;
 import com.scorestv.rankings.domain.UefaClubRanking;
@@ -37,15 +39,18 @@ public class RankingsService {
     private final UefaClubRankingRepository uefaClubRepository;
     private final UefaCountryRankingRepository uefaCountryRepository;
     private final CountryRepository countryRepository;
+    private final TeamRepository teamRepository;
 
     public RankingsService(FifaRankingRepository fifaRepository,
                             UefaClubRankingRepository uefaClubRepository,
                             UefaCountryRankingRepository uefaCountryRepository,
-                            CountryRepository countryRepository) {
+                            CountryRepository countryRepository,
+                            TeamRepository teamRepository) {
         this.fifaRepository = fifaRepository;
         this.uefaClubRepository = uefaClubRepository;
         this.uefaCountryRepository = uefaCountryRepository;
         this.countryRepository = countryRepository;
+        this.teamRepository = teamRepository;
     }
 
     // ============================================================
@@ -103,6 +108,26 @@ public class RankingsService {
             }
         }
 
+        // FIFA siralamasi = milli takimlar; teams tablosunda national=true olarak
+        // varlar. Isimle (gerekirse 3-harf kod ile) esleyip /takim linki slug'i uret.
+        Map<String, String> teamSlugByName = new HashMap<>();
+        Map<String, String> teamSlugByCode = new HashMap<>();
+        for (Team team : teamRepository.findByNationalTrue()) {
+            if (team.getId() == null || team.getName() == null) continue;
+            // Slug ismi: TR modda nameTr varsa Turkce'den (arjantin-26), yoksa
+            // normal isimden (argentina-26). Eslestirme anahtari ise HER ZAMAN
+            // Ingilizce isim (FIFA teamName Ingilizce gelir).
+            String slugName = (turkish && team.getNameTr() != null
+                    && !team.getNameTr().isBlank())
+                    ? team.getNameTr()
+                    : team.getName();
+            String slug = SlugUtil.slugify(slugName) + "-" + team.getId();
+            teamSlugByName.put(team.getName().toLowerCase(Locale.ROOT), slug);
+            if (team.getCode() != null && !team.getCode().isBlank()) {
+                teamSlugByCode.putIfAbsent(team.getCode().toUpperCase(Locale.ROOT), slug);
+            }
+        }
+
         List<FifaRankingResponse.Row> rows = all.stream()
                 .map(r -> {
                     String name = r.getTeamName();
@@ -136,6 +161,12 @@ public class RankingsService {
                             : r.getTeamName();
                     // DB Country eslesmesi varsa /ulke linki slug'i; yoksa null.
                     String countrySlug = key != null ? slugByName.get(key) : null;
+                    // FIFA milli takim -> teams tablosu eslesmesi (once isim, sonra kod).
+                    String teamSlug = key != null ? teamSlugByName.get(key) : null;
+                    if (teamSlug == null && r.getCountryCode() != null) {
+                        teamSlug = teamSlugByCode.get(
+                                r.getCountryCode().toUpperCase(Locale.ROOT));
+                    }
                     return new FifaRankingResponse.Row(
                             r.getRank(),
                             r.getPrevRank(),
@@ -149,7 +180,8 @@ public class RankingsService {
                             r.getPrevPoints(),
                             r.getRatedMatches(),
                             flag,
-                            countrySlug);
+                            countrySlug,
+                            teamSlug);
                 })
                 .collect(Collectors.toList());
 
