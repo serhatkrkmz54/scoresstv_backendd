@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSource;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
@@ -125,7 +126,8 @@ public class MatchDetailSeoBuilder {
                 description,
                 image);
 
-        String jsonLd = buildJsonLd(fixture, canonicalUrl, homeName, awayName, leagueName, image);
+        String jsonLd = buildJsonLd(
+                fixture, canonicalUrl, homeName, awayName, leagueName, image, description);
 
         List<MatchSeoResponse.Breadcrumb> breadcrumbs = buildBreadcrumbs(
                 fixture, homeName, awayName, leagueName, slug, turkish, baseUrl);
@@ -140,27 +142,24 @@ public class MatchDetailSeoBuilder {
     /** Schema.org SportsEvent JSON-LD'sini hazır string olarak üretir. */
     private String buildJsonLd(Fixture fixture, String canonicalUrl,
                                String homeName, String awayName, String leagueName,
-                               String image) {
+                               String image, String description) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("@context", "https://schema.org");
         root.put("@type", "SportsEvent");
         root.put("name", homeName + " vs " + awayName);
         root.put("url", canonicalUrl);
+        if (description != null && !description.isBlank()) {
+            root.put("description", description);
+        }
         root.put("startDate", fixture.getKickoffAt().toString());
+        // Tahmini bitiş: ilk düdük + 2 saat (devre arası dâhil tipik maç süresi).
+        root.put("endDate", fixture.getKickoffAt().plus(Duration.ofHours(2)).toString());
         root.put("eventStatus", schemaEventStatus(fixture.getStatusShort()));
         root.put("eventAttendanceMode", "https://schema.org/OfflineEventAttendanceMode");
 
-        Venue venue = fixture.getVenue();
-        if (venue != null && venue.getName() != null) {
-            Map<String, Object> location = new LinkedHashMap<>();
-            location.put("@type", "Place");
-            location.put("name", venue.getName());
-            if (venue.getCity() != null && !venue.getCity().isBlank()) {
-                Map<String, Object> address = new LinkedHashMap<>();
-                address.put("@type", "PostalAddress");
-                address.put("addressLocality", venue.getCity());
-                location.put("address", address);
-            }
+        // location — Google Event için ZORUNLU. Venue varsa stadyum, yoksa lig ülkesi.
+        Map<String, Object> location = buildLocation(fixture);
+        if (location != null) {
             root.put("location", location);
         }
 
@@ -168,11 +167,16 @@ public class MatchDetailSeoBuilder {
         competitors.add(teamSchema(homeName, fixture.getHomeTeam().getLogoKey()));
         competitors.add(teamSchema(awayName, fixture.getAwayTeam().getLogoKey()));
         root.put("competitor", competitors);
+        // performer — aynı takımlar (Google'ın opsiyonel "performer" ipucunu karşılar).
+        root.put("performer", competitors);
 
-        Map<String, Object> superEvent = new LinkedHashMap<>();
-        superEvent.put("@type", "SportsEvent");
-        superEvent.put("name", leagueName);
-        root.put("superEvent", superEvent);
+        // organizer — ligi/organizasyonu temsil eder. ESKİDEN superEvent (SportsEvent)
+        // idi; Google onu AYRI bir Event sanıp startDate/location zorunlu kılıyordu
+        // ("Dünya Kupası" kritik hataları). Organization bu zorunluluğu taşımaz.
+        Map<String, Object> organizer = new LinkedHashMap<>();
+        organizer.put("@type", "Organization");
+        organizer.put("name", leagueName);
+        root.put("organizer", organizer);
 
         if (image != null) {
             root.put("image", image);
@@ -185,6 +189,41 @@ public class MatchDetailSeoBuilder {
                     fixture.getId(), ex.getMessage());
             return "{}";
         }
+    }
+
+    /**
+     * SportsEvent {@code location}'ı: önce stadyum (venue), yoksa lig ülkesi.
+     * Google Event için location zorunlu — venue verisi olmayan maçlarda da
+     * en azından ülke seviyesinde geçerli bir {@code Place} döndürürüz.
+     */
+    private Map<String, Object> buildLocation(Fixture fixture) {
+        Venue venue = fixture.getVenue();
+        if (venue != null && venue.getName() != null && !venue.getName().isBlank()) {
+            Map<String, Object> location = new LinkedHashMap<>();
+            location.put("@type", "Place");
+            location.put("name", venue.getName());
+            if (venue.getCity() != null && !venue.getCity().isBlank()) {
+                Map<String, Object> address = new LinkedHashMap<>();
+                address.put("@type", "PostalAddress");
+                address.put("addressLocality", venue.getCity());
+                location.put("address", address);
+            }
+            return location;
+        }
+        // Fallback — lig ülkesi (venue yoksa).
+        String country = fixture.getLeague() != null
+                ? fixture.getLeague().getCountryName() : null;
+        if (country != null && !country.isBlank()) {
+            Map<String, Object> location = new LinkedHashMap<>();
+            location.put("@type", "Place");
+            location.put("name", country);
+            Map<String, Object> address = new LinkedHashMap<>();
+            address.put("@type", "PostalAddress");
+            address.put("addressCountry", country);
+            location.put("address", address);
+            return location;
+        }
+        return null;
     }
 
     private Map<String, Object> teamSchema(String name, String logoKey) {
