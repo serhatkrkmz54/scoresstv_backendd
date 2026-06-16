@@ -101,6 +101,21 @@ public class HighlightsService {
     }
 
     /**
+     * Highlight YouTube kaynaklı mı? YouTube içerikleri (özellikle FIFA/resmi)
+     * sık sık üçüncü taraf embed'i kapatır; bunları inline gömmek yerine harici
+     * (YouTube'da izle) açarız. Kaynak adı + embedUrl/url alan adından tespit.
+     */
+    private static boolean isYouTube(HighlightlyHighlightDto d) {
+        String src = d.source() == null ? "" : d.source().toLowerCase();
+        if (src.contains("youtube") || src.contains("youtu.be")) return true;
+        String e = d.embedUrl() == null ? "" : d.embedUrl().toLowerCase();
+        String u = d.url() == null ? "" : d.url().toLowerCase();
+        return e.contains("youtube.com") || e.contains("youtu.be")
+                || e.contains("youtube-nocookie.com")
+                || u.contains("youtube.com") || u.contains("youtu.be");
+    }
+
+    /**
      * Ülkeden bağımsız ham liste (her highlight için base embeddable + geo
      * allowed/blocked). Cache'li — geo çağrıları yalnız cache dolarken yapılır.
      */
@@ -138,8 +153,14 @@ public class HighlightsService {
             boolean baseEmbeddable = false;
             List<String> allowed = List.of();
             List<String> blocked = List.of();
-            // Yalnız embedUrl'i olanlar için geo-restriction sorgula (ücretli plan).
-            if (d.embedUrl() != null && !d.embedUrl().isBlank() && d.id() != null) {
+            // YouTube içerikleri (özellikle FIFA/resmi yayıncılar) çoğu kez
+            // üçüncü taraf site/app'te gömmeyi kapatır ("iş ortağı engelledi") —
+            // bu coğrafi değil, sahibin embed yasağıdır ve aşılamaz. Bunları hiç
+            // gömme; küçük-resim + "YouTube'da izle" harici yedeğine düşsünler.
+            // Yalnız gömmeye izin veren kaynakları (streamin, dazn vb.) geo'ya
+            // bakıp göm — geo çağrısından da tasarruf olur.
+            if (d.embedUrl() != null && !d.embedUrl().isBlank() && d.id() != null
+                    && !isYouTube(d)) {
                 HighlightlyGeoRestrictionDto geo = client.fetchGeoRestriction(d.id());
                 if (geo != null) {
                     baseEmbeddable = Boolean.TRUE.equals(geo.embeddable());
