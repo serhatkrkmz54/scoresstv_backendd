@@ -138,6 +138,25 @@ scorestv:
     refresh-ms: ${BILYONER_REFRESH_MS:60000}
 
   # ============================================================
+  # SocialData.tools — sag raydaki X/Twitter tweet akisi.
+  # API anahtari GIZLI: sadece .env'de SOCIALDATA_API_KEY. enabled=false iken
+  # hic istek atilmaz (bolum bos doner). Maliyet job tarafinda, ziyaretci basina degil.
+  # ============================================================
+  social:
+    enabled: ${SOCIAL_ENABLED:true}
+    api-key: ${SOCIALDATA_API_KEY:9174|d3RiUi8jsTXTm0cv99nouy9fAdPsGgbvYDvtdDTG6c4d6980}
+    base-url: ${SOCIAL_BASE_URL:https://api.socialdata.tools}
+    # Virgulle ayrilmis X kullanici adlari (@'siz).
+    accounts: ${SOCIAL_ACCOUNTS:Fenerbahce,GalatasaraySK,Besiktas,Trabzonspor,FIFAWorldCup,TFF_Org}
+    max-per-account: ${SOCIAL_MAX_PER_ACCOUNT:8}
+    max-total: ${SOCIAL_MAX_TOTAL:60}
+    exclude-replies: ${SOCIAL_EXCLUDE_REPLIES:true}
+    exclude-retweets: ${SOCIAL_EXCLUDE_RETWEETS:true}
+    # Yenileme araligi (ms) — varsayilan 30 dk. initial-delay: acilistan sonra ilk cekim.
+    refresh-ms: ${SOCIAL_REFRESH_MS:1800000}
+    initial-delay-ms: ${SOCIAL_INITIAL_DELAY_MS:8000}
+
+  # ============================================================
   # Basketbol (API-Basketball v1) — football'dan TAMAMEN ayri modul.
   # api-key football ile AYNI API-Sports anahtari (API_FOOTBALL_KEY).
   # enabled=false ise sync/job hic calismaz. live-enabled ayrica canli

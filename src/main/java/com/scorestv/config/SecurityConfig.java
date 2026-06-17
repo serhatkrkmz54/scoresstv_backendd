@@ -85,6 +85,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/v1/contact").permitAll()
                 // Sitemap listeleme uclari — public (SEO).
                 .requestMatchers("/api/v1/sitemap", "/api/v1/sitemap/**").permitAll()
+                // Sosyal medya (X/Twitter) tweet akisi — public okuma.
+                .requestMatchers(HttpMethod.GET, "/api/v1/social", "/api/v1/social/**").permitAll()
                 // Admin SPA — statik dosyalar + SPA route'lari herkese acik
                 // (auth UI tarafinda yapilir, API endpointleri zaten JWT korumali).
                 .requestMatchers("/admin", "/admin/**").permitAll()
