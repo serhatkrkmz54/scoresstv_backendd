@@ -40,8 +40,13 @@ public class SidelinedSyncService {
         this.upserter = upserter;
     }
 
-    /** Tek bir oyuncu icin. */
+    /** Tek bir oyuncu icin. playerId gecersizse (null/<=0) hic cagri yapilmaz. */
     public int syncOne(Long playerId) {
+        // API-Football "The Player field cannot be 0." hatasi veriyordu —
+        // gecersiz id ile bosa istek atilmasin (rate-limit'i de bosa harcar).
+        if (playerId == null || playerId <= 0) {
+            return 0;
+        }
         ApiFootballResponse<List<SidelinedApiDto>> response = client.get(
                 "/sidelined", Map.of("player", playerId), SIDELINED_TYPE);
         return upserter.upsert(playerId, response.response());
@@ -55,7 +60,7 @@ public class SidelinedSyncService {
         if (playerIds == null || playerIds.isEmpty()) return 0;
         int total = 0;
         for (Long playerId : playerIds) {
-            if (playerId == null) continue;
+            if (playerId == null || playerId <= 0) continue;
             try {
                 total += syncOne(playerId);
             } catch (RuntimeException ex) {
