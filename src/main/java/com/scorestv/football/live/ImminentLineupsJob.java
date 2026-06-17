@@ -6,6 +6,7 @@ import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.football.sync.FixtureLineupsSyncResult;
 import com.scorestv.football.sync.FixtureLineupsSyncService;
+import com.scorestv.mobile.notify.NotificationDispatcherService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -41,15 +42,18 @@ public class ImminentLineupsJob {
     private final FixtureRepository fixtureRepository;
     private final FixtureLineupsSyncService lineupsSyncService;
     private final LineupBroadcaster broadcaster;
+    private final NotificationDispatcherService notificationDispatcher;
     private final FootballProperties properties;
 
     public ImminentLineupsJob(FixtureRepository fixtureRepository,
                               FixtureLineupsSyncService lineupsSyncService,
                               LineupBroadcaster broadcaster,
+                              NotificationDispatcherService notificationDispatcher,
                               FootballProperties properties) {
         this.fixtureRepository = fixtureRepository;
         this.lineupsSyncService = lineupsSyncService;
         this.broadcaster = broadcaster;
+        this.notificationDispatcher = notificationDispatcher;
         this.properties = properties;
         log.info("ImminentLineupsJob aktif: her {} dk'da bir, {} sa pencere yoklanır.",
                 properties.sync().imminentLineupsIntervalMinutes(),
@@ -78,6 +82,8 @@ public class ImminentLineupsJob {
                 // açıklamadır → bildirim.
                 if (result.lineupsWritten() > 0) {
                     broadcaster.broadcastAnnounced(fixture.getId());
+                    // Kadroyu İLK açıklayan maç → takım takipçilerine push.
+                    notificationDispatcher.dispatchLineup(fixture.getId());
                     announced++;
                 }
             } catch (ApiException ex) {

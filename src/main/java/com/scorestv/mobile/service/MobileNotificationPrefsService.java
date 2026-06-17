@@ -95,6 +95,9 @@ public class MobileNotificationPrefsService {
             pref.setNotifyPenalty(dto.penalti());
             pref.setNotifyKickoff(dto.basladi());
             pref.setNotifyFinal(dto.bitti());
+            // Geriye-uyumlu: eski client kadro göndermez (null) → dokunma,
+            // entity default (true) / mevcut değer korunur.
+            if (dto.kadro() != null) pref.setNotifyLineup(dto.kadro());
             prefRepository.save(pref);
             upserted++;
         }
@@ -126,7 +129,8 @@ public class MobileNotificationPrefsService {
                     p.isNotifyRedCard(),
                     p.isNotifyPenalty(),
                     p.isNotifyKickoff(),
-                    p.isNotifyFinal()
+                    p.isNotifyFinal(),
+                    p.isNotifyLineup()
             ));
         }
         return result;

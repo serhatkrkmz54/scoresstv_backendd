@@ -62,4 +62,8 @@ public class UserNotificationPref extends BaseEntity {
 
     @Column(name = "notify_final", nullable = false)
     private boolean notifyFinal = true;
+
+    /** İlk 11 (kadro) açıklandığında bildirim — kickoff'tan ~20-40 dk önce. */
+    @Column(name = "notify_lineup", nullable = false)
+    private boolean notifyLineup = true;
 }

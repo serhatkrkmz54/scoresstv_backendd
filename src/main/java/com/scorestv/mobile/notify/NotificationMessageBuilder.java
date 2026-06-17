@@ -38,6 +38,14 @@ public class NotificationMessageBuilder {
                         _name(fixture.getAwayTeam())));
     }
 
+    public NotificationMessage buildLineupMessage(Fixture fixture) {
+        return new NotificationMessage(
+                "📋 İlk 11 açıklandı",
+                "%s - %s maçının ilk 11'i belli oldu".formatted(
+                        _name(fixture.getHomeTeam()),
+                        _name(fixture.getAwayTeam())));
+    }
+
     public NotificationMessage buildFinalMessage(Fixture fixture) {
         final Integer h = fixture.getHomeGoals();
         final Integer a = fixture.getAwayGoals();

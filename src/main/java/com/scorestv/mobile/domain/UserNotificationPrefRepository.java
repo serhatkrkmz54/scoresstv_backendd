@@ -52,4 +52,9 @@ public interface UserNotificationPrefRepository
             + "JOIN FETCH p.deviceToken "
             + "WHERE p.team.id = :teamId AND p.notifyFinal = true")
     List<UserNotificationPref> findRecipientsForFinal(@Param("teamId") Long teamId);
+
+    @Query("SELECT p FROM UserNotificationPref p "
+            + "JOIN FETCH p.deviceToken "
+            + "WHERE p.team.id = :teamId AND p.notifyLineup = true")
+    List<UserNotificationPref> findRecipientsForLineup(@Param("teamId") Long teamId);
 }

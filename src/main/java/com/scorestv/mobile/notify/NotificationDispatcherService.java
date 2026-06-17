@@ -303,6 +303,29 @@ public class NotificationDispatcherService {
         _dispatchMatchStatus(fixture, "bitti");
     }
 
+    // ============================================================
+    // KADRO (İlk 11) — ImminentLineupsJob kadro İLK açıklandığında cagrilir.
+    // ============================================================
+
+    @Async
+    @Transactional(readOnly = true)
+    public void dispatchLineup(Long fixtureId) {
+        if (!fcmMessaging.isEnabled() || fixtureId == null) return;
+
+        // Cift bildirim guardu — job ayni maci pespese tick'te gormesin.
+        final String key = "lineup:" + fixtureId;
+        if (_isRecentlySent(key)) {
+            log.info("Kadro push SKIP (dedup) fixtureId={}", fixtureId);
+            return;
+        }
+        _markSent(key);
+
+        final Fixture fixture =
+                fixtureRepository.findById(fixtureId).orElse(null);
+        if (fixture == null) return;
+        _dispatchMatchStatus(fixture, "kadro");
+    }
+
     private void _dispatchMatchStatus(Fixture fixture, String mobileType) {
         // 1) Takim takibinden gelen recipient'lar — hem ev hem deplasman takim
         final Set<Long> teamIds = new LinkedHashSet<>();
@@ -333,9 +356,11 @@ public class NotificationDispatcherService {
             return;
         }
 
-        final var msg = "basladi".equals(mobileType)
-                ? messageBuilder.buildKickoffMessage(fixture)
-                : messageBuilder.buildFinalMessage(fixture);
+        final var msg = switch (mobileType) {
+            case "basladi" -> messageBuilder.buildKickoffMessage(fixture);
+            case "kadro" -> messageBuilder.buildLineupMessage(fixture);
+            default -> messageBuilder.buildFinalMessage(fixture);
+        };
         final Map<String, String> data = new HashMap<>();
         data.put("type", mobileType);
         data.put("fixtureId", String.valueOf(fixture.getId()));
@@ -397,6 +422,7 @@ public class NotificationDispatcherService {
             case "penalti" -> prefRepository.findRecipientsForPenalty(teamId);
             case "basladi" -> prefRepository.findRecipientsForKickoff(teamId);
             case "bitti" -> prefRepository.findRecipientsForFinal(teamId);
+            case "kadro" -> prefRepository.findRecipientsForLineup(teamId);
             default -> List.of();
         };
     }
