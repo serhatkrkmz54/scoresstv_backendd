@@ -153,7 +153,7 @@ scorestv:
     exclude-replies: ${SOCIAL_EXCLUDE_REPLIES:true}
     exclude-retweets: ${SOCIAL_EXCLUDE_RETWEETS:true}
     # Yenileme araligi (ms) — varsayilan 30 dk. initial-delay: acilistan sonra ilk cekim.
-    refresh-ms: ${SOCIAL_REFRESH_MS:1800000}
+    refresh-ms: ${SOCIAL_REFRESH_MS:3600000}
     initial-delay-ms: ${SOCIAL_INITIAL_DELAY_MS:8000}
 
   # ============================================================
