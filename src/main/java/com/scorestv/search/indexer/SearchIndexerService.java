@@ -72,6 +72,10 @@ public class SearchIndexerService {
     private final CountryDocRepository countryDocs;
     private final FixtureDocRepository fixtureDocs;
 
+    /** Popüler lig/takım id'leri — arama relevansinda popularity boost icin. */
+    private final java.util.Set<Long> popularTeamIds;
+    private final java.util.Set<Long> popularLeagueIds;
+
     @Autowired
     private ElasticsearchOperations esOps;
 
@@ -85,7 +89,8 @@ public class SearchIndexerService {
             LeagueDocRepository leagueDocs,
             PlayerDocRepository playerDocs,
             CountryDocRepository countryDocs,
-            FixtureDocRepository fixtureDocs) {
+            FixtureDocRepository fixtureDocs,
+            com.scorestv.football.FootballProperties footballProps) {
         this.teamRepo = teamRepo;
         this.leagueRepo = leagueRepo;
         this.playerRepo = playerRepo;
@@ -96,6 +101,10 @@ public class SearchIndexerService {
         this.playerDocs = playerDocs;
         this.countryDocs = countryDocs;
         this.fixtureDocs = fixtureDocs;
+        this.popularTeamIds =
+                java.util.Set.copyOf(footballProps.serving().popularTeamIds());
+        this.popularLeagueIds =
+                java.util.Set.copyOf(footballProps.serving().popularLeagueIds());
     }
 
     // ============================================================
@@ -337,6 +346,10 @@ public class SearchIndexerService {
         d.setCountryTr(countryTrFor(t.getCountry()));
         d.setLogoUrl(t.getLogoUrl());
         d.setNational(t.isNational());
+        // Popüler takımlar (config) en yüksek; milli takımlar orta; diğerleri 1.
+        d.setPopularity(popularTeamIds.contains(t.getId())
+                ? 6.0f
+                : (t.isNational() ? 3.0f : 1.0f));
         return d;
     }
 
@@ -352,6 +365,8 @@ public class SearchIndexerService {
         d.setLogoUrl(l.getLogoUrl());
         d.setFlagUrl(l.getCountryFlagUrl());
         d.setCovered(l.isCovered());
+        // Popüler ligler (config: Süper Lig, PL, La Liga, CL...) üste çıksın.
+        d.setPopularity(popularLeagueIds.contains(l.getId()) ? 6.0f : 1.0f);
         return d;
     }
 

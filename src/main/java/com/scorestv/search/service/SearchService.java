@@ -1,6 +1,9 @@
 package com.scorestv.search.service;
 
+import co.elastic.clients.elasticsearch._types.query_dsl.FieldValueFactorModifier;
+import co.elastic.clients.elasticsearch._types.query_dsl.FunctionBoostMode;
 import co.elastic.clients.elasticsearch._types.query_dsl.MultiMatchQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import com.scorestv.search.index.CountryDoc;
@@ -26,16 +29,17 @@ import java.util.Set;
  *
  * <p><b>Query stratejisi:</b>
  * <ul>
- *   <li><b>MOST_FIELDS</b> + fuzziness=AUTO — autocomplete-friendly. Index
+ *   <li><b>MOST_FIELDS + operator AND</b> — autocomplete-friendly. Index
  *       tarafi edge_ngram (1-15 char) ile her prefix'i indexler; query tarafi
  *       (autocomplete_search) standard + lowercase + asciifolding ile
  *       Turkce karakterler (ü/ö/ç/ş/ı/ğ) ascii esdegerleriyle eslesir.
  *       Sonuc: "Tur" → "Türkiye", "Galat" → "Galatasaray", "ozer" → "Özer".</li>
- *   <li>MostFields = tum field'lardaki hit'ler toplanir (ad + nameTr + slug
- *       her biri puanlanir → hepsi katki saglar). BestFields'tan farki tum
- *       fieldlarda buyuk veri seti icin daha hassas sira veriyor.</li>
- *   <li>fuzziness=AUTO typo backup (1-2 harf yanlislari edge_ngram + asciifold
- *       kacirirsa devreye girer).</li>
+ *   <li><b>FUZZINESS YOK</b> — edge_ngram alaninda fuzziness "fen" → "Lens"
+ *       (len token'i, mesafe 1) gibi yanlis eslesmeler uretiyordu. Prefix +
+ *       asciifold zaten yeterli; fuzziness kaldirildi.</li>
+ *   <li><b>popularity function_score</b> (team/league/player) — populer
+ *       takim/lig esit alakada uste cikar ("süp" → Süper Lig, "fen" →
+ *       Fenerbahçe). Deger indexer'da config'teki popular-*-ids'ten gelir.</li>
  *   <li>Tum tipler PARALEL sorgulanir (CompletableFuture).</li>
  * </ul>
  *
@@ -109,14 +113,35 @@ public class SearchService {
     // Tip-bazli query helper'lari
     // ============================================================
 
+    /**
+     * Verilen match query'sini {@code popularity} ile function_score'a sarar —
+     * popüler takım/lig/oyuncu eşit alaka durumunda üste çıkar.
+     *
+     * <p><b>Önemli:</b> Edge_ngram alanlarinda fuzziness KULLANMIYORUZ — "fen"
+     * sorgusu, "Lens" dokumaninin "len" edge-ngram token'i ile fuzzy eslesip
+     * (mesafe 1) yanlis sonuc getiriyordu. Edge_ngram + asciifolding zaten
+     * prefix eslesmeyi (Türkçe karakter dahil) sagliyor; fuzziness yalniz çöp
+     * üretiyordu. Kaldirildi.
+     */
+    private Query withPopularity(Query base) {
+        return Query.of(b -> b.functionScore(fs -> fs
+                .query(base)
+                .functions(fn -> fn.fieldValueFactor(fv -> fv
+                        .field("popularity")
+                        .factor(1.0)
+                        .modifier(FieldValueFactorModifier.Log1p)
+                        .missing(1.0)))
+                .boostMode(FunctionBoostMode.Multiply)));
+    }
+
     private List<SearchResponse.TeamHit> searchTeams(String q) {
         Query mm = Query.of(b -> b.multiMatch(MultiMatchQuery.of(m -> m
                 .query(q)
-                .fields("name^2", "nameTr^2", "slug")
+                .fields("name^3", "nameTr^3", "slug")
                 .type(TextQueryType.MostFields)
-                .fuzziness("AUTO"))));
+                .operator(Operator.And))));
         var nq = NativeQuery.builder()
-                .withQuery(mm)
+                .withQuery(withPopularity(mm))
                 .withMaxResults(MAX_PER_TYPE)
                 .build();
         SearchHits<TeamDoc> hits = ops.search(nq, TeamDoc.class,
@@ -134,11 +159,11 @@ public class SearchService {
     private List<SearchResponse.LeagueHit> searchLeagues(String q) {
         Query mm = Query.of(b -> b.multiMatch(MultiMatchQuery.of(m -> m
                 .query(q)
-                .fields("name^2", "nameTr^2", "country", "slug")
+                .fields("name^3", "nameTr^3", "country", "slug")
                 .type(TextQueryType.MostFields)
-                .fuzziness("AUTO"))));
+                .operator(Operator.And))));
         var nq = NativeQuery.builder()
-                .withQuery(mm)
+                .withQuery(withPopularity(mm))
                 .withMaxResults(MAX_PER_TYPE)
                 .build();
         SearchHits<LeagueDoc> hits = ops.search(nq, LeagueDoc.class,
@@ -159,9 +184,9 @@ public class SearchService {
                 .query(q)
                 .fields("name^3", "firstName", "lastName^2", "slug")
                 .type(TextQueryType.MostFields)
-                .fuzziness("AUTO"))));
+                .operator(Operator.And))));
         var nq = NativeQuery.builder()
-                .withQuery(mm)
+                .withQuery(withPopularity(mm))
                 .withMaxResults(MAX_PER_TYPE)
                 .build();
         SearchHits<PlayerDoc> hits = ops.search(nq, PlayerDoc.class,
@@ -186,7 +211,7 @@ public class SearchService {
                         "awayTeamName", "awayTeamNameTr",
                         "leagueName", "leagueNameTr")
                 .type(TextQueryType.MostFields)
-                .fuzziness("AUTO"))));
+                .operator(Operator.And))));
         var nq = NativeQuery.builder()
                 .withQuery(mm)
                 .withMaxResults(MAX_PER_TYPE)
@@ -209,7 +234,7 @@ public class SearchService {
                 .query(q)
                 .fields("name^2", "nameTr^2", "code", "slug")
                 .type(TextQueryType.MostFields)
-                .fuzziness("AUTO"))));
+                .operator(Operator.And))));
         var nq = NativeQuery.builder()
                 .withQuery(mm)
                 .withMaxResults(MAX_PER_TYPE)
