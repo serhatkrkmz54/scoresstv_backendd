@@ -189,20 +189,22 @@ public class HighlightsService {
                     embedUrl = yt;
                     baseEmbeddable = true;
                 }
-            } else if (d.embedUrl() != null && !d.embedUrl().isBlank()
-                    && d.id() != null) {
-                // Gömmeye izin veren diğer kaynaklar (streamin, dazn vb.) — geo'ya
-                // bakıp göm.
-                HighlightlyGeoRestrictionDto geo = client.fetchGeoRestriction(d.id());
-                if (geo != null) {
-                    baseEmbeddable = Boolean.TRUE.equals(geo.embeddable());
-                    allowed = geo.allowedCountries() != null
-                            ? geo.allowedCountries() : List.of();
-                    blocked = geo.blockedCountries() != null
-                            ? geo.blockedCountries() : List.of();
-                } else {
-                    // geo çağrısı yapılamadı — embedUrl var, kısıtsız gömülebilir say.
-                    baseEmbeddable = true;
+            } else if (d.embedUrl() != null && !d.embedUrl().isBlank()) {
+                // streamin.me / DAZN gibi kaynaklar: embedUrl varsa uygulama
+                // içinde (WebView) oynatmayı DENE. geo'nun embeddable=false
+                // bayrağını ZORLAMAYIZ (çok muhafazakârdı, hepsini harici
+                // atıyordu) — yalnız ülke engellerini uygularız. Framing'i
+                // tıkayan kaynakta istemci harici yedek butonuna düşer.
+                baseEmbeddable = true;
+                if (d.id() != null) {
+                    HighlightlyGeoRestrictionDto geo =
+                            client.fetchGeoRestriction(d.id());
+                    if (geo != null) {
+                        allowed = geo.allowedCountries() != null
+                                ? geo.allowedCountries() : List.of();
+                        blocked = geo.blockedCountries() != null
+                                ? geo.blockedCountries() : List.of();
+                    }
                 }
             }
             items.add(new GeoHighlight(d, embedUrl, baseEmbeddable, allowed, blocked));
