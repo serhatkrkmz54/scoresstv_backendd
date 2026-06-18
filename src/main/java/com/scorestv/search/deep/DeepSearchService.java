@@ -105,6 +105,17 @@ public class DeepSearchService {
         final String key = normalize(q);
         if (key.isEmpty()) return;
 
+        // API-Football'un ?search= alani YALNIZCA harf/rakam/boşluk kabul eder;
+        // nokta/kesme/tire/iki nokta vb. iceren sorgular 400 verir ("The Search
+        // field may only contain alpha-numeric characters and spaces"). Orn.
+        // "S. Olsson", "O'Brien", "FC-X". Bu yuzden API'ye göndermeden temizle.
+        final String apiQ = sanitizeForApi(q);
+        if (apiQ.length() < MIN_LEN) {
+            log.debug("Derin arama atlandı (temizlenmiş sorgu < {} karakter): '{}'",
+                    MIN_LEN, q);
+            return;
+        }
+
         final long now = System.currentTimeMillis();
         final Long last = attempted.get(key);
         if (last != null && (now - last) < ATTEMPT_TTL_MS) return; // yakın zamanda denendi
@@ -115,12 +126,12 @@ public class DeepSearchService {
         try {
             attempted.put(key, now);
             if (attempted.size() > MAX_CACHE) attempted.clear();
-            log.info("Derin arama başladı: '{}'", q);
-            importTeams(q);
-            importCoaches(q);
-            importLeagues(q);
-            importCountries(q);
-            importPlayers(q);
+            log.info("Derin arama başladı: '{}' (api sorgusu='{}')", q, apiQ);
+            importTeams(apiQ);
+            importCoaches(apiQ);
+            importLeagues(apiQ);
+            importCountries(apiQ);
+            importPlayers(apiQ);
         } finally {
             slots.release();
         }
@@ -219,6 +230,27 @@ public class DeepSearchService {
         } catch (RuntimeException e) {
             log.warn("Derin arama /players/profiles hata ('{}'): {}", q, e.toString());
         }
+    }
+
+    /**
+     * API-Football ?search= icin sorguyu temizler: yalnizca harf (Türkçe/aksanli
+     * dahil), rakam ve TEK boşluk birakir; nokta/kesme/tire/iki nokta gibi her
+     * şeyi boşlukla degistirip coklu boşluklari sadelestrir. Boylece "S. Olsson"
+     * → "S Olsson", "O'Brien" → "O Brien" olur ve API 400 vermez.
+     */
+    private static String sanitizeForApi(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (Character.isLetterOrDigit(c)) {
+                sb.append(c);
+            } else if (Character.isWhitespace(c)) {
+                sb.append(' ');
+            }
+            // diger tum noktalama/sembol karakterleri atilir
+        }
+        return sb.toString().trim().replaceAll("\\s+", " ");
     }
 
     private static String normalize(String s) {

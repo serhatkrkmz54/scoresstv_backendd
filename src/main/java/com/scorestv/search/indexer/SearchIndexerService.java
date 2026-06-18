@@ -463,7 +463,25 @@ public class SearchIndexerService {
     private CoachDoc toDoc(Coach c) {
         var d = new CoachDoc();
         d.setId(c.getId());
-        d.setName(c.getName());
+        // Koç adi: API-Football koç verisini cogu zaman KISALTILMIS verir
+        // (name="İ. Kartal"), ama firstname/lastname ayri gelir ("İsmail" +
+        // "Kartal"). Display icin TAM ad daha guzel + aranabilirligi artirir.
+        // Her iki ad parcasi varsa "İsmail Kartal", yoksa kisa name fallback.
+        // (firstName/lastName zaten ayri alanlarda indexli — "kartal" sorgusu
+        //  lastName uzerinden de yakalanir.)
+        String first = c.getFirstname() == null ? null : c.getFirstname().trim();
+        String last = c.getLastname() == null ? null : c.getLastname().trim();
+        boolean hasFirst = first != null && !first.isEmpty();
+        boolean hasLast = last != null && !last.isEmpty();
+        String display;
+        if (hasFirst && hasLast) {
+            display = first + " " + last;
+        } else if (hasLast) {
+            display = last;
+        } else {
+            display = c.getName();
+        }
+        d.setName(display);
         d.setFirstName(c.getFirstname());
         d.setLastName(c.getLastname());
         d.setNationality(c.getNationality());
