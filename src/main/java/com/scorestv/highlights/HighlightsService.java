@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Maç highlight/özet servisi. Fixture'ın takım adları + tarihini kullanıp
@@ -35,6 +37,10 @@ public class HighlightsService {
 
     /** Biten maç statüleri — yalnızca bunlarda highlight aranır. */
     private static final Set<String> FINISHED = Set.of("FT", "AET", "PEN");
+
+    /** YouTube video ID'sini (11 karakter) embedUrl/url içinden yakalar. */
+    private static final Pattern YT_ID = Pattern.compile(
+            "(?:v=|/embed/|youtu\\.be/|/v/|/shorts/)([A-Za-z0-9_-]{11})");
 
     private final FixtureRepository fixtureRepository;
     private final HighlightlyClient client;
@@ -66,7 +72,7 @@ public class HighlightsService {
         List<HighlightView> out = new ArrayList<>(base.size());
         for (GeoHighlight g : base) {
             boolean embeddable = g.baseEmbeddable() && canPlay(g.allowed(), g.blocked(), cc);
-            out.add(HighlightView.of(g.dto(), embeddable));
+            out.add(HighlightView.of(g.dto(), g.embedUrl(), embeddable));
         }
         // Oynayabilir (embeddable) olanları öne al — sıralama kararlı.
         out.sort((a, b) -> Boolean.compare(b.embeddable(), a.embeddable()));
@@ -101,9 +107,9 @@ public class HighlightsService {
     }
 
     /**
-     * Highlight YouTube kaynaklı mı? YouTube içerikleri (özellikle FIFA/resmi)
-     * sık sık üçüncü taraf embed'i kapatır; bunları inline gömmek yerine harici
-     * (YouTube'da izle) açarız. Kaynak adı + embedUrl/url alan adından tespit.
+     * Highlight YouTube kaynaklı mı? YouTube özetleri normalize edilmiş embed
+     * URL'i ile uygulama içinde/sitede oynatılır (geo çağrısı yapılmaz). Kaynak
+     * adı + embedUrl/url alan adından tespit edilir.
      */
     private static boolean isYouTube(HighlightlyHighlightDto d) {
         String src = d.source() == null ? "" : d.source().toLowerCase();
@@ -113,6 +119,24 @@ public class HighlightsService {
         return e.contains("youtube.com") || e.contains("youtu.be")
                 || e.contains("youtube-nocookie.com")
                 || u.contains("youtube.com") || u.contains("youtu.be");
+    }
+
+    /**
+     * YouTube highlight için normalize edilmiş gömme URL'i
+     * ({@code youtube.com/embed/{id}}) üretir; ID çıkarılamazsa null.
+     */
+    private static String youTubeEmbedUrl(HighlightlyHighlightDto d) {
+        String id = extractYouTubeId(d.embedUrl());
+        if (id == null) id = extractYouTubeId(d.url());
+        if (id == null) return null;
+        return "https://www.youtube.com/embed/" + id
+                + "?rel=0&modestbranding=1&playsinline=1";
+    }
+
+    private static String extractYouTubeId(String url) {
+        if (url == null || url.isBlank()) return null;
+        Matcher m = YT_ID.matcher(url);
+        return m.find() ? m.group(1) : null;
     }
 
     /**
@@ -151,16 +175,24 @@ public class HighlightsService {
             if (d.url() == null || d.url().isBlank()) continue;
 
             boolean baseEmbeddable = false;
+            String embedUrl = d.embedUrl();
             List<String> allowed = List.of();
             List<String> blocked = List.of();
-            // YouTube içerikleri (özellikle FIFA/resmi yayıncılar) çoğu kez
-            // üçüncü taraf site/app'te gömmeyi kapatır ("iş ortağı engelledi") —
-            // bu coğrafi değil, sahibin embed yasağıdır ve aşılamaz. Bunları hiç
-            // gömme; küçük-resim + "YouTube'da izle" harici yedeğine düşsünler.
-            // Yalnız gömmeye izin veren kaynakları (streamin, dazn vb.) geo'ya
-            // bakıp göm — geo çağrısından da tasarruf olur.
-            if (d.embedUrl() != null && !d.embedUrl().isBlank() && d.id() != null
-                    && !isYouTube(d)) {
+            if (isYouTube(d)) {
+                // YouTube özetlerini uygulama içinde (WebView) ve sitede (iframe)
+                // oynat. embedUrl'i youtube.com/embed/{id} olarak normalize et.
+                // Gömmeyi kapatan birkaç resmi/FIFA videosu oynatıcıda "YouTube'da
+                // izle" gösterebilir; istemci harici yedek butonunu korur. Geo
+                // kısıtı uygulanmaz (allowed/blocked boş — YouTube global oynar).
+                String yt = youTubeEmbedUrl(d);
+                if (yt != null) {
+                    embedUrl = yt;
+                    baseEmbeddable = true;
+                }
+            } else if (d.embedUrl() != null && !d.embedUrl().isBlank()
+                    && d.id() != null) {
+                // Gömmeye izin veren diğer kaynaklar (streamin, dazn vb.) — geo'ya
+                // bakıp göm.
                 HighlightlyGeoRestrictionDto geo = client.fetchGeoRestriction(d.id());
                 if (geo != null) {
                     baseEmbeddable = Boolean.TRUE.equals(geo.embeddable());
@@ -169,13 +201,11 @@ public class HighlightsService {
                     blocked = geo.blockedCountries() != null
                             ? geo.blockedCountries() : List.of();
                 } else {
-                    // geo çağrısı yapılamadı — embedUrl var, gömülebilir say ama
-                    // kısıtsız olarak (allowed/blocked boş). Ülke bilinmezse yine
-                    // güvenli; biliniyorsa kısıt yok kabul edilir.
+                    // geo çağrısı yapılamadı — embedUrl var, kısıtsız gömülebilir say.
                     baseEmbeddable = true;
                 }
             }
-            items.add(new GeoHighlight(d, baseEmbeddable, allowed, blocked));
+            items.add(new GeoHighlight(d, embedUrl, baseEmbeddable, allowed, blocked));
         }
 
         return putAndReturn(fixtureId, items);
@@ -190,8 +220,9 @@ public class HighlightsService {
         return items;
     }
 
-    /** Ülkeden bağımsız ham highlight + geo verisi (cache içi). */
-    private record GeoHighlight(HighlightlyHighlightDto dto, boolean baseEmbeddable,
+    /** Ülkeden bağımsız ham highlight + (normalize) embedUrl + geo verisi. */
+    private record GeoHighlight(HighlightlyHighlightDto dto, String embedUrl,
+                                boolean baseEmbeddable,
                                 List<String> allowed, List<String> blocked) {}
 
     private record CacheEntry(List<GeoHighlight> data, Instant expiresAt) {}

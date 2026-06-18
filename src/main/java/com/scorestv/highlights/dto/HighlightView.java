@@ -19,8 +19,14 @@ public record HighlightView(
         boolean embeddable
 ) {
     public static HighlightView of(HighlightlyHighlightDto d, boolean embeddable) {
+        return of(d, d.embedUrl(), embeddable);
+    }
+
+    /** embedUrl'i dışarıdan (örn. normalize edilmiş YouTube embed) verir. */
+    public static HighlightView of(HighlightlyHighlightDto d, String embedUrl,
+                                   boolean embeddable) {
         return new HighlightView(
-                d.id(), d.title(), d.url(), d.embedUrl(),
+                d.id(), d.title(), d.url(), embedUrl,
                 d.imgUrl(), d.source(), d.type(), embeddable);
     }
 }
