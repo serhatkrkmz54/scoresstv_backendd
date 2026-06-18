@@ -198,13 +198,15 @@ scorestv:
   # ============================================================
   # TheSportsDB TV yayını entegrasyonu (thesportsdb.com).
   # API-Football fixture id'si event.idAPIfootball ile eşleştirilir.
-  # v1 ücretsiz anahtar "123" (herkese açık); premium kişiye özel.
-  # Açmak/değiştirmek için: THESPORTSDB_ENABLED / THESPORTSDB_API_KEY.
+  # PREMIUM anahtar: v1 lookuptv ücretsizde 2 kanalla sınırlı, premiumda 100'e
+  # kadar (tüm ülkeler) döner — bu yüzden V2'ye gerek yok. Anahtar kişiye özel
+  # ve ÜCRETLİ; repo public ise THESPORTSDB_API_KEY env'iyle verip burada
+  # tutmamak daha güvenli (gerekirse rotate et).
   # ============================================================
   thesportsdb:
     enabled: ${THESPORTSDB_ENABLED:true}
     base-url: ${THESPORTSDB_BASE_URL:https://www.thesportsdb.com/api/v1/json}
-    api-key: ${THESPORTSDB_API_KEY:123}
+    api-key: ${THESPORTSDB_API_KEY:6361562776}
     timezone: ${THESPORTSDB_TIMEZONE:Etc/UTC}
     cache-ttl-minutes: ${THESPORTSDB_CACHE_TTL:720}
     empty-cache-ttl-minutes: ${THESPORTSDB_EMPTY_CACHE_TTL:180}
