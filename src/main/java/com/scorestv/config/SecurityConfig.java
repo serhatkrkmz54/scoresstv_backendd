@@ -84,7 +84,7 @@ public class SecurityConfig {
                 // Iletisim formu — public POST. Admin listeleme
                 // /api/v1/admin/contact ise anyRequest().authenticated() +
                 // @PreAuthorize("hasRole('ADMIN')") ile korunur.
-                .requestMatchers(HttpMethod.POST, "/api/v1/contact").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/contact", "/api/v1/contact/report").permitAll()
                 // Sitemap listeleme uclari — public (SEO).
                 .requestMatchers("/api/v1/sitemap", "/api/v1/sitemap/**").permitAll()
                 // Sosyal medya (X/Twitter) tweet akisi — public okuma.

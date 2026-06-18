@@ -1,16 +1,21 @@
 package com.scorestv.contact.web;
 
+import com.scorestv.common.ApiException;
 import com.scorestv.contact.ContactService;
 import com.scorestv.contact.dto.ContactCreateRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -36,6 +41,34 @@ public class PublicContactController {
     public Map<String, Object> submit(@Valid @RequestBody ContactCreateRequest req,
                                       HttpServletRequest http) {
         Long id = service.create(req, clientIp(http));
+        return Map.of("status", "ok", "id", id);
+    }
+
+    /**
+     * Mobil "Bize Ulaşın" — resim/video ekli sorun bildirimi (multipart).
+     * Giriş gerektirmez. Alanlar: email (zorunlu), subject (opsiyonel, serbest
+     * metin), message (zorunlu), files (opsiyonel, en fazla 5 resim/video).
+     */
+    @PostMapping(path = "/report", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @ResponseStatus(HttpStatus.CREATED)
+    public Map<String, Object> report(
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam("email") String email,
+            @RequestParam(value = "subject", required = false) String subject,
+            @RequestParam("message") String message,
+            @RequestParam(value = "files", required = false) List<MultipartFile> files,
+            HttpServletRequest http) {
+        if (email == null || email.isBlank()) {
+            throw ApiException.badRequest("E-posta zorunlu.");
+        }
+        if (message == null || message.isBlank()) {
+            throw ApiException.badRequest("Mesaj boş olamaz.");
+        }
+        if (message.length() > 4000) {
+            throw ApiException.badRequest("Mesaj 4000 karakteri aşamaz.");
+        }
+        Long id = service.createReport(name, email, subject, message,
+                clientIp(http), "mobile", files);
         return Map.of("status", "ok", "id", id);
     }
 
