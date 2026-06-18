@@ -2,11 +2,9 @@ package com.scorestv.search.deep;
 
 import com.scorestv.football.ApiFootballClient;
 import com.scorestv.football.ApiFootballResponse;
-import com.scorestv.football.sync.CoachUpserter;
 import com.scorestv.football.sync.PlayerProfileUpserter;
 import com.scorestv.football.sync.ReferenceUpserter;
 import com.scorestv.football.sync.TeamUpserter;
-import com.scorestv.football.sync.dto.CoachApiDto;
 import com.scorestv.football.sync.dto.CountryApiDto;
 import com.scorestv.football.sync.dto.LeagueApiDto;
 import com.scorestv.football.sync.dto.PlayerSeasonApiDto;
@@ -30,12 +28,19 @@ import java.util.concurrent.Semaphore;
  * aradığında (lokal Elasticsearch sonuç vermediğinde), API-Football'un
  * {@code ?search=} uçlarından ilgili kayıtları çekip DB'ye upsert eder.
  *
- * <p><b>Otomatik indeksleme:</b> Team/Player/League/Country VE Coach
- * upserter'ları {@link com.scorestv.search.events.EntityIndexedEvent}
- * yayınladığı için upsert sonrası ES'e OTOMATİK yazılır (commit sonrası,
- * async). Böylece kullanıcı kısa süre sonra (frontend silent-retry veya
- * yeniden arama) sonucu görür. Koç da artık {@code scorestv_coaches}
- * indeksinde aranabilir (CoachDoc + SearchService.searchCoaches).
+ * <p><b>Otomatik indeksleme:</b> Team/Player/League/Country upserter'ları
+ * {@link com.scorestv.search.events.EntityIndexedEvent} yayınladığı için
+ * upsert sonrası ES'e OTOMATİK yazılır (commit sonrası, async). Böylece
+ * kullanıcı kısa süre sonra (frontend silent-retry veya yeniden arama)
+ * sonucu görür.
+ *
+ * <p><b>Koç KAPSAM DIŞI:</b> Koçlar için API'den canlı çekme (deep-import)
+ * yapılmaz — {@code /coachs?search=} ucu Türkçe karakterlerde tutarsız ve
+ * karmaşık koç verisinde import kırılgan. Koç verisi sisteme yalnızca SAĞLAM
+ * yoldan, takım sync'i ({@code CoachesSyncService.syncByTeam}, {@code
+ * /coachs?team=}) ile TAM veriyle girer ve {@code scorestv_coaches}
+ * indeksinde aranır. Yani koç araması çalışır, sadece "sistemde yoksa
+ * API'den çek" kısmı koç için devre dışıdır.
  *
  * <p><b>Kota koruması (ZORUNLU):</b>
  * <ul>
@@ -53,8 +58,6 @@ public class DeepSearchService {
 
     private static final ParameterizedTypeReference<ApiFootballResponse<List<TeamApiDto>>>
             TEAMS_TYPE = new ParameterizedTypeReference<>() {};
-    private static final ParameterizedTypeReference<ApiFootballResponse<List<CoachApiDto>>>
-            COACHS_TYPE = new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<ApiFootballResponse<List<LeagueApiDto>>>
             LEAGUES_TYPE = new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<ApiFootballResponse<List<CountryApiDto>>>
@@ -68,7 +71,6 @@ public class DeepSearchService {
 
     private final ApiFootballClient client;
     private final TeamUpserter teamUpserter;
-    private final CoachUpserter coachUpserter;
     private final ReferenceUpserter referenceUpserter;
     private final PlayerProfileUpserter playerProfileUpserter;
     private final boolean enabled;
@@ -80,14 +82,12 @@ public class DeepSearchService {
 
     public DeepSearchService(ApiFootballClient client,
                              TeamUpserter teamUpserter,
-                             CoachUpserter coachUpserter,
                              ReferenceUpserter referenceUpserter,
                              PlayerProfileUpserter playerProfileUpserter,
                              @Value("${scorestv.search.deep-import.enabled:true}")
                              boolean enabled) {
         this.client = client;
         this.teamUpserter = teamUpserter;
-        this.coachUpserter = coachUpserter;
         this.referenceUpserter = referenceUpserter;
         this.playerProfileUpserter = playerProfileUpserter;
         this.enabled = enabled;
@@ -128,10 +128,11 @@ public class DeepSearchService {
             if (attempted.size() > MAX_CACHE) attempted.clear();
             log.info("Derin arama başladı: '{}' (api sorgusu='{}')", q, apiQ);
             importTeams(apiQ);
-            importCoaches(apiQ);
             importLeagues(apiQ);
             importCountries(apiQ);
             importPlayers(apiQ);
+            // NOT: Koç deep-import'u BİLEREK yok — koçlar yalnızca takım sync'i
+            // ile (tam veri, /coachs?team=) gelir. Bkz. sınıf javadoc'u.
         } finally {
             slots.release();
         }
@@ -148,29 +149,6 @@ public class DeepSearchService {
             }
         } catch (RuntimeException e) {
             log.warn("Derin arama /teams hata ('{}'): {}", q, e.toString());
-        }
-    }
-
-    private void importCoaches(String q) {
-        try {
-            ApiFootballResponse<List<CoachApiDto>> r =
-                    client.get("/coachs", Map.of("search", q), COACHS_TYPE);
-            List<CoachApiDto> items = r.response();
-            if (items != null) {
-                int n = 0;
-                for (CoachApiDto dto : items) {
-                    if (dto == null || dto.id() == null) continue;
-                    try {
-                        coachUpserter.upsert(dto);
-                        n++;
-                    } catch (RuntimeException ignore) {
-                        // tek koç hatası diğerlerini bloklamasın
-                    }
-                }
-                if (n > 0) log.info("Derin arama: {} koç içe aktarıldı ('{}')", n, q);
-            }
-        } catch (RuntimeException e) {
-            log.warn("Derin arama /coachs hata ('{}'): {}", q, e.toString());
         }
     }
 
