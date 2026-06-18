@@ -18,7 +18,8 @@ public record SearchResponse(
         List<LeagueHit> leagues,
         List<PlayerHit> players,
         List<FixtureHit> fixtures,
-        List<CountryHit> countries
+        List<CountryHit> countries,
+        List<CoachHit> coaches
 ) {
     public record TeamHit(
             Long id, String name, String nameTr, String slug,
@@ -45,5 +46,16 @@ public record SearchResponse(
     public record CountryHit(
             Long id, String name, String nameTr, String slug,
             String code, String flagUrl
+    ) {}
+
+    /**
+     * Koç sonucu. Koç detay sayfasi yok; frontend hafif bilgi karti gosterir
+     * ve {@code currentTeamId} biliniyorsa "Takima git" ile takim sayfasina
+     * yonlendirir. {@code currentTeamId}/{@code currentTeamName} null olabilir
+     * (deep-search ile soğuk gelen koçta takim henuz bilinmiyor).
+     */
+    public record CoachHit(
+            Long id, String name, String nationality, Integer age,
+            String photoUrl, Long currentTeamId, String currentTeamName
     ) {}
 }

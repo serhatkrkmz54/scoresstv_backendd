@@ -1,5 +1,6 @@
 package com.scorestv.search.indexer;
 
+import com.scorestv.search.index.CoachDoc;
 import com.scorestv.search.index.CountryDoc;
 import com.scorestv.search.index.FixtureDoc;
 import com.scorestv.search.index.LeagueDoc;
@@ -79,6 +80,8 @@ public class SearchIndexBootstrap {
                     indexer::reindexPlayers);
             bootstrapIfEmpty("scorestv_fixtures", FixtureDoc.class,
                     indexer::reindexFixtures);
+            bootstrapIfEmpty("scorestv_coaches", CoachDoc.class,
+                    indexer::reindexCoaches);
             log.info("ES bootstrap tamamlandi");
         } catch (Exception e) {
             log.warn("ES bootstrap hata: {} (ES erisilebilir mi? Manual reindex denenebilir)",

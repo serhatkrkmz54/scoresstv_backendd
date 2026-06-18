@@ -74,6 +74,10 @@ public class SearchAdminController {
                 long n = indexer.reindexFixtures();
                 return Map.of("type", "fixtures", "indexed", n);
             }
+            case "coaches" -> {
+                long n = indexer.reindexCoaches();
+                return Map.of("type", "coaches", "indexed", n);
+            }
             default -> {
                 return Map.of("status", "error",
                         "message", "Bilinmeyen type: " + type);

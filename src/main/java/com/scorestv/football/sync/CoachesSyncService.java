@@ -8,8 +8,10 @@ import com.scorestv.football.domain.FixtureLineupRepository;
 import com.scorestv.football.domain.Team;
 import com.scorestv.football.domain.TeamRepository;
 import com.scorestv.football.sync.dto.CoachApiDto;
+import com.scorestv.search.events.EntityIndexedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,17 +61,20 @@ public class CoachesSyncService {
     private final CoachRepository coachRepository;
     private final FixtureLineupRepository lineupRepository;
     private final TeamRepository teamRepository;
+    private final ApplicationEventPublisher events;
 
     public CoachesSyncService(ApiFootballClient client,
                               CoachUpserter upserter,
                               CoachRepository coachRepository,
                               FixtureLineupRepository lineupRepository,
-                              TeamRepository teamRepository) {
+                              TeamRepository teamRepository,
+                              ApplicationEventPublisher events) {
         this.client = client;
         this.upserter = upserter;
         this.coachRepository = coachRepository;
         this.lineupRepository = lineupRepository;
         this.teamRepository = teamRepository;
+        this.events = events;
     }
 
     /**
@@ -118,6 +123,9 @@ public class CoachesSyncService {
         if (selected != null) {
             selected.setCurrentTeamId(teamId);
             coachRepository.save(selected);
+            // currentTeamId artik set — ES koç dokumanini tazele ki aramada
+            // "mevcut takim" + "Takima git" calissin (commit sonrasi @Async).
+            events.publishEvent(new EntityIndexedEvent.CoachIndexed(selected));
         }
         log.info("Coach sync: teamId={} — bas antrenor coachId={} ({})",
                 teamId, headCoach.id(), headCoach.name());

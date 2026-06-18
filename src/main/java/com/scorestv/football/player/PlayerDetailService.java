@@ -213,22 +213,42 @@ public class PlayerDetailService {
     private TeamRef resolveCurrentTeam(Long playerId, List<PlayerCareerTeam> careerTeams,
                                        boolean turkish) {
         // "Mevcut takim" widget'i KULUP takimini tercih eder. Milli takim
-        // sadece oyuncunun hicbir kulup kaydi yoksa kullanilir (amator
-        // milli takim uyesi edge case).
+        // sadece oyuncunun hicbir kulup kaydi yoksa kullanilir.
         //
-        // Ornek: Fabinho 2026 sezonunda sadece Brezilya icin oynamis (Dunya
-        // Kupasi + Dostluk). Al-Ittihad FC en son 2025 sezonu. Widget
-        // Al-Ittihad'i gostermeli — milli takim degil.
+        // SINYALLER (en guncel olan kazanir):
+        //  A) EN SON TRANSFER'in "in" takimi — kulup-kulup hareketinin kesin
+        //     tarihi var. KIRALIKLAR icin kritik: oyuncu kiralik gittiginde
+        //     (orn. O. Kökçü → Beşiktaş, 2025-07) ana kulubunun (Benfica)
+        //     sezon istatistikleri hala "guncel kulup" gibi gorunur; transfer
+        //     "in" takimi gercek guncel kulubu verir.
+        //  B) DB SEZON ISTATISTIKLERI — en yeni sezondaki ilk KULUP takimi.
         //
-        // Algoritma:
-        // 1) DB stats'ta en yeni sezondan baslayip GERIYE dogru tara —
-        //    ilk bulunan KULUP takimini sec
-        // 2) Yoksa career_teams'te en yeni kulup sezonu (yine kulup oncelikli)
-        // 3) Hicbir kulup yoksa milli takim fallback
+        // KARAR: transfer yili >= en yeni stat yili ise transfer kazanir
+        // (transfer/kiralik en taze sinyaldir). Stat daha yeni bir sezonsa
+        // (transfer kaydedilmemis serbest gecis vb.) stat kazanir. Boylece
+        // kiralik-donusu gibi durumlar da dogru cozulur.
+        //
+        // Ornek (Fabinho): 2026 sezonunda sadece Brezilya (milli) oynamis,
+        // kulup en son 2025 Al-Ittihad. Milli takim degil, kulup gosterilir.
 
-        // 1) DB stats — kulup oncelikli, sezon sezon geri tara
+        // --- A) En son transfer (max non-null tarih) → "in" takimi
+        Transfer latestTransfer = null;
+        for (Transfer tr : transferRepository.findByPlayerIdOrderByTransferDateDesc(playerId)) {
+            if (tr.getTransferDate() == null || tr.getInTeamId() == null) continue;
+            if (latestTransfer == null
+                    || tr.getTransferDate().isAfter(latestTransfer.getTransferDate())) {
+                latestTransfer = tr;
+            }
+        }
+        Integer transferYear = latestTransfer != null
+                ? latestTransfer.getTransferDate().getYear() : null;
+
+        // --- B) DB stats — kulup oncelikli, en yeni sezondaki ilk kulup
         List<Integer> seasonYears = statRepository.findSeasonYearsByPlayer(playerId);
+        Team statClub = null;
+        Integer statYear = null;
         Team fallbackNational = null;
+        outer:
         for (Integer year : seasonYears) {
             List<PlayerSeasonStat> stats =
                     statRepository.findByPlayerIdAndSeason(playerId, year);
@@ -236,7 +256,9 @@ public class PlayerDetailService {
                 Team t = s.getTeam();
                 if (t == null) continue;
                 if (!t.isNational()) {
-                    return toTeamRef(t, turkish);
+                    statClub = t;
+                    statYear = year;
+                    break outer; // en yeni sezondaki ilk kulup
                 }
                 if (fallbackNational == null) {
                     fallbackNational = t; // en yeni milli takim — fallback
@@ -244,7 +266,26 @@ public class PlayerDetailService {
             }
         }
 
-        // 2) career_teams fallback — kulup oncelikli, en yeni sezon
+        // --- KARAR: transfer vs stat, en guncel kazanir
+        if (latestTransfer != null
+                && (statYear == null || transferYear >= statYear)) {
+            Team inTeam = teamRepository.findById(latestTransfer.getInTeamId()).orElse(null);
+            if (inTeam != null) {
+                return toTeamRef(inTeam, turkish);
+            }
+            // DB'de takim yoksa transfer snapshot'undan TeamRef uret
+            String snapName = latestTransfer.getInTeamName() != null
+                    ? latestTransfer.getInTeamName()
+                    : ("Team#" + latestTransfer.getInTeamId());
+            return new TeamRef(latestTransfer.getInTeamId(), snapName,
+                    latestTransfer.getInTeamLogo(),
+                    SlugUtil.teamSlug(snapName, latestTransfer.getInTeamId()));
+        }
+        if (statClub != null) {
+            return toTeamRef(statClub, turkish);
+        }
+
+        // --- career_teams fallback — kulup oncelikli, en yeni sezon
         Team latestClub = null;
         int latestClubYear = Integer.MIN_VALUE;
         Team latestAny = null;
@@ -269,7 +310,7 @@ public class PlayerDetailService {
             return toTeamRef(latestClub, turkish);
         }
 
-        // 3) Hicbir kulup kaydi yok — milli takim fallback (stats > career_teams)
+        // --- Hicbir kulup kaydi yok — milli takim fallback (stats > career_teams)
         if (fallbackNational != null) {
             return toTeamRef(fallbackNational, turkish);
         }

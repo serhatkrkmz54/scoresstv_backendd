@@ -71,4 +71,10 @@ public class SearchIndexEventListener {
     public void onFixtureIndexed(EntityIndexedEvent.FixtureIndexed e) {
         indexer.indexFixture(e.fixture());
     }
+
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onCoachIndexed(EntityIndexedEvent.CoachIndexed e) {
+        indexer.indexCoach(e.coach());
+    }
 }

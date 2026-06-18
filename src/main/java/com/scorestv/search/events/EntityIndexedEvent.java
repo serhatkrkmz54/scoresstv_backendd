@@ -1,5 +1,6 @@
 package com.scorestv.search.events;
 
+import com.scorestv.football.domain.Coach;
 import com.scorestv.football.domain.Country;
 import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.League;
@@ -23,7 +24,7 @@ import com.scorestv.football.domain.Team;
  *       event yayinlansa bile NOOP olur</li>
  * </ul>
  *
- * <p>5 tipte type-safe sealed interface — switch exhaustive kontrol saglar.
+ * <p>6 tipte type-safe sealed interface — switch exhaustive kontrol saglar.
  */
 public sealed interface EntityIndexedEvent {
 
@@ -32,4 +33,5 @@ public sealed interface EntityIndexedEvent {
     record PlayerIndexed(Player player) implements EntityIndexedEvent {}
     record CountryIndexed(Country country) implements EntityIndexedEvent {}
     record FixtureIndexed(Fixture fixture) implements EntityIndexedEvent {}
+    record CoachIndexed(Coach coach) implements EntityIndexedEvent {}
 }

@@ -1,6 +1,8 @@
 package com.scorestv.search.indexer;
 
 import com.scorestv.common.SlugUtil;
+import com.scorestv.football.domain.Coach;
+import com.scorestv.football.domain.CoachRepository;
 import com.scorestv.football.domain.Country;
 import com.scorestv.football.domain.CountryRepository;
 import com.scorestv.football.domain.Fixture;
@@ -11,6 +13,8 @@ import com.scorestv.football.domain.Player;
 import com.scorestv.football.domain.PlayerRepository;
 import com.scorestv.football.domain.Team;
 import com.scorestv.football.domain.TeamRepository;
+import com.scorestv.search.index.CoachDoc;
+import com.scorestv.search.index.CoachDocRepository;
 import com.scorestv.search.index.CountryDoc;
 import com.scorestv.search.index.CountryDocRepository;
 import com.scorestv.search.index.FixtureDoc;
@@ -65,12 +69,14 @@ public class SearchIndexerService {
     private final PlayerRepository playerRepo;
     private final CountryRepository countryRepo;
     private final FixtureRepository fixtureRepo;
+    private final CoachRepository coachRepo;
 
     private final TeamDocRepository teamDocs;
     private final LeagueDocRepository leagueDocs;
     private final PlayerDocRepository playerDocs;
     private final CountryDocRepository countryDocs;
     private final FixtureDocRepository fixtureDocs;
+    private final CoachDocRepository coachDocs;
 
     /** Popüler lig/takım id'leri — arama relevansinda popularity boost icin. */
     private final java.util.Set<Long> popularTeamIds;
@@ -85,22 +91,26 @@ public class SearchIndexerService {
             PlayerRepository playerRepo,
             CountryRepository countryRepo,
             FixtureRepository fixtureRepo,
+            CoachRepository coachRepo,
             TeamDocRepository teamDocs,
             LeagueDocRepository leagueDocs,
             PlayerDocRepository playerDocs,
             CountryDocRepository countryDocs,
             FixtureDocRepository fixtureDocs,
+            CoachDocRepository coachDocs,
             com.scorestv.football.FootballProperties footballProps) {
         this.teamRepo = teamRepo;
         this.leagueRepo = leagueRepo;
         this.playerRepo = playerRepo;
         this.countryRepo = countryRepo;
         this.fixtureRepo = fixtureRepo;
+        this.coachRepo = coachRepo;
         this.teamDocs = teamDocs;
         this.leagueDocs = leagueDocs;
         this.playerDocs = playerDocs;
         this.countryDocs = countryDocs;
         this.fixtureDocs = fixtureDocs;
+        this.coachDocs = coachDocs;
         this.popularTeamIds =
                 java.util.Set.copyOf(footballProps.serving().popularTeamIds());
         this.popularLeagueIds =
@@ -120,6 +130,7 @@ public class SearchIndexerService {
             reindexTeams();
             reindexPlayers();
             reindexFixtures();
+            reindexCoaches();
             log.info("ES reindex (ASYNC) tamamlandi");
         } catch (Exception e) {
             log.error("ES reindex hata: {}", e.getMessage(), e);
@@ -145,11 +156,13 @@ public class SearchIndexerService {
             dropAndRecreate(com.scorestv.search.index.TeamDoc.class);
             dropAndRecreate(com.scorestv.search.index.PlayerDoc.class);
             dropAndRecreate(com.scorestv.search.index.FixtureDoc.class);
+            dropAndRecreate(com.scorestv.search.index.CoachDoc.class);
             reindexCountries();
             reindexLeagues();
             reindexTeams();
             reindexPlayers();
             reindexFixtures();
+            reindexCoaches();
             log.info("ES rebuild tamamlandi");
         } catch (Exception e) {
             log.error("ES rebuild hata: {}", e.getMessage(), e);
@@ -297,6 +310,27 @@ public class SearchIndexerService {
         return total;
     }
 
+    public long reindexCoaches() {
+        log.info("ES reindex: coaches baslatildi");
+        ensureIndex(com.scorestv.search.index.CoachDoc.class);
+        long total = 0;
+        int page = 0;
+        while (true) {
+            var slice = coachRepo.findAll(PageRequest.of(page, CHUNK));
+            if (slice.isEmpty()) break;
+            List<CoachDoc> batch = new ArrayList<>(slice.getSize());
+            for (Coach c : slice) {
+                batch.add(toDoc(c));
+            }
+            coachDocs.saveAll(batch);
+            total += slice.getNumberOfElements();
+            if (!slice.hasNext()) break;
+            page++;
+        }
+        log.info("ES reindex: coaches tamamlandi, toplam={}", total);
+        return total;
+    }
+
     // ============================================================
     // INCREMENTAL — entity tek tek (Upserter'lar buraya cagiracak)
     // ============================================================
@@ -329,6 +363,12 @@ public class SearchIndexerService {
         if (f == null) return;
         try { fixtureDocs.save(toDoc(f)); }
         catch (Exception e) { log.warn("ES indexFixture fail id={}: {}", f.getId(), e.getMessage()); }
+    }
+
+    public void indexCoach(Coach c) {
+        if (c == null) return;
+        try { coachDocs.save(toDoc(c)); }
+        catch (Exception e) { log.warn("ES indexCoach fail id={}: {}", c.getId(), e.getMessage()); }
     }
 
     // ============================================================
@@ -396,10 +436,18 @@ public class SearchIndexerService {
     private PlayerDoc toDoc(Player p) {
         var d = new PlayerDoc();
         d.setId(p.getId());
-        // displayName = "Arda Guler" (firstname+lastname varsa); yoksa kisa "A. Guler".
-        // Master Player tablosunda firstname/lastname dolu olan kayitlarda
-        // arama "arda" yazinca yakalar (autocomplete_index edge_ngram).
-        d.setName(p.getDisplayName());
+        // name = oyuncunun YAYGIN/gosterilen adi (Player.name): "Talisca",
+        // "Hulk", "Pedro Talisca"... Detay sayfasi da player.getName() gosterir,
+        // yani display tutarli olur.
+        //
+        // ONCEKI BUG: name'e getDisplayName() (firstname+lastname) yaziliyordu.
+        // Tek-isimli (mononym) oyuncularda bu, yaygin adi indeks DISINDA
+        // birakiyordu: Talisca(12724) name="Talisca" ama displayName=
+        // "Anderson Souza Conceição" → "talisca" sorgusu hicbir alana dusmuyor,
+        // sonuc gelmiyordu. firstname/lastname ZATEN ayri alanlarda indexli
+        // (autocomplete_index edge_ngram), yani "anderson"/"souza" gibi tam-ad
+        // tek-kelime aramalari calismaya devam eder.
+        d.setName(p.getName());
         d.setFirstName(p.getFirstname());
         d.setLastName(p.getLastname());
         d.setSlug(SlugUtil.playerSlug(p.getFirstname(), p.getLastname(),
@@ -409,6 +457,30 @@ public class SearchIndexerService {
         d.setPhotoUrl(p.getPhotoUrl());
         // Position + teamId/teamName Player entity'sinde tutulmuyor (squad table
         // ayri); ileride zenginlestirilebilir. Suanlik bos birakilir.
+        return d;
+    }
+
+    private CoachDoc toDoc(Coach c) {
+        var d = new CoachDoc();
+        d.setId(c.getId());
+        d.setName(c.getName());
+        d.setFirstName(c.getFirstname());
+        d.setLastName(c.getLastname());
+        d.setNationality(c.getNationality());
+        d.setAge(c.getAge());
+        d.setPhotoUrl(c.getPhotoUrl());
+        // Mevcut takim (varsa) — kartta gosterim + "Takima git" yonlendirmesi.
+        // Deep-search ile soğuk gelen koçta currentTeamId null olabilir.
+        Long teamId = c.getCurrentTeamId();
+        if (teamId != null) {
+            d.setCurrentTeamId(teamId);
+            teamRepo.findById(teamId).ifPresent(t -> {
+                // TR adi varsa onu tercih et (gosterim icin).
+                String nm = (t.getNameTr() != null && !t.getNameTr().isBlank())
+                        ? t.getNameTr() : t.getName();
+                d.setCurrentTeamName(nm);
+            });
+        }
         return d;
     }
 

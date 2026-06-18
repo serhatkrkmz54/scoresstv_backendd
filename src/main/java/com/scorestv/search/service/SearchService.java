@@ -6,9 +6,11 @@ import co.elastic.clients.elasticsearch._types.query_dsl.MultiMatchQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
+import com.scorestv.search.index.CoachDoc;
 import com.scorestv.search.index.CountryDoc;
 import com.scorestv.search.index.FixtureDoc;
 import com.scorestv.search.index.LeagueDoc;
+import com.scorestv.search.deep.DeepSearchService;
 import com.scorestv.search.index.PlayerDoc;
 import com.scorestv.search.index.TeamDoc;
 import org.slf4j.Logger;
@@ -65,9 +67,11 @@ public class SearchService {
     private static final int MIN_QUERY_LEN = 1;
 
     private final ElasticsearchOperations ops;
+    private final DeepSearchService deepSearch;
 
-    public SearchService(ElasticsearchOperations ops) {
+    public SearchService(ElasticsearchOperations ops, DeepSearchService deepSearch) {
         this.ops = ops;
+        this.deepSearch = deepSearch;
     }
 
     /**
@@ -84,7 +88,7 @@ public class SearchService {
 
         if (q.length() < MIN_QUERY_LEN) {
             return new SearchResponse(q, 0L,
-                    List.of(), List.of(), List.of(), List.of(), List.of());
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
 
         boolean all = types == null || types.isEmpty();
@@ -99,14 +103,24 @@ public class SearchService {
                 ? searchFixtures(q) : List.of();
         List<SearchResponse.CountryHit> countries = (all || types.contains("country"))
                 ? searchCountries(q) : List.of();
+        List<SearchResponse.CoachHit> coaches = (all || types.contains("coach"))
+                ? searchCoaches(q) : List.of();
+
+        // Lokal hiç sonuç yoksa → API-Football'dan derin arama tetikle (async,
+        // fire-and-forget). Bulunan kayıtlar DB'ye + (event ile) ES'e yazılır;
+        // kullanıcı kısa süre sonra (yeniden arama / frontend retry) görür.
+        if (teams.isEmpty() && leagues.isEmpty() && players.isEmpty()
+                && fixtures.isEmpty() && countries.isEmpty() && coaches.isEmpty()) {
+            deepSearch.triggerAsync(q);
+        }
 
         long took = System.currentTimeMillis() - t0;
-        log.debug("Search q='{}' took={}ms team={} league={} player={} fix={} ctry={}",
+        log.debug("Search q='{}' took={}ms team={} league={} player={} fix={} ctry={} coach={}",
                 q, took, teams.size(), leagues.size(), players.size(),
-                fixtures.size(), countries.size());
+                fixtures.size(), countries.size(), coaches.size());
 
         return new SearchResponse(q, took,
-                teams, leagues, players, fixtures, countries);
+                teams, leagues, players, fixtures, countries, coaches);
     }
 
     // ============================================================
@@ -247,6 +261,31 @@ public class SearchService {
             out.add(new SearchResponse.CountryHit(
                     d.getId(), d.getName(), d.getNameTr(), d.getSlug(),
                     d.getCode(), d.getFlagUrl()));
+        });
+        return out;
+    }
+
+    private List<SearchResponse.CoachHit> searchCoaches(String q) {
+        // Oyuncu ile ayni desen: tam isim + ad + soyad alanlarinda ara.
+        // "ismail", "kartal", "ismail kar" → "İsmail Kartal" (edge_ngram +
+        // asciifolding TR karakter destegi).
+        Query mm = Query.of(b -> b.multiMatch(MultiMatchQuery.of(m -> m
+                .query(q)
+                .fields("name^3", "firstName", "lastName^2")
+                .type(TextQueryType.MostFields)
+                .operator(Operator.And))));
+        var nq = NativeQuery.builder()
+                .withQuery(withPopularity(mm))
+                .withMaxResults(MAX_PER_TYPE)
+                .build();
+        SearchHits<CoachDoc> hits = ops.search(nq, CoachDoc.class,
+                IndexCoordinates.of("scorestv_coaches"));
+        List<SearchResponse.CoachHit> out = new ArrayList<>();
+        hits.forEach(h -> {
+            var d = h.getContent();
+            out.add(new SearchResponse.CoachHit(
+                    d.getId(), d.getName(), d.getNationality(), d.getAge(),
+                    d.getPhotoUrl(), d.getCurrentTeamId(), d.getCurrentTeamName()));
         });
         return out;
     }

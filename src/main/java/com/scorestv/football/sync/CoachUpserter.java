@@ -5,6 +5,8 @@ import com.scorestv.football.domain.CoachCareer;
 import com.scorestv.football.domain.CoachCareerRepository;
 import com.scorestv.football.domain.CoachRepository;
 import com.scorestv.football.sync.dto.CoachApiDto;
+import com.scorestv.search.events.EntityIndexedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,11 +30,14 @@ public class CoachUpserter {
 
     private final CoachRepository coachRepository;
     private final CoachCareerRepository careerRepository;
+    private final ApplicationEventPublisher events;
 
     public CoachUpserter(CoachRepository coachRepository,
-                         CoachCareerRepository careerRepository) {
+                         CoachCareerRepository careerRepository,
+                         ApplicationEventPublisher events) {
         this.coachRepository = coachRepository;
         this.careerRepository = careerRepository;
+        this.events = events;
     }
 
     // REQUIRES_NEW: her coach kendi tx'inde upsert edilir. Boylece bir coach'un
@@ -100,6 +105,13 @@ public class CoachUpserter {
                 careerRepository.save(c);
             }
         }
+
+        // ES koç arama indeksi — tx commit sonrasi @Async indexlenir
+        // (SearchIndexEventListener.onCoachIndexed). ES kapaliysa NOOP.
+        // NOT: currentTeamId burada henuz set degildir (CoachesSyncService
+        // sonra atar + tekrar event yayinlar); deep-search ile gelen koçta
+        // ise zaten null kalir.
+        events.publishEvent(new EntityIndexedEvent.CoachIndexed(coach));
     }
 
     private static LocalDate parseDate(String value) {
