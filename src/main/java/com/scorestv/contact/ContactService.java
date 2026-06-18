@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -26,7 +27,7 @@ public class ContactService {
 
     /** Mobil "Bize Ulaşın" eki: en fazla dosya + dosya başı boyut. */
     private static final int MAX_FILES = 5;
-    private static final long MAX_FILE_BYTES = 50L * 1024 * 1024; // 50 MB
+    private static final long MAX_FILE_BYTES = 100L * 1024 * 1024; // 100 MB
 
     private final ContactMessageRepository repository;
     private final MinioStorageService storage;
@@ -83,13 +84,15 @@ public class ContactService {
                     continue; // sadece resim/video
                 }
                 if (f.getSize() > MAX_FILE_BYTES) {
-                    continue; // 50MB üstü atla
+                    continue; // 100MB üstü atla
                 }
-                try {
+                try (InputStream in = f.getInputStream()) {
                     String ext = extensionFor(f.getOriginalFilename(), ct);
                     String key = "contact/" + m.getId() + "/" + UUID.randomUUID()
                             + (ext != null ? "." + ext : "");
-                    String url = storage.upload(key, f.getBytes(), ct);
+                    // Akış yükleme — içeriği belleğe okumadan doğrudan MinIO'ya
+                    // aktarır (büyük video ekleri için OOM riskini önler).
+                    String url = storage.upload(key, in, f.getSize(), ct);
                     ContactAttachment a = new ContactAttachment();
                     a.setStorageKey(key);
                     a.setUrl(url);

@@ -13,11 +13,11 @@ spring:
     import: "optional:file:.env[.properties]"
 
   # Cok parcali dosya yukleme. Ceviri Excel import'u + mobil "Bize Ulasin"
-  # resim/video ekleri (5 dosya x 50MB). max-request-size tum govde icin.
+  # resim/video ekleri (5 dosya x 100MB). max-request-size tum govde icin.
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 260MB
+      max-file-size: 100MB
+      max-request-size: 520MB
 
   jpa:
     hibernate:

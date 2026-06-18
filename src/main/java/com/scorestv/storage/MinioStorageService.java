@@ -13,6 +13,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 
 /**
  * MinIO (S3 uyumlu) nesne depolama servisi.
@@ -79,6 +80,36 @@ public class MinioStorageService {
                     .bucket(properties.bucket())
                     .object(objectKey)
                     .stream(stream, data.length, -1)
+                    .contentType(contentType)
+                    .build());
+            return publicUrl(objectKey);
+        } catch (Exception ex) {
+            throw new StorageException("Nesne yüklenemedi: " + objectKey, ex);
+        }
+    }
+
+    /**
+     * Bir nesneyi <b>akış (stream)</b> ile yükler — içeriği tümüyle belleğe
+     * (byte[]) okumadan doğrudan MinIO'ya aktarır. Büyük dosyalar (video) için
+     * heap baskısını/OOM riskini önler.
+     *
+     * @param objectKey   bucket içindeki yol/anahtar
+     * @param stream      içerik akışı (çağıran kapatır)
+     * @param size        içerik boyutu (byte); bilinmiyorsa &le; 0 verin
+     * @param contentType MIME tipi
+     * @return nesnenin herkese açık URL'si
+     * @throws StorageException yükleme başarısız olursa
+     */
+    public String upload(String objectKey, InputStream stream, long size, String contentType) {
+        // Boyut biliniyorsa partSize -1 (MinIO otomatik hesaplar); bilinmiyorsa
+        // objectSize -1 + sabit 10MB parça gerekir.
+        long objectSize = size > 0 ? size : -1L;
+        long partSize = size > 0 ? -1L : 10L * 1024 * 1024;
+        try {
+            minioClient.putObject(PutObjectArgs.builder()
+                    .bucket(properties.bucket())
+                    .object(objectKey)
+                    .stream(stream, objectSize, partSize)
                     .contentType(contentType)
                     .build());
             return publicUrl(objectKey);
