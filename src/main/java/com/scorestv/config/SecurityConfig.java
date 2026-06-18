@@ -79,6 +79,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/comments/**").permitAll()
                 // Maç highlight/özet — public okuma (Highlightly proxy).
                 .requestMatchers(HttpMethod.GET, "/api/v1/highlights/**").permitAll()
+                // Maç TV yayını — public okuma (TheSportsDB proxy).
+                .requestMatchers(HttpMethod.GET, "/api/v1/broadcasts/**").permitAll()
                 // Maç sonucu tahmin oylaması — anonim okuma + oy (voterId).
                 .requestMatchers("/api/v1/predictions/**").permitAll()
                 // Iletisim formu — public POST. Admin listeleme
