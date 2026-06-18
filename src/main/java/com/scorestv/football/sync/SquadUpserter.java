@@ -38,9 +38,17 @@ public class SquadUpserter {
         }
         Team teamRef = teamRepository.getReferenceById(teamId);
         int written = 0;
+        // Ayni kadroda tekrarli player_id'yi (veya id=0/null) ele — yoksa
+        // uq_team_squad_team_season_player ihlali tum REPLACE tx'ini rollback
+        // ederdi (takimin kadrosu hic yazilamaz).
+        java.util.Set<Long> seen = new java.util.HashSet<>();
         for (SquadApiDto.Player p : players) {
-            if (p == null || p.id() == null || p.name() == null) {
+            // id <= 0: API bazen gercek oyuncu yerine id=0 doner — atla.
+            if (p == null || p.id() == null || p.id() <= 0 || p.name() == null) {
                 continue;
+            }
+            if (!seen.add(p.id())) {
+                continue; // ayni yanitta tekrarli oyuncu
             }
             TeamSquad squad = new TeamSquad();
             squad.setTeam(teamRef);

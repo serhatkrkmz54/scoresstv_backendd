@@ -79,7 +79,10 @@ public class PlayerUpserter {
      * deneme kaldirildi.
      */
     public void upsert(Long playerId, String playerName, String photoUrl) {
-        if (playerId == null || playerName == null || playerName.isBlank()) {
+        // playerId <= 0: API bazen kadro/olay/istatistik verisinde gercek
+        // oyuncu yerine id=0 (bilinmeyen/kayitsiz) doner. Bunu master tabloya
+        // yazmak coplemedir + downstream'de (squad uq) cakismaya yol acar.
+        if (playerId == null || playerId <= 0 || playerName == null || playerName.isBlank()) {
             return;
         }
         try {
