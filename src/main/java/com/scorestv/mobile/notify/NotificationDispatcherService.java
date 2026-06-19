@@ -9,12 +9,15 @@ import com.scorestv.mobile.domain.DeviceMatchSubscriptionRepository;
 import com.scorestv.mobile.domain.UserNotificationPref;
 import com.scorestv.mobile.domain.UserNotificationPrefRepository;
 import com.scorestv.mobile.fcm.FcmMessagingService;
+import com.scorestv.mobile.fcm.FcmTopics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -58,6 +61,9 @@ public class NotificationDispatcherService {
     private final FixtureRepository fixtureRepository;
     private final FixtureEventRepository fixtureEventRepository;
     private final NotificationOutboxEnqueuer enqueuer;
+    /** FCM Topics yolu acik mi? (scorestv.notify.use-fcm-topics) — acikken alici
+     * DB sorgusu + multicast yerine topic/condition'a TEK gonderim. */
+    private final boolean useFcmTopics;
 
     /**
      * Cift bildirim onleme memo'su. Key formati:
@@ -104,7 +110,9 @@ public class NotificationDispatcherService {
             NotificationMessageBuilder messageBuilder,
             FixtureRepository fixtureRepository,
             FixtureEventRepository fixtureEventRepository,
-            NotificationOutboxEnqueuer enqueuer) {
+            NotificationOutboxEnqueuer enqueuer,
+            @Value("${scorestv.notify.use-fcm-topics:false}") boolean useFcmTopics) {
+        this.useFcmTopics = useFcmTopics;
         this.prefRepository = prefRepository;
         this.matchSubRepository = matchSubRepository;
         this.fcmMessaging = fcmMessaging;
@@ -295,6 +303,39 @@ public class NotificationDispatcherService {
             // FCM kapali — worker'in beklemesi (retry) icin gecici hata say.
             throw new IllegalStateException("FCM devre disi");
         }
+
+        // ---- FCM Topics yolu (flag ACIK) ----
+        // Alici DB sorgusu + multicast YOK: ilgili topic'lere TEK condition mesaji;
+        // fan-out'u Google yapar (milyon kullanicida bile sabit maliyet).
+        if (useFcmTopics) {
+            final String suffix = FcmTopics.suffixFor(notifType);
+            final List<String> topics = new ArrayList<>();
+            if (teamId != null) {
+                // GOAL/EVENT — ilgili takimin olay topic'i.
+                topics.add(FcmTopics.teamEvent(teamId, suffix));
+            } else {
+                // KICKOFF/FINAL/HT/2H — maçin iki takimi.
+                final Fixture fx = fixtureRepository.findById(fixtureId).orElse(null);
+                if (fx != null) {
+                    if (fx.getHomeTeam() != null) {
+                        topics.add(FcmTopics.teamEvent(fx.getHomeTeam().getId(), suffix));
+                    }
+                    if (fx.getAwayTeam() != null) {
+                        topics.add(FcmTopics.teamEvent(fx.getAwayTeam().getId(), suffix));
+                    }
+                }
+            }
+            // Maç-bazli favori takipçiler — her tip bildirimi alir.
+            topics.add(FcmTopics.favoriteFixture(fixtureId));
+            if (topics.isEmpty()) return 0;
+            fcmMessaging.sendToConditionOrThrow(
+                    FcmTopics.orCondition(topics), title, body, data);
+            log.info("FCM topic dispatch: fixtureId={} type={} topics={}",
+                    fixtureId, notifType, topics);
+            return 1;
+        }
+
+        // ---- Token-multicast yolu (flag KAPALI — mevcut, varsayilan) ----
         final Set<String> tokens = new LinkedHashSet<>();
         if (teamId != null) {
             // GOAL/EVENT — ilgili takimin (notifType tercihi acik) takipcileri.

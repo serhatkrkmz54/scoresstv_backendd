@@ -1,13 +1,10 @@
 package com.scorestv.football.queue;
 
-import com.scorestv.football.domain.League;
-import com.scorestv.football.domain.LeagueRepository;
-import com.scorestv.football.domain.PlayerRepository;
-import com.scorestv.football.domain.TeamLeagueSeasonRepository;
-import com.scorestv.football.domain.TeamRepository;
+import com.scorestv.football.domain.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -76,13 +73,14 @@ public class AutoEnqueueScheduler {
     @Scheduled(
             cron = "${scorestv.football.sync.auto-enqueue-weekly-squads-cron:0 0 2 * * SUN}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "autoEnqueueWeeklyAllTeamSquads", lockAtMostFor = "PT15M")
     public void weeklyAllTeamSquads() {
         Integer season = LocalDate.now().getYear();
         int added = 0;
         long teamCount = teamRepository.count();
         log.info("Weekly auto-enqueue: tum takimlarin squad sync'i basliyor (toplam {} takim)",
                 teamCount);
-        for (Long teamId : teamRepository.findAll().stream().map(t -> t.getId()).toList()) {
+        for (Long teamId : teamRepository.findAll().stream().map(Team::getId).toList()) {
             Map<String, Object> payload = new HashMap<>();
             payload.put("teamId", teamId);
             payload.put("season", season);
@@ -101,11 +99,12 @@ public class AutoEnqueueScheduler {
     @Scheduled(
             cron = "${scorestv.football.sync.auto-enqueue-daily-transfers-cron:0 30 3 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "autoEnqueueDailyCoveredTransfers", lockAtMostFor = "PT15M")
     public void dailyCoveredTransfers() {
         int added = 0;
         for (Long teamId : teamRepository.findAll().stream()
-                .filter(t -> t.isCovered())
-                .map(t -> t.getId())
+                .filter(Team::isCovered)
+                .map(Team::getId)
                 .toList()) {
             if (queueService.enqueueIfAbsent(SyncJobType.TEAM_TRANSFERS_SYNC,
                     Map.of("teamId", teamId), SyncQueueService.PRIORITY_COVERED)) {
@@ -122,11 +121,12 @@ public class AutoEnqueueScheduler {
     @Scheduled(
             cron = "${scorestv.football.sync.auto-enqueue-daily-standings-cron:0 0 4 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "autoEnqueueDailyCoveredStandings", lockAtMostFor = "PT15M")
     public void dailyCoveredStandings() {
         Integer season = LocalDate.now().getYear();
         int added = 0;
         for (Long leagueId : leagueRepository.findByCoveredTrue().stream()
-                .map(l -> l.getId()).toList()) {
+                .map(League::getId).toList()) {
             Map<String, Object> payload = new HashMap<>();
             payload.put("leagueId", leagueId);
             payload.put("season", season);
@@ -145,12 +145,13 @@ public class AutoEnqueueScheduler {
     @Scheduled(
             cron = "${scorestv.football.sync.auto-enqueue-daily-top-players-cron:0 30 4 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "autoEnqueueDailyCoveredTopPlayers", lockAtMostFor = "PT15M")
     public void dailyCoveredTopPlayers() {
         Integer season = LocalDate.now().getYear();
         int added = 0;
         String[] categories = {"SCORERS", "ASSISTS", "YELLOW_CARDS", "RED_CARDS"};
         for (Long leagueId : leagueRepository.findByCoveredTrue().stream()
-                .map(l -> l.getId()).toList()) {
+                .map(League::getId).toList()) {
             for (String category : categories) {
                 Map<String, Object> payload = new HashMap<>();
                 payload.put("leagueId", leagueId);
@@ -173,12 +174,13 @@ public class AutoEnqueueScheduler {
     @Scheduled(
             cron = "${scorestv.football.sync.auto-enqueue-daily-team-player-stats-cron:0 0 5 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "autoEnqueueDailyCoveredTeamPlayerStats", lockAtMostFor = "PT15M")
     public void dailyCoveredTeamPlayerStats() {
         Integer season = LocalDate.now().getYear();
         int added = 0;
         for (Long teamId : teamRepository.findAll().stream()
-                .filter(t -> t.isCovered())
-                .map(t -> t.getId())
+                .filter(Team::isCovered)
+                .map(Team::getId)
                 .toList()) {
             Map<String, Object> payload = new HashMap<>();
             payload.put("teamId", teamId);
@@ -211,6 +213,7 @@ public class AutoEnqueueScheduler {
     @Scheduled(
             cron = "${scorestv.football.sync.auto-enqueue-daily-teams-roster-cron:0 30 2 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "autoEnqueueDailyCoveredTeamsRoster", lockAtMostFor = "PT15M")
     public void dailyCoveredTeamsRoster() {
         Integer season = LocalDate.now().getYear();
         int considered = 0;
@@ -249,11 +252,12 @@ public class AutoEnqueueScheduler {
     @Scheduled(
             cron = "${scorestv.football.sync.auto-enqueue-daily-player-profile-cron:0 30 5 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "autoEnqueueDailyCoveredPlayerProfiles", lockAtMostFor = "PT15M")
     public void dailyCoveredPlayerProfiles() {
         Integer season = LocalDate.now().getYear();
         int added = 0;
         for (Long playerId : playerRepository.findByCoveredTrue().stream()
-                .map(p -> p.getId()).toList()) {
+                .map(Player::getId).toList()) {
             Map<String, Object> payload = new HashMap<>();
             payload.put("playerId", playerId);
             payload.put("season", season);
@@ -287,6 +291,7 @@ public class AutoEnqueueScheduler {
     @Scheduled(
             cron = "${scorestv.football.sync.auto-enqueue-hourly-player-hydrate-cron:0 15 * * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "autoEnqueueHourlyHydrateMissingPlayerNames", lockAtMostFor = "PT15M")
     public void hourlyHydrateMissingPlayerNames() {
         Integer season = LocalDate.now().getYear();
         int added = 0;

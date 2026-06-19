@@ -1,6 +1,7 @@
 package com.scorestv.social;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -24,6 +25,7 @@ public class SocialTweetsJob {
     @Scheduled(
             fixedDelayString = "${scorestv.social.refresh-ms:1800000}",
             initialDelayString = "${scorestv.social.initial-delay-ms:8000}")
+    @SchedulerLock(name = "socialTweets", lockAtMostFor = "PT5M")
     public void run() {
         service.refresh();
     }

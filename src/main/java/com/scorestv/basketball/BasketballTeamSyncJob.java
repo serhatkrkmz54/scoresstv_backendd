@@ -1,6 +1,7 @@
 package com.scorestv.basketball;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -31,6 +32,7 @@ public class BasketballTeamSyncJob {
     @Scheduled(
             cron = "${scorestv.basketball.team-sync-cron:0 30 4 * * *}",
             zone = "${scorestv.basketball.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "basketballTeamSync", lockAtMostFor = "PT30M")
     public void run() {
         teamSync.syncAllCurrentSeasons();
     }

@@ -3,6 +3,7 @@ package com.scorestv.football.sync;
 import com.scorestv.football.FootballProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -31,6 +32,7 @@ public class FixtureSyncJob {
 
     /** Cron saatinde (varsayılan 04:00) tüm pencereyi yeniden senkronlar. */
     @Scheduled(cron = "${scorestv.football.sync.window-cron}")
+    @SchedulerLock(name = "fixtureSync", lockAtMostFor = "PT30M")
     public void onSchedule() {
         if (!properties.sync().enabled()) {
             return;

@@ -1,6 +1,7 @@
 package com.scorestv.basketball;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -22,6 +23,7 @@ public class BasketballImageMirrorJob {
     @Scheduled(
             cron = "${scorestv.basketball.image-mirror-cron:0 15 * * * *}",
             zone = "${scorestv.basketball.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "basketballImageMirror", lockAtMostFor = "PT15M")
     public void run() {
         mirror.mirrorAll();
     }

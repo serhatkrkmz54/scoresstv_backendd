@@ -6,6 +6,7 @@ import com.scorestv.football.domain.FixtureRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -40,6 +41,7 @@ public class DailyInjuriesJob {
     @Scheduled(
             cron = "${scorestv.football.sync.injuries-cron:0 30 4 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "dailyInjuries", lockAtMostFor = "PT15M")
     public void run() {
         Instant start = Instant.now();
         Instant end = start.plus(Duration.ofHours(36));

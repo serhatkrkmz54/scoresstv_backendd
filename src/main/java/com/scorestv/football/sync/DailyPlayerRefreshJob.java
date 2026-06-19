@@ -6,6 +6,7 @@ import com.scorestv.football.domain.PlayerSeasonStatRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -54,6 +55,7 @@ public class DailyPlayerRefreshJob {
     @Scheduled(
             cron = "${scorestv.football.sync.player-refresh-cron:0 0 7 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "dailyPlayerRefresh", lockAtMostFor = "PT30M")
     public void run() {
         List<Player> covered = playerRepository.findByCoveredTrue();
         if (covered.isEmpty()) {

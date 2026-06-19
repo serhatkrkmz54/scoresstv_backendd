@@ -6,6 +6,7 @@ import com.scorestv.football.domain.FixtureRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -86,6 +87,7 @@ public class FinishedMatchFinalSyncJob {
     @Scheduled(
             fixedDelayString = "${scorestv.football.sync.final-finished-interval-minutes:15}",
             timeUnit = TimeUnit.MINUTES)
+    @SchedulerLock(name = "finishedMatchFinalSync", lockAtMostFor = "PT10M")
     public void run() {
         Instant now = Instant.now();
         Instant start = now.minus(MAX_AGE);

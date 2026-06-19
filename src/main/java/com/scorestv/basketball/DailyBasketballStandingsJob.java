@@ -5,6 +5,7 @@ import com.scorestv.basketball.domain.BasketballSeasonRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -46,6 +47,7 @@ public class DailyBasketballStandingsJob {
      * yeterli (lazy sync ucla aktif kullanici tetikler).
      */
     @Scheduled(cron = "0 30 5 * * *", zone = "UTC")
+    @SchedulerLock(name = "dailyBasketballStandings", lockAtMostFor = "PT30M")
     public void run() {
         List<BasketballSeason> entries;
         try {

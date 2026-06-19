@@ -1,6 +1,7 @@
 package com.scorestv.bilyoner;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -25,6 +26,7 @@ public class BilyonerOddsJob {
     @Scheduled(
             fixedDelayString = "${scorestv.bilyoner.refresh-ms:60000}",
             initialDelayString = "${scorestv.bilyoner.initial-delay-ms:10000}")
+    @SchedulerLock(name = "bilyonerOdds", lockAtMostFor = "PT5M")
     public void run() {
         service.refresh();
     }

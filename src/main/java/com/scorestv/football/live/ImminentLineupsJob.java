@@ -10,6 +10,7 @@ import com.scorestv.mobile.notify.NotificationDispatcherService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -63,6 +64,7 @@ public class ImminentLineupsJob {
     @Scheduled(
             fixedDelayString = "${scorestv.football.sync.imminent-lineups-interval-minutes:15}",
             timeUnit = TimeUnit.MINUTES)
+    @SchedulerLock(name = "imminentLineups", lockAtMostFor = "PT5M")
     public void run() {
         Instant now = Instant.now();
         Instant until = now.plus(Duration.ofHours(

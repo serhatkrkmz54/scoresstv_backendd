@@ -5,6 +5,7 @@ import com.scorestv.basketball.domain.BasketballGameRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -48,6 +49,7 @@ public class BasketballLiveStatsJob {
     }
 
     @Scheduled(fixedDelay = FIXED_DELAY_MS, initialDelay = 90_000L)
+    @SchedulerLock(name = "basketballLiveStats", lockAtMostFor = "PT3M")
     public void run() {
         List<BasketballGame> live;
         try {

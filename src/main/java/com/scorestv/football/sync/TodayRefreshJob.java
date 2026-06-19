@@ -5,6 +5,7 @@ import com.scorestv.football.FootballProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -48,6 +49,7 @@ public class TodayRefreshJob {
     @Scheduled(
             cron = "${scorestv.football.sync.today-refresh-cron:0 */15 * * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "todayRefresh", lockAtMostFor = "PT10M")
     public void run() {
         LocalDate today = LocalDate.now(ZoneId.of(properties.sync().timezone()));
         try {

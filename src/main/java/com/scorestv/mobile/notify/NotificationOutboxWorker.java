@@ -6,6 +6,7 @@ import com.scorestv.mobile.fcm.FcmMessagingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -58,6 +59,7 @@ public class NotificationOutboxWorker {
     }
 
     @Scheduled(fixedDelayString = "${scorestv.notify.outbox-interval-ms:5000}")
+    @SchedulerLock(name = "notificationOutboxWorker", lockAtMostFor = "PT2M")
     public void process() {
         if (!fcm.isEnabled()) {
             return; // FCM kapali — satirlar PENDING bekler (ya da EXPIRE olur).

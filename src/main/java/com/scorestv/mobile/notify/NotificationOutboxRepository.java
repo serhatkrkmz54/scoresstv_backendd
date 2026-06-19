@@ -2,6 +2,9 @@ package com.scorestv.mobile.notify;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
@@ -18,4 +21,14 @@ public interface NotificationOutboxRepository
 
     /** Aynı bildirim zaten kuyruğa girmiş mi? (idempotent enqueue). */
     boolean existsByDedupKey(String dedupKey);
+
+    /**
+     * Retention temizliği: verilen statüdeki, {@code before}'dan eski satırları
+     * siler (tablo sınırsız büyümesin). {@link NotificationOutboxCleanupJob}
+     * kullanır. @Modifying → çağıran @Transactional olmalı.
+     */
+    @Modifying
+    @Query("DELETE FROM NotificationOutbox o WHERE o.status = :status AND o.createdAt < :before")
+    int deleteByStatusAndCreatedAtBefore(@Param("status") String status,
+                                         @Param("before") Instant before);
 }

@@ -18,6 +18,9 @@ services:
       -jar app.jar
     env_file:
       - .env
+    depends_on:
+      artemis:
+        condition: service_started
     ports:
       - "8080:8080"
     volumes:
@@ -41,6 +44,38 @@ services:
       options:
         max-size: "100m"
         max-file: "5"
+
+  # STOMP broker — ActiveMQ Artemis. RabbitMQ STOMP slash'li hedefleri
+  # (/topic/a/b/c) reddediyordu; Artemis hedefleri OPAK string olarak ele alir
+  # → uygulamanin mevcut /topic/fixtures/... adresleri DEGISMEDEN calisir.
+  # Backend ayni docker agindan 'artemis:61613' (STOMP) ile erisir; STOMP
+  # portu DISARI ACILMAZ. Kullanici/parola .env'deki RABBITMQ_DEFAULT_* ile ayni.
+  artemis:
+    image: apache/activemq-artemis:latest
+    container_name: scorestv-artemis
+    restart: unless-stopped
+    # Bind-mount dizini (./data/artemis) root-sahipli; image non-root (UID 1000)
+    # ile calisip "path not writable" veriyordu. Root calistir → yazabilir.
+    user: "0:0"
+    environment:
+      ARTEMIS_USER: ${RABBITMQ_DEFAULT_USER}
+      ARTEMIS_PASSWORD: ${RABBITMQ_DEFAULT_PASS}
+      ANONYMOUS_LOGIN: "false"
+    volumes:
+      - ./data/artemis:/var/lib/artemis-instance
+    ports:
+      # Yonetim konsolu — SADECE localhost (gerekirse SSH tunnel). STOMP (61613)
+      # ve diger broker portlari DISARI ACILMAZ.
+      - "127.0.0.1:8161:8161"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
 
   nginx:
     image: nginx:1.27-alpine

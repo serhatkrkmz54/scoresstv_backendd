@@ -3,6 +3,7 @@ package com.scorestv.football.sync;
 import com.scorestv.football.FootballProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -30,6 +31,7 @@ public class ReferenceSyncJob {
 
     /** Haftalık cron ile tüm referans veriyi tazeler. */
     @Scheduled(cron = "${scorestv.football.sync.reference-cron}")
+    @SchedulerLock(name = "referenceSync", lockAtMostFor = "PT30M")
     public void onSchedule() {
         if (!properties.sync().enabled()) {
             return;

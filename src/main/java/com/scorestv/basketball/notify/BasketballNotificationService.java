@@ -5,12 +5,15 @@ import com.scorestv.basketball.domain.DeviceBasketballSubscriptionRepository;
 import com.scorestv.mobile.domain.BasketballNotificationPref;
 import com.scorestv.mobile.domain.BasketballNotificationPrefRepository;
 import com.scorestv.mobile.fcm.FcmMessagingService;
+import com.scorestv.mobile.fcm.FcmTopics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -44,14 +47,18 @@ public class BasketballNotificationService {
     private final FcmMessagingService fcm;
     private final DeviceBasketballSubscriptionRepository subRepo;
     private final BasketballNotificationPrefRepository prefRepo;
+    /** FCM Topics yolu acik mi? (scorestv.notify.use-fcm-topics) — futbolla ayni flag. */
+    private final boolean useFcmTopics;
 
     public BasketballNotificationService(
             FcmMessagingService fcm,
             DeviceBasketballSubscriptionRepository subRepo,
-            BasketballNotificationPrefRepository prefRepo) {
+            BasketballNotificationPrefRepository prefRepo,
+            @Value("${scorestv.notify.use-fcm-topics:false}") boolean useFcmTopics) {
         this.fcm = fcm;
         this.subRepo = subRepo;
         this.prefRepo = prefRepo;
+        this.useFcmTopics = useFcmTopics;
     }
 
     /** NS→canlı: maç başladı. */
@@ -94,6 +101,35 @@ public class BasketballNotificationService {
                       EventKind kind) {
         if (!fcm.isEnabled() || gameId == null) return;
 
+        // ---- FCM Topics yolu (flag ACIK) ----
+        // Alici DB sorgusu + multicast YOK: ilgili topic'lere TEK condition mesaji.
+        if (useFcmTopics) {
+            final String suffix = switch (kind) {
+                case START -> "basladi";
+                case PERIOD -> "ceyrek";
+                case FINAL -> "bitti";
+            };
+            final List<String> topics = new ArrayList<>();
+            if (homeTeamId != null) topics.add(FcmTopics.basketballTeamEvent(homeTeamId, suffix));
+            if (awayTeamId != null) topics.add(FcmTopics.basketballTeamEvent(awayTeamId, suffix));
+            topics.add(FcmTopics.basketballGame(gameId));
+            Map<String, String> data = new HashMap<>();
+            data.put("type", type);
+            data.put("gameId", String.valueOf(gameId));
+            data.put("sport", "basketball");
+            if (quarter != null) data.put("quarter", String.valueOf(quarter));
+            try {
+                fcm.sendToConditionOrThrow(FcmTopics.orCondition(topics), title, body, data);
+                log.info("FCM basketbol {} topic dispatch: gameId={} topics={}",
+                        type, gameId, topics);
+            } catch (RuntimeException ex) {
+                // Basketbol outbox'ta DEGIL (fire-and-forget) — hatayi yut + logla.
+                log.warn("Basketbol topic dispatch hata gameId={}: {}", gameId, ex.getMessage());
+            }
+            return;
+        }
+
+        // ---- Token-multicast yolu (flag KAPALI — mevcut, varsayilan) ----
         // 1) Favori MAÇ aboneleri.
         Set<String> tokens = new LinkedHashSet<>();
         for (DeviceBasketballSubscription s : subRepo.findRecipientsForGame(gameId)) {

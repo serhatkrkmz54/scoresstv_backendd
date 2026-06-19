@@ -6,6 +6,7 @@ import com.scorestv.football.domain.LeagueRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -39,6 +40,7 @@ public class HourlyStandingsJob {
     @Scheduled(
             cron = "${scorestv.football.sync.standings-cron:0 5 * * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "hourlyStandings", lockAtMostFor = "PT15M")
     public void run() {
         List<League> covered = leagueRepository.findByCoveredTrue();
         if (covered.isEmpty()) {

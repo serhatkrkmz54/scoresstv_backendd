@@ -3,6 +3,7 @@ package com.scorestv.rankings.sync;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -46,6 +47,7 @@ public class DailyRankingsJob {
     @Scheduled(
             cron = "${scorestv.rankings.daily-cron:0 0 3 * * *}",
             zone = "${scorestv.rankings.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "dailyRankings", lockAtMostFor = "PT15M")
     public void run() {
         log.info("Daily rankings sync basliyor...");
         int fifa = safeRun("FIFA", fifaSync::sync);

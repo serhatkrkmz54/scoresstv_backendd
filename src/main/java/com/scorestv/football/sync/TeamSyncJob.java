@@ -3,6 +3,7 @@ package com.scorestv.football.sync;
 import com.scorestv.football.FootballProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -27,6 +28,7 @@ public class TeamSyncJob {
 
     /** Her Pazar 06:00'da tüm takım/stadyum verisini tazeler. */
     @Scheduled(cron = "0 0 6 * * SUN")
+    @SchedulerLock(name = "teamSync", lockAtMostFor = "PT30M")
     public void onSchedule() {
         if (!properties.sync().enabled()) {
             return;

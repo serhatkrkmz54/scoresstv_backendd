@@ -6,6 +6,7 @@ import com.scorestv.football.domain.FixtureRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -51,6 +52,7 @@ public class LiveEventsJob {
     @Scheduled(
             fixedDelayString = "${scorestv.football.sync.live-events-interval-seconds:30}",
             timeUnit = TimeUnit.SECONDS)
+    @SchedulerLock(name = "liveEvents", lockAtMostFor = "PT2M")
     public void run() {
         // JOIN FETCH league: SyncRateLimiter.isCovered() lazy-init hatasını önlemek için.
         List<Fixture> live = fixtureRepository.findByStatusShortInWithLeague(LIVE_STATUSES);

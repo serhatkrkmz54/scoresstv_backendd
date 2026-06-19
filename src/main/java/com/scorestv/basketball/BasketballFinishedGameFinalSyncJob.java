@@ -5,6 +5,7 @@ import com.scorestv.basketball.domain.BasketballGameRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -62,6 +63,7 @@ public class BasketballFinishedGameFinalSyncJob {
     }
 
     @Scheduled(fixedDelay = FIXED_DELAY_MS, initialDelay = 60_000L)
+    @SchedulerLock(name = "basketballFinishedGameFinalSync", lockAtMostFor = "PT30M")
     public void run() {
         Instant now = Instant.now();
         Instant from = now.minus(MAX_AGE);

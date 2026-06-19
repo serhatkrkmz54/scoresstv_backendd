@@ -7,6 +7,7 @@ import com.scorestv.football.sync.FixturePlayerStatsSyncService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -48,6 +49,7 @@ public class LivePlayerStatsJob {
     @Scheduled(
             fixedDelayString = "${scorestv.football.sync.live-player-stats-interval-seconds:120}",
             timeUnit = TimeUnit.SECONDS)
+    @SchedulerLock(name = "livePlayerStats", lockAtMostFor = "PT3M")
     public void run() {
         // JOIN FETCH league: SyncRateLimiter.isCovered() lazy-init hatasını önlemek için.
         List<Fixture> live = fixtureRepository.findByStatusShortInWithLeague(LIVE_STATUSES);

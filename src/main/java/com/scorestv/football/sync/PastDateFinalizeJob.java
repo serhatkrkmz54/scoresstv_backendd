@@ -6,6 +6,7 @@ import com.scorestv.football.domain.FixtureRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -71,6 +72,7 @@ public class PastDateFinalizeJob {
     @Scheduled(
             cron = "${scorestv.football.sync.past-date-finalize-cron:0 0 3 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "pastDateFinalize", lockAtMostFor = "PT15M")
     public void run() {
         ZoneId zone = ZoneId.of(properties.sync().timezone());
         LocalDate today = LocalDate.now(zone);

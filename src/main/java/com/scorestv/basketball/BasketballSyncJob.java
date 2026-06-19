@@ -3,6 +3,7 @@ package com.scorestv.basketball;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -39,6 +40,7 @@ public class BasketballSyncJob {
     @Scheduled(
             cron = "${scorestv.basketball.today-cron:0 */30 * * * *}",
             zone = "${scorestv.basketball.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "basketballSyncRunToday", lockAtMostFor = "PT30M")
     public void runToday() {
         LocalDate today = LocalDate.now(ZoneId.of(props.timezone()));
         sync.syncDate(today);
@@ -49,6 +51,7 @@ public class BasketballSyncJob {
     @Scheduled(
             cron = "${scorestv.basketball.window-cron:0 0 4 * * *}",
             zone = "${scorestv.basketball.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "basketballSyncRunWindow", lockAtMostFor = "PT30M")
     public void runWindow() {
         var dates = sync.windowDates();
         int total = 0;

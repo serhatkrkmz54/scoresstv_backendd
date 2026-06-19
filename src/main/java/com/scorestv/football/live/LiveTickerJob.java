@@ -5,6 +5,7 @@ import com.scorestv.football.FootballProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -37,6 +38,7 @@ public class LiveTickerJob {
     @Scheduled(
             fixedDelayString = "${scorestv.football.sync.live-interval-seconds:15}",
             timeUnit = TimeUnit.SECONDS)
+    @SchedulerLock(name = "liveTicker", lockAtMostFor = "PT2M")
     public void run() {
         try {
             tickerService.tick();

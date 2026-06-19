@@ -1,6 +1,7 @@
 package com.scorestv.basketball;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +29,7 @@ public class BasketballLiveJob {
     @Scheduled(
             fixedDelayString = "#{${scorestv.basketball.live-interval-seconds:20} * 1000}",
             initialDelay = 15_000)
+    @SchedulerLock(name = "basketballLive", lockAtMostFor = "PT2M")
     public void run() {
         sync.syncLive();
         // Sync sonrası taze canlı skorları WS ile mobile'a it.

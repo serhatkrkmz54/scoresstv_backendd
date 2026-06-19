@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cache.CacheManager;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -63,6 +64,7 @@ public class DailyBasketballTeamRefreshJob {
     @Scheduled(
             cron = "${scorestv.basketball.team-refresh-cron:0 45 6 * * *}",
             zone = "${scorestv.basketball.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "dailyBasketballTeamRefresh", lockAtMostFor = "PT30M")
     public void run() {
         List<BasketballTeam> covered = teamRepo.findByCoveredTrue();
         if (covered.isEmpty()) {

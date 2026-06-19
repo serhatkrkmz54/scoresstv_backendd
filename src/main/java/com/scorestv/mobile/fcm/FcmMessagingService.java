@@ -6,6 +6,7 @@ import com.google.firebase.messaging.ApsAlert;
 import com.google.firebase.messaging.BatchResponse;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.FirebaseMessagingException;
+import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.MessagingErrorCode;
 import com.google.firebase.messaging.MulticastMessage;
 import com.google.firebase.messaging.Notification;
@@ -107,6 +108,52 @@ public class FcmMessagingService {
             totalSent += sendChunk(chunk, title, body, data, true);
         }
         return totalSent;
+    }
+
+    /**
+     * Bir FCM <b>condition</b>'a (topic kombinasyonu) TEK mesaj gönderir —
+     * fan-out'u Google yapar (alıcı DB sorgusu + multicast YOK). FCM Topics
+     * yolu için kullanılır.
+     *
+     * @param condition örn. {@code 't549_gol' in topics || 'fix12345' in topics}
+     * @throws RuntimeException sert FCM hatasında (outbox retry sinyali)
+     */
+    public void sendToConditionOrThrow(String condition, String title, String body,
+                                       Map<String, String> data) {
+        if (messaging == null) {
+            throw new IllegalStateException("FCM devre disi (FirebaseMessaging null)");
+        }
+        try {
+            Message.Builder builder = Message.builder()
+                    .setCondition(condition)
+                    .setNotification(Notification.builder()
+                            .setTitle(title)
+                            .setBody(body)
+                            .build())
+                    .setAndroidConfig(AndroidConfig.builder()
+                            .setPriority(AndroidConfig.Priority.HIGH)
+                            .setNotification(AndroidNotification.builder()
+                                    .setChannelId("scorestv_default")
+                                    .build())
+                            .build())
+                    .setApnsConfig(com.google.firebase.messaging.ApnsConfig.builder()
+                            .setAps(com.google.firebase.messaging.Aps.builder()
+                                    .setAlert(ApsAlert.builder()
+                                            .setTitle(title)
+                                            .setBody(body)
+                                            .build())
+                                    .setSound("default")
+                                    .build())
+                            .build());
+            if (data != null && !data.isEmpty()) {
+                builder.putAllData(data);
+            }
+            String id = messaging.send(builder.build());
+            log.info("FCM condition gonderildi: condition=[{}] id={}", condition, id);
+        } catch (FirebaseMessagingException ex) {
+            log.error("FCM condition basarisiz (condition=[{}]): {}", condition, ex.getMessage(), ex);
+            throw new RuntimeException("FCM condition gonderim hatasi: " + ex.getMessage(), ex);
+        }
     }
 
     private int sendChunk(List<String> tokens, String title, String body,

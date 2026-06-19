@@ -32,7 +32,7 @@ public class NotificationMessageBuilder {
 
     public NotificationMessage buildKickoffMessage(Fixture fixture) {
         return new NotificationMessage(
-                "▶ Maç başladı!",
+                "⏱️ Maç başladı!",
                 "%s - %s maçında ilk düdük çaldı".formatted(
                         _name(fixture.getHomeTeam()),
                         _name(fixture.getAwayTeam())));
@@ -43,7 +43,7 @@ public class NotificationMessageBuilder {
         final Integer a = fixture.getAwayGoals();
         final String score = (h != null && a != null) ? "%d - %d".formatted(h, a) : "";
         return new NotificationMessage(
-                "⏸ İlk yarı bitti",
+                "⏱️ İlk yarı bitti",
                 "%s %s %s".formatted(
                         _name(fixture.getHomeTeam()), score, _name(fixture.getAwayTeam()))
                         .trim());

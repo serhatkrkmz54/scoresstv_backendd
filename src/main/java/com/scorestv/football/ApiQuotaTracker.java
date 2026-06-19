@@ -2,6 +2,7 @@ package com.scorestv.football;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
@@ -43,12 +44,19 @@ public class ApiQuotaTracker {
     private final AtomicReference<Instant> lastUpdatedAt = new AtomicReference<>();
     private final AtomicLong totalRequestsSinceStart = new AtomicLong(0);
     /**
-     * 429 (rate limit) sonrasi global cooldown'in bitis ani (epoch ms).
-     * 0 = cooldown yok. {@link ApiFootballClient} bu sure boyunca tum cagrilari
-     * reddeder; boylece firewall blok riski olan "429 sonrasi hammer'lama"
-     * onlenir (bkz. api-football ratelimit dokumantasyonu).
+     * 429 (rate limit) sonrasi GLOBAL cooldown — <b>Redis'te paylasilir</b> ki
+     * bir node 429 yiyip cooldown'a girince TUM node'lar ayni cooldown'a uysun.
+     * Multi-instance'ta "bir node ban yer, otekiler hammer'lamaya devam eder"
+     * sorununu onler. Deger = bitis epoch ms; TTL = kalan cooldown (otomatik
+     * temizlenir). {@link ApiFootballClient} bu sure boyunca tum cagrilari reddeder.
      */
-    private final AtomicLong cooldownUntilEpochMs = new AtomicLong(0);
+    private static final String COOLDOWN_KEY = "scorestv:apifootball:cooldownUntil";
+
+    private final StringRedisTemplate redis;
+
+    public ApiQuotaTracker(StringRedisTemplate redis) {
+        this.redis = redis;
+    }
 
     /**
      * Yanit header'larindan kotayi gunceller. Beklenmedik degerler (null, parse
@@ -117,15 +125,39 @@ public class ApiQuotaTracker {
         if (duration == null || duration.isZero() || duration.isNegative()) {
             return;
         }
-        long until = System.currentTimeMillis() + duration.toMillis();
-        cooldownUntilEpochMs.accumulateAndGet(until, Math::max);
-        log.warn("API-Football cooldown baslatildi: ~{} sn (429 rate limit)",
-                duration.toSeconds());
+        try {
+            long now = System.currentTimeMillis();
+            long candidate = now + duration.toMillis();
+            // Mevcut cooldown daha uzun ise kisaltma (max korunur).
+            String existing = redis.opsForValue().get(COOLDOWN_KEY);
+            long until = candidate;
+            if (existing != null) {
+                try {
+                    until = Math.max(Long.parseLong(existing), candidate);
+                } catch (NumberFormatException ignore) {
+                    // bozuk deger — candidate kullan
+                }
+            }
+            long ttlMs = Math.max(1L, until - now);
+            redis.opsForValue().set(COOLDOWN_KEY, Long.toString(until),
+                    Duration.ofMillis(ttlMs));
+            log.warn("API-Football cooldown baslatildi: ~{} sn (429 rate limit)",
+                    duration.toSeconds());
+        } catch (Exception e) {
+            log.warn("Cooldown Redis'e yazilamadi: {}", e.toString());
+        }
     }
 
-    /** Cooldown bitene kadar kalan ms; aktif degilse 0. */
+    /** Cooldown bitene kadar kalan ms; aktif degilse 0. Redis paylasimli. */
     public long cooldownRemainingMillis() {
-        return Math.max(0L, cooldownUntilEpochMs.get() - System.currentTimeMillis());
+        try {
+            String v = redis.opsForValue().get(COOLDOWN_KEY);
+            if (v == null) return 0L;
+            return Math.max(0L, Long.parseLong(v) - System.currentTimeMillis());
+        } catch (Exception e) {
+            // Redis erisilemezse cooldown'i uygulamayi engelleme (fail-open).
+            return 0L;
+        }
     }
 
     /** Su an 429 cooldown'i aktif mi? */

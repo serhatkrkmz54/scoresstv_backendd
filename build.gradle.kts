@@ -68,6 +68,19 @@ dependencies {
 	// Prod'da AYRI sunucuda calisir; baglanti detaylari env-driven.
 	implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
 
+	// --- ShedLock (dagitik scheduled-task kilidi) ---
+	// Birden fazla backend instance calistirildiginda @Scheduled isler her
+	// node'da degil YALNIZCA bir node'da calissin diye Redis tabanli dagitik
+	// kilit. @SchedulerLock ile isaretlenir; lock store Redis. 7.x = Spring
+	// Boot 4 / Spring Framework 7 uyumlu.
+	implementation("net.javacrumbs.shedlock:shedlock-spring:7.7.0")
+	implementation("net.javacrumbs.shedlock:shedlock-provider-redis-spring:7.7.0")
+
+	// --- STOMP broker relay TCP client (Reactor Netty) ---
+	// enableStompBrokerRelay (cok-instance WebSocket) dis broker'a TCP baglanti
+	// icin Reactor Netty kullanir. Relay kapaliyken (SimpleBroker) kullanilmaz.
+	implementation("org.springframework.boot:spring-boot-starter-reactor-netty")
+
 	// --- Gelistirme ---
 	developmentOnly("org.springframework.boot:spring-boot-devtools")
 }

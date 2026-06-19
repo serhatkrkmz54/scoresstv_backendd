@@ -2,6 +2,7 @@ package com.scorestv.user;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +30,7 @@ public class RefreshTokenCleanupJob {
 
     /** Her gun saat 03:00'te suresi dolmus refresh token'lari siler. */
     @Scheduled(cron = "0 0 3 * * *")
+    @SchedulerLock(name = "refreshTokenCleanup", lockAtMostFor = "PT15M")
     @Transactional
     public void purgeExpiredTokens() {
         int deleted = refreshTokenRepository.deleteExpired(Instant.now());

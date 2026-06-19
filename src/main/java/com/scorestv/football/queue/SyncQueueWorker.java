@@ -8,6 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -110,6 +111,7 @@ public class SyncQueueWorker {
     @Scheduled(
             fixedDelayString = "${scorestv.football.sync.queue-worker-delay-ms:2000}",
             timeUnit = TimeUnit.MILLISECONDS)
+    @SchedulerLock(name = "syncQueueWorker", lockAtMostFor = "PT5M")
     public void tick() {
         // 429 cooldown aktifse hic is alma — kisa rate-limit penceresinde job'lari
         // bos yere 5dk backoff'a atmaktansa worker'i tamamen duraklat.
@@ -153,7 +155,7 @@ public class SyncQueueWorker {
         List<SyncJob> candidates = repository.findClaimable(
                 Instant.now(), maxAllowedPriority, PageRequest.of(0, 1));
         if (candidates.isEmpty()) return null;
-        SyncJob job = candidates.get(0);
+        SyncJob job = candidates.getFirst();
         job.setStatus(SyncJobStatus.IN_PROGRESS);
         job.setAttempts(job.getAttempts() + 1);
         return repository.save(job);

@@ -7,6 +7,7 @@ import com.scorestv.football.domain.FixtureRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -48,6 +49,7 @@ public class DailyH2hPrefetchJob {
     @Scheduled(
             cron = "${scorestv.football.sync.h2h-prefetch-cron:0 0 3 * * *}",
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "dailyH2hPrefetch", lockAtMostFor = "PT15M")
     public void run() {
         // Yarın için pre-fetch — 0-36 saatlik pencere bugünün gecesi + tüm yarınını kapsar.
         Instant start = Instant.now();
