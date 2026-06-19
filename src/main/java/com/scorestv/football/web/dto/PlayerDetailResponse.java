@@ -38,6 +38,10 @@ public record PlayerDetailResponse(
         /** API "190 cm" gibi ham string. */
         String height,
         String weight,
+        /** Ana pozisyon — sezon istatistiğindeki games.position'dan türetilir
+         *  (ham "Attacker" + çevrilmiş "Forvet"). Null olabilir. */
+        String position,
+        String positionText,
         Boolean injured,
         BirthInfo birth,
         /**

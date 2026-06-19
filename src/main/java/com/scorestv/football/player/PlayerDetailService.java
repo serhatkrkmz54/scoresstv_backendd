@@ -179,6 +179,17 @@ public class PlayerDetailService {
         PlayerSeoResponse seo = seoBuilder.build(
                 player, displayName, currentTeam, selectedSeason, turkish ? "tr" : "en");
 
+        // Ana pozisyon — seçili sezonun ilk dolu games.position'ı (API-Football).
+        String position = null;
+        String positionText = null;
+        for (PlayerSeasonStatView st : seasonStats) {
+            if (st.position() != null && !st.position().isBlank()) {
+                position = st.position();
+                positionText = st.positionText();
+                break;
+            }
+        }
+
         return new PlayerDetailResponse(
                 player.getId(),
                 slug,
@@ -191,6 +202,8 @@ public class PlayerDetailService {
                 photo,
                 player.getHeight(),
                 player.getWeight(),
+                position,
+                positionText,
                 player.getInjured(),
                 birth,
                 currentTeam,
