@@ -142,14 +142,21 @@ public class NotificationDispatcherService {
         final Long teamId = event.getTeam() != null ? event.getTeam().getId() : null;
         if (teamId == null) return;
 
-        // Cift bildirim guardu: ayni fixture + type + teamId + dakika icin
-        // son 120sn'de push gonderildiyse skip. Event listener bazen ayni
-        // event'i yeniden isler (idempotency icin event_id unique constraint
-        // olmadigi durumlarda).
+        // Cift bildirim guardu: ayni fixture + type + teamId + dakika(+uzatma)
+        // icin son 120sn'de push gonderildiyse skip.
+        //
+        // ONEMLI (cift kirmizi kart bug fix): anahtara event.getId() VE playerId
+        // DAHIL EDILMEZ. API kirmizi karti once ISIMSIZ gonderiyor; isim gelince
+        // olay silinip YENI id ile yeniden yaziliyor (events her sync'te replace
+        // edilir — bkz. FixtureEvent javadoc). Eski anahtar event.getId()
+        // icerdiginden isimli surum (yeni id) dedup'a TAKILMIYOR ve IKINCI push
+        // gidiyordu. Dakika + uzatma + tip + takim yeterince ayirt edici; ayni
+        // takimin ayni dakikadaki iki AYRI kirmizisi (cok nadir) tek bildirim alir.
+        final int evExtra = event.getTimeExtra() == null ? 0 : event.getTimeExtra();
         final String evDedupKey = String.format("ev:%d:%s:%d:%d:%d",
                 fixture.getId(), mobileType, teamId,
                 event.getTimeElapsed() == null ? 0 : event.getTimeElapsed(),
-                event.getId() == null ? 0L : event.getId());
+                evExtra);
         if (_isRecentlySent(evDedupKey)) {
             log.info("Event push SKIP (dedup) fixtureId={} key={}",
                     fixture.getId(), evDedupKey);

@@ -1,6 +1,7 @@
 package com.scorestv.football.domain;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -10,6 +11,22 @@ import java.util.List;
 
 /** Maç (fikstür) verisine erişim. */
 public interface FixtureRepository extends JpaRepository<Fixture, Long> {
+
+    /**
+     * "Başladı" bildirimi için ATOMİK claim. Yalnız {@code notif_kickoff_at}
+     * NULL iken set eder; eşzamanlı/tekrar tick'lerde sadece BİRİ 1 satır
+     * günceller → tam-bir-kez. Dönen değer etkilenen satır sayısı (0 veya 1).
+     */
+    @Modifying
+    @Query("UPDATE Fixture f SET f.notifKickoffAt = :now "
+            + "WHERE f.id = :id AND f.notifKickoffAt IS NULL")
+    int claimKickoffNotification(@Param("id") Long id, @Param("now") Instant now);
+
+    /** "Bitti" bildirimi için atomik claim — bkz. {@link #claimKickoffNotification}. */
+    @Modifying
+    @Query("UPDATE Fixture f SET f.notifFinalAt = :now "
+            + "WHERE f.id = :id AND f.notifFinalAt IS NULL")
+    int claimFinalNotification(@Param("id") Long id, @Param("now") Instant now);
 
     /**
      * Belirli bir zaman aralığında başlayan maçlar (anasayfa fikstür listesi).

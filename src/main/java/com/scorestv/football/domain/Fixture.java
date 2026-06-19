@@ -124,6 +124,18 @@ public class Fixture {
     @Column(name = "last_synced_at")
     private Instant lastSyncedAt;
 
+    /**
+     * "Başladı" push'unun gönderildiği an (TAM-BİR-KEZ kapısı). NULL = henüz
+     * gönderilmedi. FixtureNotifyGate atomik UPDATE ile set eder; FixtureUpserter
+     * bu alana DOKUNMAZ, yani sync'ler boyunca korunur.
+     */
+    @Column(name = "notif_kickoff_at")
+    private Instant notifKickoffAt;
+
+    /** "Bitti" push'unun gönderildiği an (TAM-BİR-KEZ kapısı). NULL = gönderilmedi. */
+    @Column(name = "notif_final_at")
+    private Instant notifFinalAt;
+
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
