@@ -1,5 +1,7 @@
 package com.scorestv.highlights;
 
+import com.scorestv.broadcasts.TheSportsDbClient;
+import com.scorestv.broadcasts.dto.TsdbEventDto;
 import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.highlights.dto.HighlightView;
@@ -45,15 +47,18 @@ public class HighlightsService {
     private final FixtureRepository fixtureRepository;
     private final HighlightlyClient client;
     private final HighlightlyProperties props;
+    private final TheSportsDbClient tsdb;
 
     private final ConcurrentHashMap<Long, CacheEntry> cache = new ConcurrentHashMap<>();
 
     public HighlightsService(FixtureRepository fixtureRepository,
                              HighlightlyClient client,
-                             HighlightlyProperties props) {
+                             HighlightlyProperties props,
+                             TheSportsDbClient tsdb) {
         this.fixtureRepository = fixtureRepository;
         this.client = client;
         this.props = props;
+        this.tsdb = tsdb;
     }
 
     /**
@@ -210,7 +215,47 @@ public class HighlightsService {
             items.add(new GeoHighlight(d, embedUrl, baseEmbeddable, allowed, blocked));
         }
 
+        // TheSportsDB event'inde maç özeti (strVideo, YouTube) varsa ekle.
+        appendTheSportsDbHighlight(items, home, away, date, fixtureId);
+
         return putAndReturn(fixtureId, items);
+    }
+
+    /**
+     * Eşleşen TheSportsDB event'inde {@code strVideo} (YouTube maç özeti) varsa
+     * embeddable bir highlight olarak listeye ekler (Highlightly'nin yanına).
+     * Aynı video zaten varsa tekrar eklemez. Hata olursa Highlightly listesi
+     * etkilenmez.
+     */
+    private void appendTheSportsDbHighlight(List<GeoHighlight> items, String home,
+                                            String away, String date, long fixtureId) {
+        try {
+            TsdbEventDto ev = tsdb.matchEvent(home, away, date, fixtureId);
+            if (ev == null) return;
+            String video = ev.strVideo();
+            if (video == null || video.isBlank()) return;
+            String ytId = extractYouTubeId(video);
+            if (ytId == null) return;
+            String embedUrl = "https://www.youtube.com/embed/" + ytId
+                    + "?rel=0&modestbranding=1&playsinline=1";
+            for (GeoHighlight g : items) {
+                if (embedUrl.equals(g.embedUrl())) return; // aynı video zaten var
+            }
+            HighlightlyHighlightDto dto = new HighlightlyHighlightDto(
+                    parseLongOrNull(ev.idEvent()), "VERIFIED", ev.strThumb(),
+                    home + " - " + away, null, video, embedUrl, null, "TheSportsDB");
+            items.add(new GeoHighlight(dto, embedUrl, true, List.of(), List.of()));
+        } catch (Exception ignored) {
+            // TheSportsDB yedeği — Highlightly sonucunu bozmasın.
+        }
+    }
+
+    private static Long parseLongOrNull(String s) {
+        try {
+            return s == null ? null : Long.parseLong(s.trim());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private List<GeoHighlight> putAndReturn(Long fixtureId, List<GeoHighlight> items) {
