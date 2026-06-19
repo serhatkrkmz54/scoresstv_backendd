@@ -1,5 +1,6 @@
 package com.scorestv.football.player;
 
+import com.scorestv.broadcasts.TheSportsDbClient;
 import com.scorestv.common.ApiException;
 import com.scorestv.common.SlugUtil;
 import com.scorestv.football.FootballCacheNames;
@@ -72,6 +73,7 @@ public class PlayerDetailService {
     private final PlayerDetailSeoBuilder seoBuilder;
     private final FootballMessages messages;
     private final MinioStorageService storage;
+    private final TheSportsDbClient tsdb;
 
     private final PlayerDetailService self;
 
@@ -88,6 +90,7 @@ public class PlayerDetailService {
                                PlayerDetailSeoBuilder seoBuilder,
                                FootballMessages messages,
                                MinioStorageService storage,
+                               TheSportsDbClient tsdb,
                                @Lazy PlayerDetailService self) {
         this.playerRepository = playerRepository;
         this.careerTeamRepository = careerTeamRepository;
@@ -102,6 +105,7 @@ public class PlayerDetailService {
         this.seoBuilder = seoBuilder;
         this.messages = messages;
         this.storage = storage;
+        this.tsdb = tsdb;
         this.self = self;
     }
 
@@ -190,6 +194,20 @@ public class PlayerDetailService {
             }
         }
 
+        // Kullandığı ayak — API-Football vermez; TheSportsDB'den best-effort.
+        // player.getId() == API-Football oyuncu id'si (TheSportsDB idAPIfootball
+        // ile eşleşir). Hata/ağ sorunu olursa ayak gösterilmez, sayfa çalışır.
+        String foot = null;
+        String footText = null;
+        try {
+            foot = tsdb.lookupFoot(displayName, player.getId());
+            if (foot != null) {
+                footText = messages.playerFoot(foot, turkish);
+            }
+        } catch (Exception ignored) {
+            // ayak opsiyonel
+        }
+
         return new PlayerDetailResponse(
                 player.getId(),
                 slug,
@@ -204,6 +222,8 @@ public class PlayerDetailService {
                 player.getWeight(),
                 position,
                 positionText,
+                foot,
+                footText,
                 player.getInjured(),
                 birth,
                 currentTeam,
