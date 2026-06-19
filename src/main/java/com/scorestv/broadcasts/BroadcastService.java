@@ -107,20 +107,10 @@ public class BroadcastService {
 
         LinkedHashMap<String, BroadcastView> dedup = new LinkedHashMap<>();
 
-        // 1) TheSportsDB event'ini bul — idAPIfootball == fixtureId ile KESİN
-        //    doğrula; isim+tarih tek sonuç verirse onu kabul et.
-        String idEvent = null;
-        List<TsdbEventDto> events = client.searchEvents(home, away, date);
-        String fixtureIdStr = String.valueOf(fixtureId);
-        for (TsdbEventDto ev : events) {
-            if (fixtureIdStr.equals(ev.idAPIfootball())) {
-                idEvent = ev.idEvent();
-                break;
-            }
-        }
-        if (idEvent == null && events.size() == 1) {
-            idEvent = events.get(0).idEvent();
-        }
+        // 1) TheSportsDB event'ini eşleştir (isim+idAPIfootball; isim farkında
+        //    "Czechia" vs "Czech Republic" gün listesi yedeği devreye girer).
+        TsdbEventDto matched = client.matchEvent(home, away, date, fixtureId);
+        String idEvent = matched != null ? matched.idEvent() : null;
 
         // 2) Event bulunduysa o event'in TV kanallarını ekle (kanal+ülke tekille).
         if (idEvent != null && !idEvent.isBlank()) {

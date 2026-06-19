@@ -14,5 +14,9 @@ public record TsdbEventDto(
         String strHomeTeam,
         String strAwayTeam,
         String dateEvent,
-        String strSport
+        String strSport,
+        /** Varsa YouTube highlight linki (maç özeti). */
+        String strVideo,
+        /** Event önizleme görseli (highlight thumbnail). */
+        String strThumb
 ) {}
