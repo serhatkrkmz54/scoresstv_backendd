@@ -12,6 +12,7 @@ import com.scorestv.football.domain.StandingRepository;
 import com.scorestv.football.domain.Team;
 import com.scorestv.football.domain.TeamLeagueSeasonRepository;
 import com.scorestv.football.domain.TranslatableName;
+import com.scorestv.football.sync.ReferenceSyncService;
 import com.scorestv.football.sync.TeamSyncService;
 import com.scorestv.football.web.dto.LeagueTeamView;
 import com.scorestv.storage.MinioStorageService;
@@ -81,6 +82,7 @@ public class LeagueTeamsService {
     private final StandingRepository standingRepository;
     private final TeamLeagueSeasonRepository membershipRepository;
     private final TeamSyncService teamSyncService;
+    private final ReferenceSyncService referenceSyncService;
     private final MinioStorageService storage;
     private final CacheManager cacheManager;
     private final LeagueTeamsService self;
@@ -91,6 +93,7 @@ public class LeagueTeamsService {
                               StandingRepository standingRepository,
                               TeamLeagueSeasonRepository membershipRepository,
                               TeamSyncService teamSyncService,
+                              ReferenceSyncService referenceSyncService,
                               MinioStorageService storage,
                               CacheManager cacheManager,
                               @org.springframework.context.annotation.Lazy LeagueTeamsService self) {
@@ -100,6 +103,7 @@ public class LeagueTeamsService {
         this.standingRepository = standingRepository;
         this.membershipRepository = membershipRepository;
         this.teamSyncService = teamSyncService;
+        this.referenceSyncService = referenceSyncService;
         this.storage = storage;
         this.cacheManager = cacheManager;
         this.self = self;
@@ -148,33 +152,52 @@ public class LeagueTeamsService {
     @Async
     public void ensureTeamsAsync(Long leagueId, Integer season) {
         if (leagueId == null) return;
+
+        // Debounce — leagueId bazli (asagidaki syncOne current_season'i
+        // degistirebildigi icin sezon degil leagueId anahtar). Kisa pencere;
+        // sync 1-3sn surer, kullanici geri dondugunde junction dolu olur.
+        String key = leagueId.toString();
+        Instant last = _lastTeamsSync.get(key);
+        if (last != null && last.isAfter(Instant.now().minus(TEAMS_SYNC_DEBOUNCE))) {
+            log.debug("ensureTeamsAsync: debounce'a takildi leagueId={}", leagueId);
+            return;
+        }
+        _lastTeamsSync.put(key, Instant.now());
+
         try {
             League league = leagueRepository.findById(leagueId).orElse(null);
             if (league == null) {
                 log.warn("ensureTeamsAsync: lig bulunamadi leagueId={}", leagueId);
                 return;
             }
+
+            // SUREKLI-GUNCEL: explicit sezon istenmediyse ONCE lig metadata'sini
+            // tazele — current_season, API'nin current=true sezonuna guncellenir.
+            // Boylece stale current_season (sezon devri ya da covered-disi lig)
+            // onboarding'i bos birakmaz; takimlar HER ZAMAN guncel sezona gelir.
+            if (season == null) {
+                try {
+                    referenceSyncService.syncOne(leagueId);
+                    league = leagueRepository.findById(leagueId).orElse(league);
+                } catch (RuntimeException ex) {
+                    log.warn("ensureTeamsAsync: lig metadata refresh hata leagueId={}: {}",
+                            leagueId, ex.getMessage());
+                }
+            }
+
             Integer effective = resolveSeason(league, season);
             if (effective == null) {
                 log.warn("ensureTeamsAsync: sezon cozumlenemedi leagueId={} (currentSeason ve "
                         + "seasons tablosu bos) — /teams cagrilamayacak", leagueId);
                 return;
             }
-            String key = leagueId + "-" + effective;
-            Instant last = _lastTeamsSync.get(key);
-            if (last != null && last.isAfter(Instant.now().minus(TEAMS_SYNC_DEBOUNCE))) {
-                log.debug("ensureTeamsAsync: debounce'a takildi leagueId={} season={}",
-                        leagueId, effective);
-                return;
-            }
-            _lastTeamsSync.put(key, Instant.now());
             log.info("ensureTeamsAsync: /teams cagriliyor leagueId={} ({}) season={}",
                     leagueId, league.getName(), effective);
             int n = teamSyncService.syncLeague(leagueId, effective);
             if (n == 0) {
-                // API'den 0 sonuc — sezon yili yanlis veya API'de bu kombinasyon yok.
+                // API'den 0 sonuc — guncel sezon henuz kapsanmiyor (sezon basi) olabilir.
                 log.warn("ensureTeamsAsync: /teams API'den 0 takim dondu leagueId={} ({}) season={} "
-                        + "— olasi sebep: currentSeason yanlis ya da API'de bu sezon kapsanmiyor",
+                        + "— olasi sebep: API'de bu sezon henuz kapsanmiyor (sezon basi)",
                         leagueId, league.getName(), effective);
             } else {
                 log.info("ensureTeamsAsync: junction'a {} takim yazildi leagueId={} ({}) season={}",
