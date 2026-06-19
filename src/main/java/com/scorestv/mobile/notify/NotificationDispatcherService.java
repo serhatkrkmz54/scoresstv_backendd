@@ -151,8 +151,13 @@ public class NotificationDispatcherService {
         // Aynı dakika+uzatma+tip+takım aynı anahtara düşer → TEK bildirim; ilk
         // gelen (genelde isimsiz) kuyruğa girer, isimli sürüm dedup'a takılır.
         final int evExtra = event.getTimeExtra() == null ? 0 : event.getTimeExtra();
-        final String dedupKey = String.format("EVENT:%d:%s:%d:%d:%d",
-                fixture.getId(), mobileType, teamId,
+        // event tipi (goal/card/var) anahtara dahil: ayni dakikada VAR penalti
+        // karari (type=var) ile kacan penalti (type=goal) farkli anahtara dussun,
+        // biri digerini dedup'a takip dusurmesin. Tip STABIL (isimsiz->isimli
+        // replace'te degismez) → kirmizi-kart cift-push korumasi bozulmaz.
+        final String evType = event.getType() == null ? "" : event.getType().toLowerCase();
+        final String dedupKey = String.format("EVENT:%d:%s:%s:%d:%d:%d",
+                fixture.getId(), mobileType, evType, teamId,
                 event.getTimeElapsed() == null ? 0 : event.getTimeElapsed(), evExtra);
 
         // Mesajı ŞİMDİ render et (oyuncu/dakika snapshot'ı), kuyruğa yaz.
@@ -384,12 +389,13 @@ public class NotificationDispatcherService {
      *
      * <p>API-Football event kombinasyonlari:
      * <ul>
-     *   <li>Goal + "Normal Goal" / "Own Goal" → "gol"</li>
-     *   <li>Goal + "Penalty" → "penalti" (penaltidan gol)</li>
-     *   <li>Goal + "Missed Penalty" → "penalti" (kacirilan penalti)</li>
+     *   <li>Goal + "Normal Goal" / "Own Goal" / "Penalty" → "gol" (penaltidan gol
+     *       de skor degisiminden "GOL!" atilir; ayrica penalti bildirimi gonderilmez)</li>
+     *   <li>Goal + "Missed Penalty" → "penalti" (kacan penalti)</li>
      *   <li>Card + "Red Card" / "Second Yellow card" → "kirmizi"</li>
-     *   <li>Var + detail icinde "Penalty" → "penalti" (VAR karari)</li>
-     *   <li>Diger (Yellow Card, subst, normal Var) → null (bildirim yok)</li>
+     *   <li>Var + detail icinde "Penalty" veya "Goal" → "penalti" (VAR karari;
+     *       mesaj builder "📺 VAR: ..." metni uretir)</li>
+     *   <li>Diger (Yellow Card, subst, kart-upgrade Var) → null (bildirim yok)</li>
      * </ul>
      */
     private String _mapEventType(FixtureEvent e) {
@@ -398,7 +404,10 @@ public class NotificationDispatcherService {
         final String detail = e.getDetail() == null ? "" : e.getDetail().toLowerCase();
 
         if ("goal".equals(type)) {
-            if (detail.contains("penalty")) return "penalti";
+            // Penaltidan GOL → "gol": skor degisimi zaten "⚽ GOL!" atar; burada
+            // "penalti" donsek ayni an iki bildirim (gol + penalti) olurdu.
+            // Sadece KACAN penalti ("Missed Penalty") penalti olarak bildirilir.
+            if (detail.contains("missed")) return "penalti";
             return "gol";
         }
         if ("card".equals(type)) {
@@ -408,8 +417,10 @@ public class NotificationDispatcherService {
             return null; // sari kart bildirim listemizde yok
         }
         if ("var".equals(type)) {
-            if (detail.contains("penalty")) return "penalti";
-            return null;
+            // Penalti veya gol ile ilgili VAR kararlari "penalti" tercihine duser
+            // (ayri VAR toggle yok). Mesaj builder type=Var'i gorup "VAR:" metni uretir.
+            if (detail.contains("penalty") || detail.contains("goal")) return "penalti";
+            return null; // kart upgrade vb. bildirilmez
         }
         return null;
     }
