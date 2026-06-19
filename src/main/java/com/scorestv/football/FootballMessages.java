@@ -528,32 +528,6 @@ public class FootballMessages {
     }
 
     /**
-     * Kullandığı ayak çevirisi (TheSportsDB {@code strSide}: "Right" / "Left" /
-     * "Both"). Bilinmeyen değer kaynak metinle döner; boş/null ise null döner
-     * (çağıran alanı hiç göstermez).
-     */
-    public String playerFoot(String side, boolean turkish) {
-        if (side == null || side.isBlank()) {
-            return null;
-        }
-        String key = side.trim().toLowerCase(Locale.ROOT);
-        if (turkish) {
-            return switch (key) {
-                case "right" -> "Sağ ayak";
-                case "left" -> "Sol ayak";
-                case "both", "either" -> "Çift ayak";
-                default -> side.trim();
-            };
-        }
-        return switch (key) {
-            case "right" -> "Right foot";
-            case "left" -> "Left foot";
-            case "both", "either" -> "Both feet";
-            default -> side.trim();
-        };
-    }
-
-    /**
      * Transfer turu cevirisi (Transfer / Loan / Free / N/A).
      * Para ile yazilanlar ("€ 1.1M", "$ 500K") evrenseldir, dokunulmaz —
      * onlari fiyat sembollerine bakarak pass-through doneriz.

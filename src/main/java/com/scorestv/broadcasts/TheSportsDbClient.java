@@ -2,9 +2,6 @@ package com.scorestv.broadcasts;
 
 import com.scorestv.broadcasts.dto.TsdbEventDto;
 import com.scorestv.broadcasts.dto.TsdbEventsResponse;
-import com.scorestv.broadcasts.dto.TsdbPlayerDto;
-import com.scorestv.broadcasts.dto.TsdbPlayerLookupResponse;
-import com.scorestv.broadcasts.dto.TsdbPlayerSearchResponse;
 import com.scorestv.broadcasts.dto.TsdbTvDto;
 import com.scorestv.broadcasts.dto.TsdbTvResponse;
 import org.slf4j.Logger;
@@ -35,16 +32,6 @@ public class TheSportsDbClient {
     /** Gün bazında event cache (date → idAPIfootball → event). */
     private static final long DAY_TTL_MIN = 360;
     private final ConcurrentHashMap<String, DayEntry> dayCache = new ConcurrentHashMap<>();
-
-    /** Oyuncu ayağı cache (API-Football oyuncu id → strSide). Ayak neredeyse hiç
-     *  değişmez → uzun TTL. Bulunamayan (negatif) sonuç daha kısa TTL ile cache'lenir
-     *  ki yeni eklenen oyuncular sonradan yakalanabilsin. */
-    private static final long FOOT_TTL_MIN = 30L * 24 * 60;     // 30 gün
-    private static final long FOOT_EMPTY_TTL_MIN = 24 * 60;     // 1 gün
-    /** searchplayers'tan dönen aday sayısının üst sınırı (gereksiz lookupplayer
-     *  çağrılarını engeller). Tam isim araması genelde 1-3 sonuç döner. */
-    private static final int FOOT_MAX_CANDIDATES = 8;
-    private final ConcurrentHashMap<Long, FootEntry> footCache = new ConcurrentHashMap<>();
 
     public TheSportsDbClient(TheSportsDbProperties props) {
         this.props = props;
@@ -154,84 +141,4 @@ public class TheSportsDbClient {
     }
 
     private record DayEntry(Map<String, TsdbEventDto> byFixture, Instant expiresAt) {}
-
-    // ---------------------------------------------------------------------
-    // Oyuncu — kullandığı ayak (strSide). API-Football oyuncu pozisyonu verir
-    // ama ayağı vermez; TheSportsDB verir. İsimle searchplayers → her aday için
-    // lookupplayer → idAPIfootball eşleşmesi → strSide. idAPIfootball tam sayı
-    // eşleşmesi olduğu için yanlış oyuncu gelme riski yok.
-    // ---------------------------------------------------------------------
-
-    /**
-     * Oyuncunun kullandığı ayağı ("Right" / "Left" / "Both") döner; bulunamazsa
-     * {@code null}. {@code apiFootballPlayerId} ile eşleşme doğrulanır. Sonuç
-     * uzun süre cache'lenir (ayak değişmez). Hata/ağ sorununda null döner —
-     * çağıran oyuncu sayfasını yine gösterebilsin.
-     */
-    public String lookupFoot(String playerName, long apiFootballPlayerId) {
-        if (!props.enabled() || playerName == null || playerName.isBlank()) return null;
-        FootEntry fe = footCache.get(apiFootballPlayerId);
-        if (fe != null && fe.expiresAt().isAfter(Instant.now())) {
-            return fe.foot();  // pozitif VE negatif (null) sonuç cache'lenir
-        }
-        String foot = resolveFoot(playerName, String.valueOf(apiFootballPlayerId));
-        long ttl = (foot != null) ? FOOT_TTL_MIN : FOOT_EMPTY_TTL_MIN;
-        footCache.put(apiFootballPlayerId,
-                new FootEntry(foot, Instant.now().plus(Duration.ofMinutes(ttl))));
-        return foot;
-    }
-
-    private String resolveFoot(String name, String apiFootballId) {
-        List<TsdbPlayerDto> candidates = searchPlayers(name);
-        int checked = 0;
-        for (TsdbPlayerDto c : candidates) {
-            if (c.idPlayer() == null || c.idPlayer().isBlank()) continue;
-            if (c.strSport() != null && !"Soccer".equalsIgnoreCase(c.strSport())) continue;
-            if (checked++ >= FOOT_MAX_CANDIDATES) break;
-            TsdbPlayerDto full = lookupPlayer(c.idPlayer());
-            if (full == null) continue;
-            if (apiFootballId.equals(full.idAPIfootball())) {
-                String side = full.strSide();
-                return (side != null && !side.isBlank()) ? side.trim() : null;
-            }
-        }
-        return null;
-    }
-
-    /** {@code searchplayers.php?p={name}} — isimle oyuncu arar (lite kayıtlar). */
-    private List<TsdbPlayerDto> searchPlayers(String name) {
-        try {
-            TsdbPlayerSearchResponse resp = http.get()
-                    .uri(u -> u.path("/{key}/searchplayers.php")
-                            .queryParam("p", name)
-                            .build(props.apiKey()))
-                    .retrieve()
-                    .body(TsdbPlayerSearchResponse.class);
-            if (resp == null || resp.player() == null) return List.of();
-            return resp.player();
-        } catch (Exception ex) {
-            log.debug("TheSportsDB searchplayers hata p={}: {}", name, ex.toString());
-            return List.of();
-        }
-    }
-
-    /** {@code lookupplayer.php?id={idPlayer}} — tam oyuncu kaydı (idAPIfootball + strSide). */
-    private TsdbPlayerDto lookupPlayer(String idPlayer) {
-        try {
-            TsdbPlayerLookupResponse resp = http.get()
-                    .uri(u -> u.path("/{key}/lookupplayer.php")
-                            .queryParam("id", idPlayer)
-                            .build(props.apiKey()))
-                    .retrieve()
-                    .body(TsdbPlayerLookupResponse.class);
-            if (resp == null || resp.players() == null || resp.players().isEmpty()) return null;
-            return resp.players().get(0);
-        } catch (Exception ex) {
-            log.debug("TheSportsDB lookupplayer hata id={}: {}", idPlayer, ex.toString());
-            return null;
-        }
-    }
-
-    /** Ayak cache girişi — null foot da geçerli (negatif sonuç). */
-    private record FootEntry(String foot, Instant expiresAt) {}
 }

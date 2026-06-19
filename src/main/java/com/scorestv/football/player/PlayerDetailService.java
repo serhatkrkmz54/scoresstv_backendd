@@ -1,6 +1,5 @@
 package com.scorestv.football.player;
 
-import com.scorestv.broadcasts.TheSportsDbClient;
 import com.scorestv.common.ApiException;
 import com.scorestv.common.SlugUtil;
 import com.scorestv.football.FootballCacheNames;
@@ -73,7 +72,6 @@ public class PlayerDetailService {
     private final PlayerDetailSeoBuilder seoBuilder;
     private final FootballMessages messages;
     private final MinioStorageService storage;
-    private final TheSportsDbClient tsdb;
 
     private final PlayerDetailService self;
 
@@ -90,7 +88,6 @@ public class PlayerDetailService {
                                PlayerDetailSeoBuilder seoBuilder,
                                FootballMessages messages,
                                MinioStorageService storage,
-                               TheSportsDbClient tsdb,
                                @Lazy PlayerDetailService self) {
         this.playerRepository = playerRepository;
         this.careerTeamRepository = careerTeamRepository;
@@ -105,7 +102,6 @@ public class PlayerDetailService {
         this.seoBuilder = seoBuilder;
         this.messages = messages;
         this.storage = storage;
-        this.tsdb = tsdb;
         this.self = self;
     }
 
@@ -145,7 +141,9 @@ public class PlayerDetailService {
         for (PlayerCareerTeam ct : careerTeams) {
             if (ct.getSeasons() != null) seasonsUnion.addAll(ct.getSeasons());
         }
-        seasonsUnion.addAll(statRepository.findSeasonYearsByPlayer(playerId));
+        // İstatistiği OLAN sezonlar (yeni → eski). Pozisyon fallback'i bunu kullanır.
+        List<Integer> statSeasonYears = statRepository.findSeasonYearsByPlayer(playerId);
+        seasonsUnion.addAll(statSeasonYears);
         List<Integer> seasons = new ArrayList<>(seasonsUnion);
 
         Integer selectedSeason = season != null
@@ -193,19 +191,21 @@ public class PlayerDetailService {
                 break;
             }
         }
-
-        // Kullandığı ayak — API-Football vermez; TheSportsDB'den best-effort.
-        // player.getId() == API-Football oyuncu id'si (TheSportsDB idAPIfootball
-        // ile eşleşir). Hata/ağ sorunu olursa ayak gösterilmez, sayfa çalışır.
-        String foot = null;
-        String footText = null;
-        try {
-            foot = tsdb.lookupFoot(displayName, player.getId());
-            if (foot != null) {
-                footText = messages.playerFoot(foot, turkish);
+        // Fallback: seçili sezonda pozisyon yoksa (ör. yeni sezon henüz
+        // istatistiksiz — Haziran'da 2026 gibi), istatistiği OLAN en yeni
+        // sezondan al. Hero pozisyon pill'i sezon seçiminden bağımsız dolu kalsın.
+        if (position == null) {
+            outer:
+            for (Integer y : statSeasonYears) {  // yeni → eski
+                for (PlayerSeasonStat s : statRepository.findByPlayerIdAndSeason(playerId, y)) {
+                    String raw = extractPosition(s);
+                    if (raw != null && !raw.isBlank()) {
+                        position = raw;
+                        positionText = messages.playerPosition(raw, turkish);
+                        break outer;
+                    }
+                }
             }
-        } catch (Exception ignored) {
-            // ayak opsiyonel
         }
 
         return new PlayerDetailResponse(
@@ -222,8 +222,6 @@ public class PlayerDetailService {
                 player.getWeight(),
                 position,
                 positionText,
-                foot,
-                footText,
                 player.getInjured(),
                 birth,
                 currentTeam,
@@ -386,6 +384,16 @@ public class PlayerDetailService {
         return max;
     }
 
+    /** PlayerSeasonStat JSONB'sinden {@code games.position}'ı çıkarır (yoksa null). */
+    private static String extractPosition(PlayerSeasonStat s) {
+        if (s.getStatsJson() != null
+                && s.getStatsJson().get("games") instanceof Map<?, ?> gamesMap) {
+            Object pos = gamesMap.get("position");
+            if (pos instanceof String posStr && !posStr.isBlank()) return posStr;
+        }
+        return null;
+    }
+
     private List<PlayerSeasonStatView> loadSeasonStats(Long playerId, Integer season,
                                                        boolean turkish) {
         if (season == null) return List.of();
@@ -398,12 +406,7 @@ public class PlayerDetailService {
             League lg = s.getLeague();
             String teamName = displayName(team, turkish);
             String leagueName = displayName(lg, turkish);
-            String rawPosition = null;
-            if (s.getStatsJson() != null
-                    && s.getStatsJson().get("games") instanceof Map<?, ?> gamesMap) {
-                Object pos = gamesMap.get("position");
-                if (pos instanceof String posStr) rawPosition = posStr;
-            }
+            String rawPosition = extractPosition(s);
             out.add(new PlayerSeasonStatView(
                     team.getId(), teamName,
                     team.getLogoKey() != null ? storage.publicUrl(team.getLogoKey()) : null,

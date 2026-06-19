@@ -42,11 +42,6 @@ public record PlayerDetailResponse(
          *  (ham "Attacker" + çevrilmiş "Forvet"). Null olabilir. */
         String position,
         String positionText,
-        /** Kullandığı ayak — TheSportsDB strSide (ham "Right" + çevrilmiş
-         *  "Sağ ayak"). API-Football vermez; TheSportsDB'den best-effort.
-         *  TheSportsDB'de kaydı yoksa null. */
-        String foot,
-        String footText,
         Boolean injured,
         BirthInfo birth,
         /**
