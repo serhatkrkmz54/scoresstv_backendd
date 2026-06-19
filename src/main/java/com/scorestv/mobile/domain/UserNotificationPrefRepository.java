@@ -30,31 +30,49 @@ public interface UserNotificationPrefRepository
      */
     @Query("SELECT p FROM UserNotificationPref p "
             + "JOIN FETCH p.deviceToken "
-            + "WHERE p.team.id = :teamId AND p.notifyGoal = true")
+            + "WHERE p.team.id = :teamId AND p.notifyGoal = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
     List<UserNotificationPref> findRecipientsForGoal(@Param("teamId") Long teamId);
 
     @Query("SELECT p FROM UserNotificationPref p "
             + "JOIN FETCH p.deviceToken "
-            + "WHERE p.team.id = :teamId AND p.notifyRedCard = true")
+            + "WHERE p.team.id = :teamId AND p.notifyRedCard = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
     List<UserNotificationPref> findRecipientsForRedCard(@Param("teamId") Long teamId);
 
     @Query("SELECT p FROM UserNotificationPref p "
             + "JOIN FETCH p.deviceToken "
-            + "WHERE p.team.id = :teamId AND p.notifyPenalty = true")
+            + "WHERE p.team.id = :teamId AND p.notifyPenalty = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
     List<UserNotificationPref> findRecipientsForPenalty(@Param("teamId") Long teamId);
 
     @Query("SELECT p FROM UserNotificationPref p "
             + "JOIN FETCH p.deviceToken "
-            + "WHERE p.team.id = :teamId AND p.notifyKickoff = true")
+            + "WHERE p.team.id = :teamId AND p.notifyKickoff = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
     List<UserNotificationPref> findRecipientsForKickoff(@Param("teamId") Long teamId);
 
     @Query("SELECT p FROM UserNotificationPref p "
             + "JOIN FETCH p.deviceToken "
-            + "WHERE p.team.id = :teamId AND p.notifyFinal = true")
+            + "WHERE p.team.id = :teamId AND p.notifyFinal = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
     List<UserNotificationPref> findRecipientsForFinal(@Param("teamId") Long teamId);
 
     @Query("SELECT p FROM UserNotificationPref p "
             + "JOIN FETCH p.deviceToken "
-            + "WHERE p.team.id = :teamId AND p.notifyLineup = true")
+            + "WHERE p.team.id = :teamId AND p.notifyLineup = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
     List<UserNotificationPref> findRecipientsForLineup(@Param("teamId") Long teamId);
+
+    @Query("SELECT p FROM UserNotificationPref p "
+            + "JOIN FETCH p.deviceToken "
+            + "WHERE p.team.id = :teamId AND p.notifyHalftime = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
+    List<UserNotificationPref> findRecipientsForHalftime(@Param("teamId") Long teamId);
+
+    @Query("SELECT p FROM UserNotificationPref p "
+            + "JOIN FETCH p.deviceToken "
+            + "WHERE p.team.id = :teamId AND p.notifySecondHalf = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
+    List<UserNotificationPref> findRecipientsForSecondHalf(@Param("teamId") Long teamId);
 }

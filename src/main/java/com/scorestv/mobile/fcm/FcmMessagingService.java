@@ -80,13 +80,37 @@ public class FcmMessagingService {
         for (int i = 0; i < tokens.size(); i += FCM_MAX_TOKENS_PER_REQUEST) {
             int end = Math.min(i + FCM_MAX_TOKENS_PER_REQUEST, tokens.size());
             List<String> chunk = tokens.subList(i, end);
-            totalSent += sendChunk(chunk, title, body, data);
+            totalSent += sendChunk(chunk, title, body, data, false);
+        }
+        return totalSent;
+    }
+
+    /**
+     * {@link #sendMulticast} ile AYNI, ama sert (batch-seviyesi) FCM hatasında
+     * istisnayı YUTMAZ — {@link RuntimeException} olarak fırlatır. Outbox
+     * worker'ı bunu yakalayıp backoff'la TEKRAR DENEYEBİLSİN diye. Geçici
+     * hatalarda (FCM UNAVAILABLE/INTERNAL, ağ) bildirim kaybolmaz.
+     *
+     * @return başarıyla gönderilen alıcı sayısı (0 = alıcı yok demek olabilir)
+     * @throws RuntimeException sert FCM hatasında (retry sinyali)
+     */
+    public int sendMulticastOrThrow(List<String> tokens, String title, String body,
+                                    Map<String, String> data) {
+        if (messaging == null) {
+            throw new IllegalStateException("FCM devre disi (FirebaseMessaging null)");
+        }
+        if (tokens.isEmpty()) return 0;
+        int totalSent = 0;
+        for (int i = 0; i < tokens.size(); i += FCM_MAX_TOKENS_PER_REQUEST) {
+            int end = Math.min(i + FCM_MAX_TOKENS_PER_REQUEST, tokens.size());
+            List<String> chunk = tokens.subList(i, end);
+            totalSent += sendChunk(chunk, title, body, data, true);
         }
         return totalSent;
     }
 
     private int sendChunk(List<String> tokens, String title, String body,
-                          Map<String, String> data) {
+                          Map<String, String> data, boolean throwOnError) {
         try {
             MulticastMessage.Builder builder = MulticastMessage.builder()
                     .addAllTokens(tokens)
@@ -130,6 +154,10 @@ public class FcmMessagingService {
             return response.getSuccessCount();
         } catch (FirebaseMessagingException ex) {
             log.error("FCM multicast basarisiz: {}", ex.getMessage(), ex);
+            if (throwOnError) {
+                // Outbox worker retry edebilsin diye sinyal ver.
+                throw new RuntimeException("FCM gonderim hatasi: " + ex.getMessage(), ex);
+            }
             return 0;
         }
     }

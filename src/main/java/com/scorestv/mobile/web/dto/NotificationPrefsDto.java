@@ -18,11 +18,15 @@ public record NotificationPrefsDto(
         boolean penalti,
         boolean basladi,
         boolean bitti,
-        Boolean kadro
+        Boolean kadro,
+        /** "İlk yarı bitti" — GERIYE-UYUMLU nullable (eski client göndermez). */
+        Boolean ilkYari,
+        /** "İkinci yarı başladı" — GERIYE-UYUMLU nullable. */
+        Boolean ikinciYari
 ) {
 
     /** Tum bildirimler acik default — yeni eklenen takimlar icin. */
     public static NotificationPrefsDto allEnabled() {
-        return new NotificationPrefsDto(true, true, true, true, true, true);
+        return new NotificationPrefsDto(true, true, true, true, true, true, true, true);
     }
 }

@@ -28,7 +28,8 @@ public interface DeviceBasketballSubscriptionRepository
     /** <b>Dispatcher anahtar sorgusu</b> — maçın favori abonesi tüm cihazlar. */
     @Query("SELECT s FROM DeviceBasketballSubscription s "
             + "JOIN FETCH s.deviceToken "
-            + "WHERE s.game.id = :gameId")
+            + "WHERE s.game.id = :gameId "
+            + "AND s.deviceToken.notificationsEnabled = true")
     List<DeviceBasketballSubscription> findRecipientsForGame(
             @Param("gameId") Long gameId);
 }

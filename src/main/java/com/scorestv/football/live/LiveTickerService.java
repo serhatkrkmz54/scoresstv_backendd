@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -68,19 +67,6 @@ public class LiveTickerService {
      */
     private static final int STUCK_BATCH_SIZE = 20;
 
-    /** Final statuleri — buraya gecis "bitti" FCM push tetikler. */
-    private static final Set<String> FINAL_STATUSES = Set.of("FT", "AET", "PEN");
-
-    /**
-     * "Başladı" push'u yalnız maç YENİ başlamışsa atılır. elapsed bu değeri
-     * aşmışsa (geç gördük) atlanır — geç/alakasız "başladı" bildirimi olmaz.
-     */
-    private static final int KICKOFF_MAX_ELAPSED = 15;
-    /** elapsed null geldiğinde duvar-saati fallback'i (gecikmeli başlama vs.). */
-    private static final Duration KICKOFF_WALL_FALLBACK = Duration.ofMinutes(25);
-    /** "Bitti" push'u: kickoff bu kadar zaman öncesinden yeni ise gönder (eski/ardı maçlara atma). */
-    private static final Duration FINAL_RECENCY = Duration.ofHours(4);
-
     /**
      * Bir maçın normal maksimum süresi (2×45 dk + iki devre arası + buffer).
      * Bundan eski kickoff'lu hâlâ "canlı" statüde olan maçlar API'den zorla
@@ -102,7 +88,7 @@ public class LiveTickerService {
     private final FixturePlayerStatsSyncService playerStatsSyncService;
     private final SyncRateLimiter rateLimiter;
     private final NotificationDispatcherService notificationDispatcher;
-    private final FixtureNotifyGate notifyGate;
+    private final MatchStatusNotifier statusNotifier;
 
     public LiveTickerService(ApiFootballClient client,
                              FixtureUpserter upserter,
@@ -113,7 +99,7 @@ public class LiveTickerService {
                              FixturePlayerStatsSyncService playerStatsSyncService,
                              SyncRateLimiter rateLimiter,
                              NotificationDispatcherService notificationDispatcher,
-                             FixtureNotifyGate notifyGate) {
+                             MatchStatusNotifier statusNotifier) {
         this.client = client;
         this.upserter = upserter;
         this.fixtureRepository = fixtureRepository;
@@ -123,7 +109,7 @@ public class LiveTickerService {
         this.playerStatsSyncService = playerStatsSyncService;
         this.rateLimiter = rateLimiter;
         this.notificationDispatcher = notificationDispatcher;
-        this.notifyGate = notifyGate;
+        this.statusNotifier = statusNotifier;
     }
 
     /**
@@ -216,11 +202,12 @@ public class LiveTickerService {
         // 5) Tek seferde tum items (live + stuck) upsert.
         upserter.upsert(items);
 
-        // 5a) Maç başladı/bitti bildirimleri — KALICI tam-bir-kez kapısıyla.
-        // Diff'e bağlı DEĞİL: durumu başka bir yol önce ilerletse, tick kaçsa
-        // ya da app restart olsa bile her geçiş bir kez işlenir. Upsert sonrası
-        // çağrılır ki fixture satırları DB'de mevcut olsun (claim UPDATE için).
-        dispatchStatusNotifications(items);
+        // 5a) Maç başladı/bitti bildirimleri — ASENKRON + KALICI tam-bir-kez.
+        // fire-and-forget: bildirim claim'i + FCM ayrı thread'de koşar, bu
+        // hız-kritik canlı-skor tick'ini ASLA sektmez/yavaşlatmaz. Doğruluk
+        // (tam-bir-kez) atomik claim ile korunur. Upsert sonrası çağrılır ki
+        // fixture satırları DB'de mevcut olsun (claim UPDATE için).
+        statusNotifier.notifyStatusTransitions(items);
 
         // 4) Değişen id'leri saptayan karşılaştırma — yeni gelen API verisi
         //    ile önceki DB snapshot eşit değilse o maç değişmiş demektir.
@@ -307,71 +294,6 @@ public class LiveTickerService {
         log.info("Canlı tick: {} maç, {} değişim ({} skor) WebSocket'e yayıldı.",
                 items.size(), updated.size(), scoreChangedIds.size());
         return new LiveTickerResult(items.size(), updated.size());
-    }
-
-    /**
-     * Maç başladı/bitti FCM bildirimleri — KALICI tam-bir-kez kapısı.
-     *
-     * <p>Her tick'te TÜM canlı/stuck item'lar değerlendirilir (yalnız "değişen"
-     * olanlar değil) — çünkü durumu başka bir yol (detay lazy-sync) önce
-     * ilerletmişse o maç bu tick'te "değişmemiş" görünür ama bildirimi hiç
-     * gitmemiş olabilir. {@link FixtureNotifyGate} atomik UPDATE ile tam-bir-kez
-     * sağlar; recency guard'ı geç/alakasız bildirimi engeller. dispatchKickoff/
-     * dispatchFinal yalnız id ile çalışır (içeride reload eder), hafif ref yeter.
-     */
-    private void dispatchStatusNotifications(List<FixtureApiDto> items) {
-        final Instant now = Instant.now();
-        for (FixtureApiDto item : items) {
-            final FixtureApiDto.Fixture f = item.fixture();
-            if (f == null || f.id() == null || f.status() == null) continue;
-            final String status = f.status().shortCode();
-            if (status == null) continue;
-            final Long id = f.id();
-            try {
-                if (FINAL_STATUSES.contains(status)) {
-                    // "Bitti" — yalniz yeni biten maclar (eski/ardı maçlara atma).
-                    final Instant ko = parseKickoff(f.date());
-                    final boolean recent = ko == null
-                            || Duration.between(ko, now).compareTo(FINAL_RECENCY) <= 0;
-                    if (recent && notifyGate.claimFinal(id)) {
-                        notificationDispatcher.dispatchFinal(refFixture(id));
-                    }
-                } else if (LIVE_DB_STATUSES.contains(status)) {
-                    // "Başladı" — yalniz YENİ başlayanlar (~ilk 15 dk).
-                    final Integer elapsed = f.status().elapsed();
-                    final boolean recentlyStarted;
-                    if (elapsed != null) {
-                        recentlyStarted = elapsed <= KICKOFF_MAX_ELAPSED;
-                    } else {
-                        final Instant ko = parseKickoff(f.date());
-                        recentlyStarted = ko == null
-                                || Duration.between(ko, now).compareTo(KICKOFF_WALL_FALLBACK) <= 0;
-                    }
-                    if (recentlyStarted && notifyGate.claimKickoff(id)) {
-                        notificationDispatcher.dispatchKickoff(refFixture(id));
-                    }
-                }
-            } catch (RuntimeException ex) {
-                log.warn("Durum bildirim dispatch hata fixtureId={}: {}",
-                        id, ex.getMessage());
-            }
-        }
-    }
-
-    /** dispatchKickoff/Final içeride id ile reload eder; hafif ref yeterli. */
-    private static Fixture refFixture(Long id) {
-        Fixture f = new Fixture();
-        f.setId(id);
-        return f;
-    }
-
-    private static Instant parseKickoff(String date) {
-        if (date == null) return null;
-        try {
-            return OffsetDateTime.parse(date).toInstant();
-        } catch (RuntimeException ex) {
-            return null;
-        }
     }
 
     /** Skor değişimi (gol) tespiti — homeGoals ya da awayGoals farklı mı? */

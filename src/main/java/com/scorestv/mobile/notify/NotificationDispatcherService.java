@@ -57,6 +57,7 @@ public class NotificationDispatcherService {
     private final NotificationMessageBuilder messageBuilder;
     private final FixtureRepository fixtureRepository;
     private final FixtureEventRepository fixtureEventRepository;
+    private final NotificationOutboxEnqueuer enqueuer;
 
     /**
      * Cift bildirim onleme memo'su. Key formati:
@@ -102,13 +103,15 @@ public class NotificationDispatcherService {
             FcmMessagingService fcmMessaging,
             NotificationMessageBuilder messageBuilder,
             FixtureRepository fixtureRepository,
-            FixtureEventRepository fixtureEventRepository) {
+            FixtureEventRepository fixtureEventRepository,
+            NotificationOutboxEnqueuer enqueuer) {
         this.prefRepository = prefRepository;
         this.matchSubRepository = matchSubRepository;
         this.fcmMessaging = fcmMessaging;
         this.messageBuilder = messageBuilder;
         this.fixtureRepository = fixtureRepository;
         this.fixtureEventRepository = fixtureEventRepository;
+        this.enqueuer = enqueuer;
     }
 
     // ============================================================
@@ -116,7 +119,7 @@ public class NotificationDispatcherService {
     // ============================================================
 
     @Async
-    @Transactional(readOnly = true)
+    @Transactional
     public void dispatchEvent(Fixture fixtureArg, FixtureEvent eventArg) {
         if (!fcmMessaging.isEnabled()) return;
         if (fixtureArg == null || eventArg == null) return;
@@ -142,65 +145,27 @@ public class NotificationDispatcherService {
         final Long teamId = event.getTeam() != null ? event.getTeam().getId() : null;
         if (teamId == null) return;
 
-        // Cift bildirim guardu: ayni fixture + type + teamId + dakika(+uzatma)
-        // icin son 120sn'de push gonderildiyse skip.
-        //
-        // ONEMLI (cift kirmizi kart bug fix): anahtara event.getId() VE playerId
-        // DAHIL EDILMEZ. API kirmizi karti once ISIMSIZ gonderiyor; isim gelince
-        // olay silinip YENI id ile yeniden yaziliyor (events her sync'te replace
-        // edilir — bkz. FixtureEvent javadoc). Eski anahtar event.getId()
-        // icerdiginden isimli surum (yeni id) dedup'a TAKILMIYOR ve IKINCI push
-        // gidiyordu. Dakika + uzatma + tip + takim yeterince ayirt edici; ayni
-        // takimin ayni dakikadaki iki AYRI kirmizisi (cok nadir) tek bildirim alir.
+        // OUTBOX dedup anahtarı — STABİL: event.getId()/playerId DAHIL DEĞİL.
+        // API kırmızı kartı önce ISIMSIZ, sonra olayı silip YENİ id ile İSİMLİ
+        // gönderiyor (events her sync'te replace — bkz. FixtureEvent javadoc).
+        // Aynı dakika+uzatma+tip+takım aynı anahtara düşer → TEK bildirim; ilk
+        // gelen (genelde isimsiz) kuyruğa girer, isimli sürüm dedup'a takılır.
         final int evExtra = event.getTimeExtra() == null ? 0 : event.getTimeExtra();
-        final String evDedupKey = String.format("ev:%d:%s:%d:%d:%d",
+        final String dedupKey = String.format("EVENT:%d:%s:%d:%d:%d",
                 fixture.getId(), mobileType, teamId,
-                event.getTimeElapsed() == null ? 0 : event.getTimeElapsed(),
-                evExtra);
-        if (_isRecentlySent(evDedupKey)) {
-            log.info("Event push SKIP (dedup) fixtureId={} key={}",
-                    fixture.getId(), evDedupKey);
-            return;
-        }
-        _markSent(evDedupKey);
+                event.getTimeElapsed() == null ? 0 : event.getTimeElapsed(), evExtra);
 
-        // 1) Takim takibinden gelen recipient'lar (user_notification_prefs)
-        final List<UserNotificationPref> teamRecipients =
-                _recipientsFor(mobileType, teamId);
-
-        // 2) Mac-bazli favori abonelikleri (device_match_subscriptions) —
-        //    favori yapan tum cihazlar default tum event'leri alir.
-        final List<DeviceMatchSubscription> favRecipients =
-                matchSubRepository.findRecipientsForFixture(fixture.getId());
-
-        if (teamRecipients.isEmpty() && favRecipients.isEmpty()) {
-            log.debug("Dispatch event: alici yok fixtureId={} type={} teamId={}",
-                    fixture.getId(), mobileType, teamId);
-            return;
-        }
-
-        // LinkedHashSet — token bazinda dedup (ayni cihaz hem takim takip ediyor
-        // hem maci favoriledikse cift bildirim almasin).
-        final Set<String> tokens = new LinkedHashSet<>();
-        for (UserNotificationPref p : teamRecipients) {
-            tokens.add(p.getDeviceToken().getFcmToken());
-        }
-        for (DeviceMatchSubscription s : favRecipients) {
-            tokens.add(s.getDeviceToken().getFcmToken());
-        }
-
+        // Mesajı ŞİMDİ render et (oyuncu/dakika snapshot'ı), kuyruğa yaz.
         final var msg = messageBuilder.buildEventMessage(fixture, event, mobileType);
         final Map<String, String> data = new HashMap<>();
         data.put("type", mobileType);
         data.put("fixtureId", String.valueOf(fixture.getId()));
         data.put("teamId", String.valueOf(teamId));
-        data.put("eventMinute", String.valueOf(event.getTimeElapsed()));
-
-        final int sent = fcmMessaging.sendMulticast(
-                List.copyOf(tokens), msg.title(), msg.body(), data);
-        log.info("FCM event dispatch: fixtureId={} type={} alici={} (takim={} favori={}) gonderildi={}",
-                fixture.getId(), mobileType, tokens.size(),
-                teamRecipients.size(), favRecipients.size(), sent);
+        if (event.getTimeElapsed() != null) {
+            data.put("eventMinute", String.valueOf(event.getTimeElapsed()));
+        }
+        enqueuer.enqueue(NotificationOutbox.KIND_EVENT, mobileType, fixture.getId(),
+                teamId, msg.title(), msg.body(), data, dedupKey);
     }
 
     // ============================================================
@@ -209,57 +174,32 @@ public class NotificationDispatcherService {
     // ============================================================
 
     @Async
-    @Transactional(readOnly = true)
+    @Transactional
     public void dispatchGoal(Long fixtureId, Long scoringTeamId) {
         if (!fcmMessaging.isEnabled() || fixtureId == null) return;
         final Fixture fixture =
                 fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
 
-        // Cift bildirim guardu: ayni mac + ayni skor + ayni dakika icin son
-        // 120sn'de push gonderildiyse skip. LiveTickerService bazen ayni skor
-        // degisimini iki tick'te (5sn ara) goruyor — kullanici 2-3 push aliyor.
-        final String dedupKey = String.format("goal:%d:%d:%d-%d",
+        // OUTBOX dedup anahtarı: skor snapshot'ı (home-away) golü benzersizleştirir.
+        // Aynı skor değişimini iki tick'te görsek de tek bildirim girer.
+        final String dedupKey = String.format("GOAL:%d:%d:%d-%d",
                 fixtureId,
                 scoringTeamId == null ? 0L : scoringTeamId,
                 fixture.getHomeGoals() == null ? 0 : fixture.getHomeGoals(),
                 fixture.getAwayGoals() == null ? 0 : fixture.getAwayGoals());
-        if (_isRecentlySent(dedupKey)) {
-            log.info("Skor-gol push SKIP (dedup) fixtureId={} key={}",
-                    fixtureId, dedupKey);
-            return;
-        }
-        _markSent(dedupKey);
 
-        // Alicilar: gol atan takim takipcileri ("gol" acik) + favori-mac aboneleri.
-        final Set<String> tokens = new LinkedHashSet<>();
-        if (scoringTeamId != null) {
-            for (UserNotificationPref p : _recipientsFor("gol", scoringTeamId)) {
-                tokens.add(p.getDeviceToken().getFcmToken());
-            }
-        }
-        for (DeviceMatchSubscription s :
-                matchSubRepository.findRecipientsForFixture(fixtureId)) {
-            tokens.add(s.getDeviceToken().getFcmToken());
-        }
-        if (tokens.isEmpty()) return;
-
-        // Skor-only — beklemeden ANINDA gonderilir (hiz oncelikli). Golcu bu
-        // anda henuz DB'de degil (skor /fixtures?live=all'dan, golcu ayri /events
-        // cagrisindan gelir); uygulamada saniyeler icinde WebSocket'le gorunur.
-        // A-Faz5 rotuş: o anki mac dakikasini (fixture.elapsed) gecirip
-        // title/body'de "12'" formatinda gostermek icin buildScoreGoal'a
-        // minute geciriyoruz. Golcu olmasa da dakika gorunur olur.
+        // Mesajı ŞİMDİ render et (skor + dakika snapshot'ı dondurulur) ve kuyruğa
+        // yaz — geç gönderimde skor değişse bile mesaj o anki golü gösterir.
         final Integer minute = fixture.getElapsed();
         final var msg = messageBuilder.buildScoreGoal(fixture, null, minute);
         final Map<String, String> data = new HashMap<>();
         data.put("type", "gol");
         data.put("fixtureId", String.valueOf(fixtureId));
         if (minute != null) data.put("eventMinute", String.valueOf(minute));
-        final int sent = fcmMessaging.sendMulticast(
-                List.copyOf(tokens), msg.title(), msg.body(), data);
-        log.info("FCM skor-gol dispatch: fixtureId={} dakika={} alici={} gonderildi={}",
-                fixtureId, minute, tokens.size(), sent);
+        // teamId = gol atan takım → "gol" tercihi açık o takım takipçileri alır.
+        enqueuer.enqueue(NotificationOutbox.KIND_GOAL, "gol", fixtureId,
+                scoringTeamId, msg.title(), msg.body(), data, dedupKey);
     }
 
     // ============================================================
@@ -315,22 +255,78 @@ public class NotificationDispatcherService {
     // ============================================================
 
     @Async
-    @Transactional(readOnly = true)
+    @Transactional
     public void dispatchLineup(Long fixtureId) {
         if (!fcmMessaging.isEnabled() || fixtureId == null) return;
-
-        // Cift bildirim guardu — job ayni maci pespese tick'te gormesin.
-        final String key = "lineup:" + fixtureId;
-        if (_isRecentlySent(key)) {
-            log.info("Kadro push SKIP (dedup) fixtureId={}", fixtureId);
-            return;
-        }
-        _markSent(key);
-
         final Fixture fixture =
                 fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
-        _dispatchMatchStatus(fixture, "kadro");
+        // Kadro maç başına BİR kez açıklanır → "LINEUP:fixture" dedup_key tek
+        // bildirim sağlar. Mesajı şimdi render et, kuyruğa yaz (garantili teslim).
+        final var msg = messageBuilder.buildLineupMessage(fixture);
+        final Map<String, String> data = new HashMap<>();
+        data.put("type", "kadro");
+        data.put("fixtureId", String.valueOf(fixtureId));
+        enqueuer.enqueue(NotificationOutbox.KIND_LINEUP, "kadro", fixtureId, null,
+                msg.title(), msg.body(), data, "LINEUP:" + fixtureId);
+    }
+
+    /**
+     * SENKRON outbox gönderimi — {@link NotificationOutboxWorker} çağırır.
+     * Mesaj zaten render edilmiş (title/body/data) olarak gelir; bu metot
+     * yalnız ALICILARI tazece çözer (token'lar değişmiş olabilir) ve FCM'e
+     * gönderir. <b>Sert FCM hatasında EXCEPTION fırlatır</b> ki worker backoff'la
+     * tekrar denesin. Alıcı yoksa 0 döner (başarı — gönderilecek yok).
+     *
+     * @param fixtureId maç id
+     * @param teamId    GOAL/EVENT: ilgili takım takipçileri; null ise (KICKOFF/
+     *                  FINAL) maçın HER İKİ takımının takipçileri alır
+     * @param notifType basladi|bitti|gol|kirmizi|penalti (tercih sorgusu)
+     */
+    @Transactional(readOnly = true)
+    public int sendOutboxRow(Long fixtureId, Long teamId, String notifType,
+                             String title, String body, Map<String, String> data) {
+        if (!fcmMessaging.isEnabled()) {
+            // FCM kapali — worker'in beklemesi (retry) icin gecici hata say.
+            throw new IllegalStateException("FCM devre disi");
+        }
+        final Set<String> tokens = new LinkedHashSet<>();
+        if (teamId != null) {
+            // GOAL/EVENT — ilgili takimin (notifType tercihi acik) takipcileri.
+            for (UserNotificationPref p : _recipientsFor(notifType, teamId)) {
+                tokens.add(p.getDeviceToken().getFcmToken());
+            }
+        } else {
+            // KICKOFF/FINAL — maçın iki takımı.
+            final Fixture fixture = fixtureRepository.findById(fixtureId).orElse(null);
+            if (fixture != null) {
+                if (fixture.getHomeTeam() != null) {
+                    for (UserNotificationPref p :
+                            _recipientsFor(notifType, fixture.getHomeTeam().getId())) {
+                        tokens.add(p.getDeviceToken().getFcmToken());
+                    }
+                }
+                if (fixture.getAwayTeam() != null) {
+                    for (UserNotificationPref p :
+                            _recipientsFor(notifType, fixture.getAwayTeam().getId())) {
+                        tokens.add(p.getDeviceToken().getFcmToken());
+                    }
+                }
+            }
+        }
+        // Mac-bazli favori abonelikleri — her tip bildirimi alir.
+        for (DeviceMatchSubscription s :
+                matchSubRepository.findRecipientsForFixture(fixtureId)) {
+            tokens.add(s.getDeviceToken().getFcmToken());
+        }
+        if (tokens.isEmpty()) return 0; // alici yok — basari
+
+        // Sert hatada fırlatır → worker retry eder.
+        final int sent = fcmMessaging.sendMulticastOrThrow(
+                List.copyOf(tokens), title, body, data);
+        log.info("FCM outbox dispatch: fixtureId={} type={} alici={} gonderildi={}",
+                fixtureId, notifType, tokens.size(), sent);
+        return sent;
     }
 
     private void _dispatchMatchStatus(Fixture fixture, String mobileType) {
@@ -430,6 +426,8 @@ public class NotificationDispatcherService {
             case "basladi" -> prefRepository.findRecipientsForKickoff(teamId);
             case "bitti" -> prefRepository.findRecipientsForFinal(teamId);
             case "kadro" -> prefRepository.findRecipientsForLineup(teamId);
+            case "ht" -> prefRepository.findRecipientsForHalftime(teamId);
+            case "2yari" -> prefRepository.findRecipientsForSecondHalf(teamId);
             default -> List.of();
         };
     }

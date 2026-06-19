@@ -32,19 +32,22 @@ public interface BasketballNotificationPrefRepository
      */
     @Query("SELECT p FROM BasketballNotificationPref p "
             + "JOIN FETCH p.deviceToken "
-            + "WHERE p.team.id = :teamId AND p.notifyStart = true")
+            + "WHERE p.team.id = :teamId AND p.notifyStart = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
     List<BasketballNotificationPref> findRecipientsForStart(
             @Param("teamId") Long teamId);
 
     @Query("SELECT p FROM BasketballNotificationPref p "
             + "JOIN FETCH p.deviceToken "
-            + "WHERE p.team.id = :teamId AND p.notifyPeriod = true")
+            + "WHERE p.team.id = :teamId AND p.notifyPeriod = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
     List<BasketballNotificationPref> findRecipientsForPeriod(
             @Param("teamId") Long teamId);
 
     @Query("SELECT p FROM BasketballNotificationPref p "
             + "JOIN FETCH p.deviceToken "
-            + "WHERE p.team.id = :teamId AND p.notifyFinal = true")
+            + "WHERE p.team.id = :teamId AND p.notifyFinal = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
     List<BasketballNotificationPref> findRecipientsForFinal(
             @Param("teamId") Long teamId);
 }

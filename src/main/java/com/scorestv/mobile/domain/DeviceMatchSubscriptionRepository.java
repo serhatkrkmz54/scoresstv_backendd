@@ -43,7 +43,8 @@ public interface DeviceMatchSubscriptionRepository
      */
     @Query("SELECT s FROM DeviceMatchSubscription s "
             + "JOIN FETCH s.deviceToken "
-            + "WHERE s.fixture.id = :fixtureId")
+            + "WHERE s.fixture.id = :fixtureId "
+            + "AND s.deviceToken.notificationsEnabled = true")
     List<DeviceMatchSubscription> findRecipientsForFixture(
             @Param("fixtureId") Long fixtureId);
 }

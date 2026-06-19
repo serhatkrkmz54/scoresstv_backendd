@@ -66,4 +66,12 @@ public class UserNotificationPref extends BaseEntity {
     /** İlk 11 (kadro) açıklandığında bildirim — kickoff'tan ~20-40 dk önce. */
     @Column(name = "notify_lineup", nullable = false)
     private boolean notifyLineup = true;
+
+    /** "İlk yarı bitti" (devre arası) bildirimi. */
+    @Column(name = "notify_halftime", nullable = false)
+    private boolean notifyHalftime = true;
+
+    /** "İkinci yarı başladı" bildirimi. */
+    @Column(name = "notify_second_half", nullable = false)
+    private boolean notifySecondHalf = true;
 }

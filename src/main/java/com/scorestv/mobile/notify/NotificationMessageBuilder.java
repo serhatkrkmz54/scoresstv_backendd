@@ -38,6 +38,25 @@ public class NotificationMessageBuilder {
                         _name(fixture.getAwayTeam())));
     }
 
+    public NotificationMessage buildHalftimeMessage(Fixture fixture) {
+        final Integer h = fixture.getHomeGoals();
+        final Integer a = fixture.getAwayGoals();
+        final String score = (h != null && a != null) ? "%d - %d".formatted(h, a) : "";
+        return new NotificationMessage(
+                "⏸ İlk yarı bitti",
+                "%s %s %s".formatted(
+                        _name(fixture.getHomeTeam()), score, _name(fixture.getAwayTeam()))
+                        .trim());
+    }
+
+    public NotificationMessage buildSecondHalfMessage(Fixture fixture) {
+        return new NotificationMessage(
+                "▶ İkinci yarı başladı",
+                "%s - %s maçında ikinci yarı başladı".formatted(
+                        _name(fixture.getHomeTeam()),
+                        _name(fixture.getAwayTeam())));
+    }
+
     public NotificationMessage buildLineupMessage(Fixture fixture) {
         return new NotificationMessage(
                 "📋 İlk 11 açıklandı",

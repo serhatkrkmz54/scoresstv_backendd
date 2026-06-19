@@ -95,9 +95,11 @@ public class MobileNotificationPrefsService {
             pref.setNotifyPenalty(dto.penalti());
             pref.setNotifyKickoff(dto.basladi());
             pref.setNotifyFinal(dto.bitti());
-            // Geriye-uyumlu: eski client kadro göndermez (null) → dokunma,
-            // entity default (true) / mevcut değer korunur.
+            // Geriye-uyumlu: eski client kadro/ilkYari/ikinciYari göndermez (null)
+            // → dokunma, entity default (true) / mevcut değer korunur.
             if (dto.kadro() != null) pref.setNotifyLineup(dto.kadro());
+            if (dto.ilkYari() != null) pref.setNotifyHalftime(dto.ilkYari());
+            if (dto.ikinciYari() != null) pref.setNotifySecondHalf(dto.ikinciYari());
             prefRepository.save(pref);
             upserted++;
         }
@@ -130,7 +132,9 @@ public class MobileNotificationPrefsService {
                     p.isNotifyPenalty(),
                     p.isNotifyKickoff(),
                     p.isNotifyFinal(),
-                    p.isNotifyLineup()
+                    p.isNotifyLineup(),
+                    p.isNotifyHalftime(),
+                    p.isNotifySecondHalf()
             ));
         }
         return result;
