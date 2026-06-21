@@ -78,9 +78,9 @@ public class CoachUpserter {
         // "en yeni end=null kariyer entry'sine sahip coach" kuralina gore yapilir.
         coachRepository.save(coach);
 
-        // Career REPLACE
-        careerRepository.deleteByCoachId(coach.getId());
-        if (dto.career() != null) {
+        // Career REPLACE — veri-kaybi korumasi: API kariyer dondurmediyse SILME.
+        if (dto.career() != null && !dto.career().isEmpty()) {
+            careerRepository.deleteByCoachId(coach.getId());
             // uq_coach_career_unique (coach_id, team_id, start_date): API ayni
             // anahtari kariyer listesinde tekrar dondurebiliyor. Dup'i parti
             // icinde ele — yoksa ikinci insert 23505 verip tx'i kirletirdi.

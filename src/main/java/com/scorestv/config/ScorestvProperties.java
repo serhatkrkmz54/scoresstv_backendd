@@ -44,7 +44,8 @@ public record ScorestvProperties(
 
     public record Security(
             Jwt jwt,
-            Google google
+            Google google,
+            Apple apple
     ) {}
 
     public record Jwt(
@@ -55,6 +56,11 @@ public record ScorestvProperties(
 
     /** Google Sign-In - kabul edilen OAuth client ID'leri (web, android, ios). */
     public record Google(
+            List<String> clientIds
+    ) {}
+
+    /** Sign in with Apple - kabul edilen audience'lar (App ID bundle + Service ID). */
+    public record Apple(
             List<String> clientIds
     ) {}
 

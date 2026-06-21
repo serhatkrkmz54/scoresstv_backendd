@@ -48,10 +48,11 @@ public class PlayerTrophiesSyncService {
         ApiFootballResponse<List<TrophyApiDto>> response = client.get(
                 "/trophies", Map.of("player", playerId), TROPHIES_TYPE);
         List<TrophyApiDto> items = response.response();
-        trophyRepository.deleteByPlayerId(playerId);
+        // Veri-kaybi korumasi: API bos dondurduyse mevcut kupalari SILME.
         if (items == null || items.isEmpty()) {
             return 0;
         }
+        trophyRepository.deleteByPlayerId(playerId);
         int written = 0;
         Set<String> seen = new HashSet<>();
         for (TrophyApiDto item : items) {

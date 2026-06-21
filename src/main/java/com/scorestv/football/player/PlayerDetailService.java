@@ -235,10 +235,29 @@ public class PlayerDetailService {
                 seo);
     }
 
-    /** Oyuncunun "current" sezonu: DB stats'taki en yeni yil. */
+    /**
+     * Oyuncunun "current" sezonu. DB stat'larindaki en yeni yil ile kariyer
+     * takimlarindaki en yeni KULUP sezonunun MAX'i — boylece oyuncu kapsanmayan
+     * bir lige gectiginde (stat henuz cekilmemisken) sync dogru/guncel sezonu
+     * (orn. Ronaldo 2025) ceker, eski yilda (2021) takilmaz.
+     */
     private Integer resolvePlayerCurrentSeason(Long playerId) {
+        Integer statMax = null;
         List<Integer> years = statRepository.findSeasonYearsByPlayer(playerId);
-        return years.isEmpty() ? null : years.get(0);
+        if (!years.isEmpty()) statMax = years.getFirst();
+
+        Integer careerMax = null;
+        for (PlayerCareerTeam ct : careerTeamRepository.findByPlayerIdWithTeam(playerId)) {
+            Team t = ct.getTeam();
+            if (t == null || t.isNational() || ct.getSeasons() == null) continue;
+            for (Integer y : ct.getSeasons()) {
+                if (y != null && (careerMax == null || y > careerMax)) careerMax = y;
+            }
+        }
+
+        if (statMax == null) return careerMax;
+        if (careerMax == null) return statMax;
+        return Math.max(statMax, careerMax);
     }
 
     private TeamRef resolveCurrentTeam(Long playerId, List<PlayerCareerTeam> careerTeams,
@@ -297,26 +316,7 @@ public class PlayerDetailService {
             }
         }
 
-        // --- KARAR: transfer vs stat, en guncel kazanir
-        if (latestTransfer != null
-                && (statYear == null || transferYear >= statYear)) {
-            Team inTeam = teamRepository.findById(latestTransfer.getInTeamId()).orElse(null);
-            if (inTeam != null) {
-                return toTeamRef(inTeam, turkish);
-            }
-            // DB'de takim yoksa transfer snapshot'undan TeamRef uret
-            String snapName = latestTransfer.getInTeamName() != null
-                    ? latestTransfer.getInTeamName()
-                    : ("Team#" + latestTransfer.getInTeamId());
-            return new TeamRef(latestTransfer.getInTeamId(), snapName,
-                    latestTransfer.getInTeamLogo(),
-                    SlugUtil.teamSlug(snapName, latestTransfer.getInTeamId()));
-        }
-        if (statClub != null) {
-            return toTeamRef(statClub, turkish);
-        }
-
-        // --- career_teams fallback — kulup oncelikli, en yeni sezon
+        // --- Kariyer takimlari — kulup oncelikli en yeni sezon (stat lag'ini asar)
         Team latestClub = null;
         int latestClubYear = Integer.MIN_VALUE;
         Team latestAny = null;
@@ -337,8 +337,36 @@ public class PlayerDetailService {
                 }
             }
         }
-        if (latestClub != null) {
-            return toTeamRef(latestClub, turkish);
+
+        // --- EN YENI KULUP: sezon-stat kulubu ile kariyer kulubu arasindan yili
+        // buyuk olan. Sezon stat'lari bayatsa (oyuncu kapsanmayan lige gitti,
+        // stat henuz cekilmedi) kariyer takimlari daha guncel kulubu verir —
+        // Ronaldo → Al-Nassr boyle dogru cozulur.
+        Team bestClub = statClub;
+        Integer bestClubYear = statYear;
+        if (latestClub != null
+                && (bestClubYear == null || latestClubYear > bestClubYear)) {
+            bestClub = latestClub;
+            bestClubYear = latestClubYear;
+        }
+
+        // --- KARAR: transfer vs en yeni kulup, en guncel kazanir
+        if (latestTransfer != null
+                && (bestClubYear == null || transferYear >= bestClubYear)) {
+            Team inTeam = teamRepository.findById(latestTransfer.getInTeamId()).orElse(null);
+            if (inTeam != null) {
+                return toTeamRef(inTeam, turkish);
+            }
+            // DB'de takim yoksa transfer snapshot'undan TeamRef uret
+            String snapName = latestTransfer.getInTeamName() != null
+                    ? latestTransfer.getInTeamName()
+                    : ("Team#" + latestTransfer.getInTeamId());
+            return new TeamRef(latestTransfer.getInTeamId(), snapName,
+                    latestTransfer.getInTeamLogo(),
+                    SlugUtil.teamSlug(snapName, latestTransfer.getInTeamId()));
+        }
+        if (bestClub != null) {
+            return toTeamRef(bestClub, turkish);
         }
 
         // --- Hicbir kulup kaydi yok — milli takim fallback (stats > career_teams)

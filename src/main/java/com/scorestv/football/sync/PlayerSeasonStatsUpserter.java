@@ -66,6 +66,39 @@ public class PlayerSeasonStatsUpserter {
         }
     }
 
+    /**
+     * Master'da yoksa minimal stub takim olustur (kulup varsayilir). Native FK
+     * upsert'inden once DB'de olmasi icin {@code saveAndFlush}.
+     */
+    private void resolveTeam(PlayerSeasonApiDto.TeamRef ref) {
+        if (ref == null || ref.id() == null || teamRepository.existsById(ref.id())) return;
+        Team team = new Team();
+        team.setId(ref.id());
+        team.setName(ref.name() != null && !ref.name().isBlank()
+                ? ref.name() : ("Team#" + ref.id()));
+        team.setLogoUrl(ref.logo());
+        team.setNational(false);
+        team.setCovered(false);
+        teamRepository.saveAndFlush(team);
+        log.info("PlayerSeasonStat: team stub olusturuldu teamId={} '{}'", ref.id(), team.getName());
+    }
+
+    /** Master'da yoksa minimal stub lig olustur (FK icin saveAndFlush). */
+    private void resolveLeague(PlayerSeasonApiDto.LeagueRef ref) {
+        if (ref == null || ref.id() == null || leagueRepository.existsById(ref.id())) return;
+        League league = new League();
+        league.setId(ref.id());
+        league.setName(ref.name() != null && !ref.name().isBlank()
+                ? ref.name() : ("League#" + ref.id()));
+        league.setLogoUrl(ref.logo());
+        league.setCountryName(ref.country());
+        league.setCountryFlagUrl(ref.flag());
+        league.setCovered(false);
+        leagueRepository.saveAndFlush(league);
+        log.info("PlayerSeasonStat: league stub olusturuldu leagueId={} '{}'",
+                ref.id(), league.getName());
+    }
+
     /** REPLACE pattern: ilk sayfa oncesi tum eski kayitlari siler. */
     @Transactional
     public void replaceStart(Long teamId, Integer season) {
@@ -100,15 +133,10 @@ public class PlayerSeasonStatsUpserter {
         Integer entrySeason = entry.league().season();
         if (entryTeamId == null || entryLeagueId == null || entrySeason == null) return 0;
 
-        // FK guard — team/league master tabloda yoksa atla.
-        Team team = teamRepository.findById(entryTeamId).orElse(null);
-        League league = leagueRepository.findById(entryLeagueId).orElse(null);
-        if (team == null || league == null) {
-            log.debug("PlayerSeasonStat single atlandi (team/league DB'de yok): "
-                            + "playerId={} teamId={} leagueId={}",
-                    playerId, entryTeamId, entryLeagueId);
-            return 0;
-        }
+        // Master'da yoksa stub olustur — kapsanmayan lig/takim (Suudi, MLS, vb.)
+        // verisi de yazilsin. Stub'lar takim/lig sayfasi ziyaret edilince zenginlesir.
+        resolveTeam(entry.team());
+        resolveLeague(entry.league());
 
         repository.upsertNative(playerId, entryTeamId, entryLeagueId,
                 entrySeason, toJson(entry.getFields()));
@@ -145,14 +173,8 @@ public class PlayerSeasonStatsUpserter {
                 if (!teamId.equals(entryTeamId)) continue;
                 if (!season.equals(entrySeason)) continue;
 
-                Team team = teamRepository.findById(entryTeamId).orElse(null);
-                League league = leagueRepository.findById(entryLeagueId).orElse(null);
-                if (team == null || league == null) {
-                    log.debug("PlayerSeasonStat atlandi (team/league DB'de yok): "
-                                    + "playerId={} teamId={} leagueId={}",
-                            p.id(), entryTeamId, entryLeagueId);
-                    continue;
-                }
+                resolveTeam(entry.team());
+                resolveLeague(entry.league());
 
                 // Native ON CONFLICT DO UPDATE — race-safe, tx-poisoning yok
                 repository.upsertNative(p.id(), entryTeamId, entryLeagueId,

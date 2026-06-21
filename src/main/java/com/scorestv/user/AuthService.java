@@ -2,9 +2,11 @@ package com.scorestv.user;
 
 import com.scorestv.common.ApiException;
 import com.scorestv.config.ScorestvProperties;
+import com.scorestv.security.AppleTokenVerifier;
 import com.scorestv.security.GoogleTokenVerifier;
 import com.scorestv.security.JwtService;
 import com.scorestv.security.LoginAttemptService;
+import com.scorestv.user.dto.AppleLoginRequest;
 import com.scorestv.user.dto.AuthResponse;
 import com.scorestv.user.dto.ChangePasswordRequest;
 import com.scorestv.user.dto.GoogleLoginRequest;
@@ -30,6 +32,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final LoginAttemptService loginAttemptService;
     private final GoogleTokenVerifier googleTokenVerifier;
+    private final AppleTokenVerifier appleTokenVerifier;
     private final Duration refreshTtl;
 
     public AuthService(UserRepository userRepository,
@@ -38,6 +41,7 @@ public class AuthService {
                        JwtService jwtService,
                        LoginAttemptService loginAttemptService,
                        GoogleTokenVerifier googleTokenVerifier,
+                       AppleTokenVerifier appleTokenVerifier,
                        ScorestvProperties props) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
@@ -45,6 +49,7 @@ public class AuthService {
         this.jwtService = jwtService;
         this.loginAttemptService = loginAttemptService;
         this.googleTokenVerifier = googleTokenVerifier;
+        this.appleTokenVerifier = appleTokenVerifier;
         this.refreshTtl = props.security().jwt().refreshTokenTtl();
     }
 
@@ -145,6 +150,64 @@ public class AuthService {
         String name = (google.name() != null && !google.name().isBlank())
                 ? google.name().trim() : email;
         return name.length() > 100 ? name.substring(0, 100) : name;
+    }
+
+    /**
+     * Apple ile giriş/kayıt — {@link #loginWithGoogle} ile aynı desen.
+     * - Daha önce Apple'a bağlanmış kullanıcı varsa: doğrudan giriş.
+     * - Aynı e-postayla local/Google hesap varsa: o hesaba Apple bağlanır.
+     * - Hiçbiri yoksa: yeni kayıt; doğum tarihi + ülke zorunlu.
+     *
+     * <p>Apple özellikleri: {@code email} gizli relay olabilir; {@code name}
+     * yalnız ilk girişte client'tan gelir (token'da yoktur).
+     */
+    @Transactional
+    public AuthResponse loginWithApple(AppleLoginRequest req) {
+        AppleTokenVerifier.AppleUser apple = appleTokenVerifier.verify(req.identityToken());
+        String email = apple.email() != null ? apple.email().toLowerCase().trim() : null;
+
+        User user = userRepository.findByAppleId(apple.appleId()).orElse(null);
+        if (user == null) {
+            // Aynı e-postayla mevcut hesap varsa Apple ile eşle.
+            if (email != null) {
+                user = userRepository.findByEmail(email).orElse(null);
+            }
+            if (user != null) {
+                user.setAppleId(apple.appleId());
+                userRepository.save(user);
+            } else {
+                // Yeni Apple kaydı — doğum tarihi ve ülke zorunlu.
+                if (req.birthDate() == null
+                        || req.country() == null || req.country().isBlank()) {
+                    throw ApiException.badRequest(
+                            "Apple ile ilk kayıt için doğum tarihi ve ülke gereklidir.");
+                }
+                if (email == null) {
+                    throw ApiException.badRequest(
+                            "Apple hesabından e-posta alınamadı; lütfen e-postayı paylaşmayı seçin.");
+                }
+                user = User.builder()
+                        .email(email)
+                        .displayName(resolveAppleDisplayName(req.name(), email))
+                        .appleId(apple.appleId())
+                        .birthDate(req.birthDate())
+                        .country(req.country().trim())
+                        .role(Role.USER)
+                        .enabled(true)
+                        .build();
+                userRepository.save(user);
+            }
+        }
+
+        if (!user.isEnabled()) {
+            throw ApiException.unauthorized("Hesabınız devre dışı bırakılmıştır.");
+        }
+        return issueTokens(user);
+    }
+
+    private String resolveAppleDisplayName(String name, String email) {
+        String n = (name != null && !name.isBlank()) ? name.trim() : email;
+        return n.length() > 100 ? n.substring(0, 100) : n;
     }
 
     /**

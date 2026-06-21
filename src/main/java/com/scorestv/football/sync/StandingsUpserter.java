@@ -56,16 +56,16 @@ public class StandingsUpserter {
     public int replace(Long leagueId,
                        Integer season,
                        List<List<StandingApiDto.Row>> groups) {
+        // Veri-kaybi korumasi: API bos dondurduyse mevcut standings'i SILME.
+        if (groups == null || groups.isEmpty()) {
+            return 0;
+        }
         // 1) Eski satirlari sil — Hibernate normalde insert'leri once flush
         //    ettiginden delete ariya kalir, unique constraint patlar. Manuel
         //    flush + clear ile delete'in DB'ye anlik gitmesini garantileriz.
         standingRepository.deleteByLeagueIdAndSeason(leagueId, season);
         entityManager.flush();
         entityManager.clear();
-
-        if (groups == null || groups.isEmpty()) {
-            return 0;
-        }
         League leagueRef = leagueRepository.getReferenceById(leagueId);
         // 2) API-Football bazi yarismalarda ayni (takim, grup) kombinasyonunu
         //    iki kez donduruyor. Unique constraint (league, season, team,

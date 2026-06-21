@@ -1,15 +1,20 @@
 package com.scorestv.football.queue;
 
+import com.scorestv.football.ApiQuotaTracker;
 import com.scorestv.football.domain.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -51,17 +56,37 @@ public class AutoEnqueueScheduler {
     private final LeagueRepository leagueRepository;
     private final PlayerRepository playerRepository;
     private final TeamLeagueSeasonRepository membershipRepository;
+    private final ApiQuotaTracker quotaTracker;
+
+    /** Surekli tazelik — her tur kac covered oyuncu/takim/lig tazelenir. */
+    @Value("${scorestv.football.sync.continuous-players-per-tick:4}")
+    private int continuousPlayersPerTick;
+    @Value("${scorestv.football.sync.continuous-teams-per-tick:2}")
+    private int continuousTeamsPerTick;
+    @Value("${scorestv.football.sync.continuous-leagues-per-tick:2}")
+    private int continuousLeaguesPerTick;
+    /** 429 cooldown disinda, gunluk kalan kota bu yuzdenin altindaysa surekli
+     *  tazeleyici durur (canli + covered + on-demand'a yer birakir). */
+    @Value("${scorestv.football.sync.continuous-min-daily-remaining-percent:15}")
+    private int continuousMinDailyRemainingPercent;
+    /** Kuyruk derinligi freni: PENDING bu degeri asarsa surekli tazelik o tur
+     *  is basmaz (worker'dan hizli uretip backlog sismesin; sweep worker
+     *  hizina kendini ayarlar). */
+    @Value("${scorestv.football.sync.continuous-max-pending-queue:500}")
+    private int continuousMaxPendingQueue;
 
     public AutoEnqueueScheduler(SyncQueueService queueService,
                                 TeamRepository teamRepository,
                                 LeagueRepository leagueRepository,
                                 PlayerRepository playerRepository,
-                                TeamLeagueSeasonRepository membershipRepository) {
+                                TeamLeagueSeasonRepository membershipRepository,
+                                ApiQuotaTracker quotaTracker) {
         this.queueService = queueService;
         this.teamRepository = teamRepository;
         this.leagueRepository = leagueRepository;
         this.playerRepository = playerRepository;
         this.membershipRepository = membershipRepository;
+        this.quotaTracker = quotaTracker;
         log.info("AutoEnqueueScheduler aktif — periyodik bulk enqueue calisacak");
     }
 
@@ -312,6 +337,132 @@ public class AutoEnqueueScheduler {
             log.info("Hourly player name hydrate auto-enqueue: {} oyuncu (batch={})",
                     added, batch.size());
         }
+    }
+
+    /**
+     * <b>Surekli tazelik — bayatlik supuruculusu.</b>
+     *
+     * <p>Her tur (varsayilan 60sn), en uzun suredir guncellenmemis
+     * ({@code updated_at} en eski) covered oyuncu/takim/lig'leri bulup TAM
+     * refresh job'larini {@code PRIORITY_LOW} ile kuyruga ekler. Worker bunlari
+     * canli/covered/on-demand isler bittikten SONRA isler — kullanici trafigini
+     * yavaslatmadan, bos zamanda veriyi surekli taze tutar. Her refresh ilgili
+     * master satirin {@code updated_at}'ini gunceller → kayit "en bayat" listesinin
+     * sonuna gider; boylece tum covered set kendiliginden donerek tazelenir.
+     *
+     * <p>{@code enqueueIfAbsent} ayni kayit PENDING'deyse tekrar eklemez (kuyruk
+     * simasiz). 429 cooldown aktifse veya gunluk kalan kota esigin altindaysa tur
+     * atlanir (ani yuk pikine yer kalir). {@code per-tick} say lari config'den.
+     */
+    @Scheduled(
+            fixedDelayString = "${scorestv.football.sync.continuous-refresh-interval-ms:60000}",
+            initialDelayString = "${scorestv.football.sync.continuous-refresh-initial-delay-ms:120000}")
+    @SchedulerLock(name = "continuousStaleRefresh", lockAtMostFor = "PT2M")
+    public void continuousStaleRefresh() {
+        // 429 cooldown → bekle. Gunluk kalan kota cok dusukse → dur.
+        if (quotaTracker.isInCooldown()) {
+            return;
+        }
+        int remainingPct = quotaTracker.getDailyRemainingPercent();
+        if (remainingPct >= 0 && remainingPct < continuousMinDailyRemainingPercent) {
+            log.debug("Surekli tazelik atlandi — gunluk kalan kota %{} < %{}",
+                    remainingPct, continuousMinDailyRemainingPercent);
+            return;
+        }
+        // Kuyruk derinligi freni — worker drenajini gecmeyelim, LOW backlog sismesin.
+        if (queueService.pendingCount() > continuousMaxPendingQueue) {
+            return;
+        }
+
+        Integer season = LocalDate.now().getYear();
+        int added = 0;
+
+        if (continuousPlayersPerTick > 0) {
+            for (Player p : playerRepository.findByCoveredTrueOrderByUpdatedAtAsc(
+                    PageRequest.of(0, continuousPlayersPerTick))) {
+                added += enqueuePlayerFull(p.getId(), season);
+                // "claim" — rotasyon diger oyunculara gecsin (job'lar master
+                // updated_at'i hemen bumplamayabilir).
+                playerRepository.touchUpdatedAt(p.getId());
+            }
+        }
+        if (continuousTeamsPerTick > 0) {
+            for (Team t : teamRepository.findByCoveredTrueOrderByUpdatedAtAsc(
+                    PageRequest.of(0, continuousTeamsPerTick))) {
+                added += enqueueTeamFull(t.getId(), season);
+                teamRepository.touchUpdatedAt(t.getId());
+            }
+        }
+        if (continuousLeaguesPerTick > 0) {
+            for (League l : leagueRepository.findByCoveredTrueOrderByUpdatedAtAsc(
+                    PageRequest.of(0, continuousLeaguesPerTick))) {
+                Integer eff = l.getCurrentSeason() != null ? l.getCurrentSeason() : season;
+                added += enqueueLeagueFull(l.getId(), eff);
+                leagueRepository.touchUpdatedAt(l.getId());
+            }
+        }
+
+        if (added > 0) {
+            log.info("Surekli tazelik: {} job kuyruga eklendi (LOW)", added);
+        }
+    }
+
+    /** Bir oyuncunun TUM modullerini LOW oncelikle enqueue eder. */
+    private int enqueuePlayerFull(Long playerId, Integer season) {
+        int n = 0;
+        if (queueService.enqueueIfAbsent(SyncJobType.PLAYER_PROFILE_SYNC,
+                payload2("playerId", playerId, "season", season),
+                SyncQueueService.PRIORITY_LOW)) n++;
+        if (queueService.enqueueIfAbsent(SyncJobType.PLAYER_CAREER_TEAMS_SYNC,
+                Map.of("playerId", playerId), SyncQueueService.PRIORITY_LOW)) n++;
+        if (queueService.enqueueIfAbsent(SyncJobType.PLAYER_TROPHIES_SYNC,
+                Map.of("playerId", playerId), SyncQueueService.PRIORITY_LOW)) n++;
+        if (queueService.enqueueIfAbsent(SyncJobType.PLAYER_TRANSFERS_SYNC,
+                Map.of("playerId", playerId), SyncQueueService.PRIORITY_LOW)) n++;
+        if (queueService.enqueueIfAbsent(SyncJobType.PLAYER_SIDELINED_SYNC,
+                Map.of("playerId", playerId), SyncQueueService.PRIORITY_LOW)) n++;
+        return n;
+    }
+
+    /** Bir takimin TUM modullerini LOW oncelikle enqueue eder. */
+    private int enqueueTeamFull(Long teamId, Integer season) {
+        int n = 0;
+        if (queueService.enqueueIfAbsent(SyncJobType.TEAM_SQUAD_SYNC,
+                payload2("teamId", teamId, "season", season),
+                SyncQueueService.PRIORITY_LOW)) n++;
+        if (queueService.enqueueIfAbsent(SyncJobType.TEAM_TRANSFERS_SYNC,
+                Map.of("teamId", teamId), SyncQueueService.PRIORITY_LOW)) n++;
+        if (queueService.enqueueIfAbsent(SyncJobType.TEAM_COACH_SYNC,
+                Map.of("teamId", teamId), SyncQueueService.PRIORITY_LOW)) n++;
+        if (queueService.enqueueIfAbsent(SyncJobType.TEAM_PLAYER_STATS_SYNC,
+                payload2("teamId", teamId, "season", season),
+                SyncQueueService.PRIORITY_LOW)) n++;
+        return n;
+    }
+
+    /** Bir ligin standings + top players (4 kategori) job'larini LOW enqueue eder. */
+    private int enqueueLeagueFull(Long leagueId, Integer season) {
+        int n = 0;
+        if (queueService.enqueueIfAbsent(SyncJobType.LEAGUE_STANDINGS_SYNC,
+                payload2("leagueId", leagueId, "season", season),
+                SyncQueueService.PRIORITY_LOW)) n++;
+        for (String category : new String[] {"SCORERS", "ASSISTS", "YELLOW_CARDS", "RED_CARDS"}) {
+            Map<String, Object> p = new HashMap<>();
+            p.put("leagueId", leagueId);
+            p.put("season", season);
+            p.put("category", category);
+            if (queueService.enqueueIfAbsent(SyncJobType.LEAGUE_TOP_PLAYERS_SYNC, p,
+                    SyncQueueService.PRIORITY_LOW)) n++;
+        }
+        return n;
+    }
+
+    /** Iki anahtarli payload (Map.of null kabul etmedigi icin HashMap). */
+    private static Map<String, Object> payload2(String k1, Object v1, String k2, Object v2) {
+        Map<String, Object> m = new HashMap<>();
+        m.put(k1, v1);
+        if (v2 != null) m.put(k2, v2);
+        return m;
     }
 
     // Basketbol covered ligler gunluk tazeleme:

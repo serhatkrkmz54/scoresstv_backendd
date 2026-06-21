@@ -2,6 +2,7 @@ package com.scorestv.user;
 
 import com.scorestv.common.MessageResponse;
 import com.scorestv.security.CurrentUser;
+import com.scorestv.user.dto.AppleLoginRequest;
 import com.scorestv.user.dto.AuthResponse;
 import com.scorestv.user.dto.ChangePasswordRequest;
 import com.scorestv.user.dto.ForgotPasswordRequest;
@@ -51,6 +52,11 @@ public class AuthController {
     @PostMapping("/google")
     public AuthResponse google(@Valid @RequestBody GoogleLoginRequest request) {
         return authService.loginWithGoogle(request);
+    }
+
+    @PostMapping("/apple")
+    public AuthResponse apple(@Valid @RequestBody AppleLoginRequest request) {
+        return authService.loginWithApple(request);
     }
 
     @PostMapping("/refresh")

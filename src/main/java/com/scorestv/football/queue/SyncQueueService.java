@@ -89,6 +89,12 @@ public class SyncQueueService {
         return true;
     }
 
+    /** Su an PENDING job sayisi — surekli tazelik supuruculugu kuyruk-derinligi
+     *  freni icin kullanir (worker'dan hizli is basip backlog sismesin). */
+    public long pendingCount() {
+        return repository.countByStatus(SyncJobStatus.PENDING);
+    }
+
     /** Bulk enqueue — coklu job'u tek tx'te ekler (transactional batch). */
     @Transactional
     public int enqueueAll(SyncJobType type, java.util.Collection<Map<String, Object>> payloads,

@@ -1,7 +1,11 @@
 package com.scorestv.football.domain;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -13,6 +17,18 @@ public interface PlayerRepository extends JpaRepository<Player, Long> {
 
     /** Kapsamli (covered=true) oyuncular — DailyPlayerRefreshJob bunu kullanir. */
     List<Player> findByCoveredTrue();
+
+    /** En bayat (en eski updated_at) covered oyuncular — surekli tazelik
+     *  enqueuer'i bunlari oncelikli tazeler. */
+    List<Player> findByCoveredTrueOrderByUpdatedAtAsc(Pageable pageable);
+
+    /** updated_at'i "claim" olarak simdiye ceker — surekli tazelik supuruculugu
+     *  enqueue sonrasi cagirir ki kayit "en bayat" listesinden cikip rotasyon
+     *  diger kayitlara gecsin. */
+    @Transactional
+    @Modifying
+    @Query("UPDATE Player p SET p.updatedAt = CURRENT_TIMESTAMP WHERE p.id = :id")
+    void touchUpdatedAt(@Param("id") Long id);
 
     /**
      * Tam isim hidratasyonu icin: firstname / lastname henuz dolmamis ilk N

@@ -1,11 +1,26 @@
 package com.scorestv.football.domain;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 /** Takım verisine erişim. */
 public interface TeamRepository extends JpaRepository<Team, Long> {
+
+    /** En bayat (en eski updated_at) covered takimlar — surekli tazelik
+     *  enqueuer'i bunlari oncelikli tazeler. */
+    List<Team> findByCoveredTrueOrderByUpdatedAtAsc(Pageable pageable);
+
+    /** updated_at'i "claim" olarak simdiye ceker — surekli tazelik rotasyonu icin. */
+    @Transactional
+    @Modifying
+    @Query("UPDATE Team t SET t.updatedAt = CURRENT_TIMESTAMP WHERE t.id = :id")
+    void touchUpdatedAt(@Param("id") Long id);
 
     /**
      * Logosu henüz MinIO'ya aynalanmamış (logo_key boş) ama kaynak logo URL'i

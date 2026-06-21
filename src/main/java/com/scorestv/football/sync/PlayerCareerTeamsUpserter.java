@@ -33,20 +33,20 @@ public class PlayerCareerTeamsUpserter {
     @Transactional
     public int upsert(Long playerId, List<PlayerCareerTeamApiDto> items) {
         if (playerId == null) return 0;
-        repository.deleteByPlayerId(playerId);
+        // Veri-kaybi korumasi: API bos/hatali dondurduyse MEVCUT veriyi SILME
+        // (transient bos cogu zaman gecici API hatasidir). Once bos-guard, SONRA
+        // replace — boylece kariyer takimlari yanlislikla wipe edilmez.
         if (items == null || items.isEmpty()) return 0;
+        repository.deleteByPlayerId(playerId);
         int written = 0;
         for (PlayerCareerTeamApiDto dto : items) {
             if (dto == null || dto.team() == null || dto.team().id() == null) continue;
-            Team team = teamRepository.findById(dto.team().id()).orElse(null);
-            if (team == null) {
-                // Team master'da yok — referans veremiyoruz. Atlanir.
-                // DailyTeamRefreshJob ileride dolduracak; bir sonraki player
-                // sync'inde bu satir yazilacak.
-                log.debug("Career team atlandi (team DB'de yok): playerId={} teamId={}",
-                        playerId, dto.team().id());
-                continue;
-            }
+            // Master'da yoksa minimal "stub" takim olustur — boylece kapsanmayan
+            // liglere (Suudi, MLS, vb.) giden oyuncularin guncel takimi da yazilir.
+            // Detay (lig, slug, milli/kulup, logo aynalama) takim sayfasi ziyaret
+            // edilince lazy-sync ile tamamlanir.
+            Team team = teamRepository.findById(dto.team().id())
+                    .orElseGet(() -> createStubTeam(dto.team()));
             PlayerCareerTeam ct = new PlayerCareerTeam();
             ct.setPlayerId(playerId);
             ct.setTeam(team);
@@ -55,5 +55,24 @@ public class PlayerCareerTeamsUpserter {
             written++;
         }
         return written;
+    }
+
+    /**
+     * Master'da olmayan takim icin minimal kayit. Kulup varsayilir (national=false;
+     * milli takimlar zaten master'da yuklu). Native sorgu/FK'dan once DB'de olmasi
+     * icin {@code saveAndFlush}.
+     */
+    private Team createStubTeam(PlayerCareerTeamApiDto.Team dto) {
+        Team team = new Team();
+        team.setId(dto.id());
+        team.setName(dto.name() != null && !dto.name().isBlank()
+                ? dto.name() : ("Team#" + dto.id()));
+        team.setLogoUrl(dto.logo());
+        team.setNational(false);
+        team.setCovered(false);
+        Team saved = teamRepository.saveAndFlush(team);
+        log.info("Career team stub olusturuldu (master'da yoktu): teamId={} '{}'",
+                dto.id(), team.getName());
+        return saved;
     }
 }

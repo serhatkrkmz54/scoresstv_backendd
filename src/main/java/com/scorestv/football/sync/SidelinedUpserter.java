@@ -31,11 +31,12 @@ public class SidelinedUpserter {
     @Transactional
     public int upsert(Long playerId, List<SidelinedApiDto> items) {
         if (playerId == null) return 0;
-        // Replace: bu oyuncunun tum eski kayitlari silinir.
-        repository.deleteByPlayerId(playerId);
+        // Veri-kaybi korumasi: API bos dondurduyse mevcut kayitlari SILME.
+        // Once bos-guard, sonra replace.
         if (items == null || items.isEmpty()) {
             return 0;
         }
+        repository.deleteByPlayerId(playerId);
         int written = 0;
         for (SidelinedApiDto dto : items) {
             if (dto == null || dto.type() == null) continue;

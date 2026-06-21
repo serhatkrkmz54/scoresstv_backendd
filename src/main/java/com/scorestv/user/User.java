@@ -49,4 +49,8 @@ public class User extends BaseEntity {
     /** Google 'sub' degeri; Google ile giris yapabilen kullanicilarda dolu. */
     @Column(name = "google_id", length = 64, unique = true)
     private String googleId;
+
+    /** Apple 'sub' degeri; Apple ile giris yapabilen kullanicilarda dolu. */
+    @Column(name = "apple_id", length = 255, unique = true)
+    private String appleId;
 }

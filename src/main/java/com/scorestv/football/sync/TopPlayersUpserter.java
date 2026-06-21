@@ -42,13 +42,12 @@ public class TopPlayersUpserter {
     @Transactional
     public int replace(Long leagueId, Integer season, Category category,
                        List<TopPlayerApiDto> items) {
-        // 1) Eski satirlari sil (immediate DELETE).
-        repository.deleteByLeagueSeasonCategory(leagueId, season, category);
-        // Flush UNIQUE-constraint yarisini onlemek icin (digerlerinde
-        // uyguladigimiz desen) JPQL DELETE zaten hemen SQL gonderir.
+        // Veri-kaybi korumasi: API bos dondurduyse mevcut top-player listesini SILME.
         if (items == null || items.isEmpty()) {
             return 0;
         }
+        // 1) Eski satirlari sil (immediate DELETE).
+        repository.deleteByLeagueSeasonCategory(leagueId, season, category);
         League leagueRef = leagueRepository.getReferenceById(leagueId);
         int rank = 1;
         int written = 0;

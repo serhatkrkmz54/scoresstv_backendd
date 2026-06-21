@@ -32,10 +32,11 @@ public class SquadUpserter {
 
     @Transactional
     public int replace(Long teamId, Integer season, List<SquadApiDto.Player> players) {
-        repository.deleteByTeamIdAndSeason(teamId, season);
+        // Veri-kaybi korumasi: API bos dondurduyse mevcut kadroyu SILME.
         if (players == null || players.isEmpty()) {
             return 0;
         }
+        repository.deleteByTeamIdAndSeason(teamId, season);
         Team teamRef = teamRepository.getReferenceById(teamId);
         int written = 0;
         // Ayni kadroda tekrarli player_id'yi (veya id=0/null) ele — yoksa

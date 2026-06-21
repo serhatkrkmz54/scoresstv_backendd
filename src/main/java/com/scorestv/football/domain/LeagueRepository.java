@@ -1,5 +1,6 @@
 package com.scorestv.football.domain;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -9,6 +10,17 @@ public interface LeagueRepository extends JpaRepository<League, Long> {
 
     /** Senkron kapsamına alınmış (covered = true) ligler. */
     List<League> findByCoveredTrue();
+
+    /** En bayat (en eski updated_at) covered ligler — surekli tazelik
+     *  enqueuer'i bunlari oncelikli tazeler. */
+    List<League> findByCoveredTrueOrderByUpdatedAtAsc(Pageable pageable);
+
+    /** updated_at'i "claim" olarak simdiye ceker — surekli tazelik rotasyonu icin. */
+    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query(
+            "UPDATE League l SET l.updatedAt = CURRENT_TIMESTAMP WHERE l.id = :id")
+    void touchUpdatedAt(@org.springframework.data.repository.query.Param("id") Long id);
 
     /**
      * Logosu henüz MinIO'ya aynalanmamış (logo_key boş) ama kaynak logo URL'i

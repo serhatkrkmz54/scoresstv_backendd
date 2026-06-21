@@ -48,11 +48,11 @@ public class CoachTrophiesSyncService {
         ApiFootballResponse<List<TrophyApiDto>> response = client.get(
                 "/trophies", Map.of("coach", coachId), TROPHIES_TYPE);
         List<TrophyApiDto> items = response.response();
-        // Replace pattern
-        trophyRepository.deleteByCoachId(coachId);
+        // Veri-kaybi korumasi: API bos dondurduyse mevcut kupalari SILME.
         if (items == null || items.isEmpty()) {
             return 0;
         }
+        trophyRepository.deleteByCoachId(coachId);
         Coach coachRef = coachRepository.getReferenceById(coachId);
         int written = 0;
         Set<String> seen = new HashSet<>();
