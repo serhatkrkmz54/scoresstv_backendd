@@ -87,8 +87,10 @@ public class AuthService {
 
         User user = userRepository.findByEmail(email).orElse(null);
         if (user != null && user.getPassword() == null) {
+            String provider = socialProviderHint(user);
             throw ApiException.unauthorized(
-                    "Bu hesap Google ile oluşturulmuş. Lütfen Google ile giriş yapın.");
+                    "Bu hesap " + provider + " ile oluşturulmuş. Lütfen "
+                            + provider + " ile giriş yapın.");
         }
         if (user == null || !passwordEncoder.matches(req.password(), user.getPassword())) {
             loginAttemptService.recordFailure(email);
@@ -211,6 +213,18 @@ public class AuthService {
     }
 
     /**
+     * Sifresiz (sosyal) bir hesabin hangi saglayici(lar) ile olusturuldugunu
+     * kullaniciya gosterilecek metne cevirir — Google / Apple / "Google veya Apple".
+     */
+    private static String socialProviderHint(User user) {
+        boolean google = user.getGoogleId() != null && !user.getGoogleId().isBlank();
+        boolean apple = user.getAppleId() != null && !user.getAppleId().isBlank();
+        if (google && apple) return "Google veya Apple";
+        if (apple) return "Apple";
+        return "Google";
+    }
+
+    /**
      * Refresh token rotasyonu + reuse detection.
      * Her kullanimda eski token iptal edilir, yeni cift uretilir. Iptal edilmis
      * (kullanilmis) bir token tekrar sunulursa bu token'in calindigi anlamina
@@ -279,7 +293,8 @@ public class AuthService {
                 .orElseThrow(() -> ApiException.unauthorized("Kullanıcı bulunamadı"));
         if (user.getPassword() == null) {
             throw ApiException.badRequest(
-                    "Bu hesap Google ile oluşturulmuş; şifresi yok, değiştirilemez.");
+                    "Bu hesap " + socialProviderHint(user)
+                            + " ile oluşturulmuş; şifresi yok, değiştirilemez.");
         }
         if (!passwordEncoder.matches(req.currentPassword(), user.getPassword())) {
             throw ApiException.unauthorized("Mevcut şifre hatalı");

@@ -335,11 +335,16 @@ scorestv:
         - 202204490934-2ll3r48acje0d64vmuacgkoj0qf4n5vu.apps.googleusercontent.com
         - 202204490934-qthde1dld01aodqn930ioes4om69pofm.apps.googleusercontent.com
     apple:
-      # Sign in with Apple — kabul edilen audience'lar:
-      #   - iOS App ID bundle id (iOS native akış) = com.scorestv.scorestvMobile
+      # Sign in with Apple — kabul edilen audience'lar (token.aud):
+      #   - iOS App ID bundle id (iOS native akış)
       #   - Service ID (web + Android web akışı) = com.scorestv.signin
       # NOT: iOS bundle id Android'den (com.scorestv.mobile) FARKLI.
+      # HEDEF: com.scorestv.mobile (Firebase + Android ile ayni — tek kimlik).
+      # Gecis donemi icin eski varyantlar da kabul; netlesince sadece
+      # com.scorestv.mobile + com.scorestv.signin birakilabilir.
       client-ids:
+        - com.scorestv.mobile
+        - com.scorestv.scorestv
         - com.scorestv.scorestvMobile
         - com.scorestv.signin
   cors:
