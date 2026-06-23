@@ -3,6 +3,9 @@ package com.scorestv.football.sync;
 import com.scorestv.common.ApiException;
 import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.FixtureRepository;
+import com.scorestv.football.domain.LeagueTopPlayer.Category;
+import com.scorestv.football.domain.Season;
+import com.scorestv.football.domain.SeasonRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -12,8 +15,11 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -63,6 +69,8 @@ public class FinishedMatchFinalSyncJob {
     private final FixturePlayerStatsSyncService playerStatsSyncService;
     private final FixtureLineupsSyncService lineupsSyncService;
     private final FixtureEventsSyncService eventsSyncService;
+    private final TopPlayersSyncService topPlayersSyncService;
+    private final SeasonRepository seasonRepository;
 
     /** Bu instance ömründe son tazelemesi yapılmış maç id'leri. */
     private final Set<Long> finalizedIds = ConcurrentHashMap.newKeySet();
@@ -71,12 +79,16 @@ public class FinishedMatchFinalSyncJob {
                                      FixtureStatisticsSyncService statsSyncService,
                                      FixturePlayerStatsSyncService playerStatsSyncService,
                                      FixtureLineupsSyncService lineupsSyncService,
-                                     FixtureEventsSyncService eventsSyncService) {
+                                     FixtureEventsSyncService eventsSyncService,
+                                     TopPlayersSyncService topPlayersSyncService,
+                                     SeasonRepository seasonRepository) {
         this.fixtureRepository = fixtureRepository;
         this.statsSyncService = statsSyncService;
         this.playerStatsSyncService = playerStatsSyncService;
         this.lineupsSyncService = lineupsSyncService;
         this.eventsSyncService = eventsSyncService;
+        this.topPlayersSyncService = topPlayersSyncService;
+        this.seasonRepository = seasonRepository;
     }
 
     /**
@@ -100,6 +112,9 @@ public class FinishedMatchFinalSyncJob {
         }
         int processed = 0;
         int skipped = 0;
+        // Bu run'da YENI finalize edilen maçların ligi → sezonu. Aynı ligde
+        // birden çok maç bitse de gol kralı tablosunu lig başına BİR kez tazele.
+        Map<Long, Integer> leaguesToRefresh = new HashMap<>();
         for (Fixture f : finished) {
             if (!finalizedIds.add(f.getId())) {
                 skipped++;
@@ -107,6 +122,9 @@ public class FinishedMatchFinalSyncJob {
             }
             finalize(f);
             processed++;
+            if (f.getLeague() != null && f.getSeason() != null) {
+                leaguesToRefresh.putIfAbsent(f.getLeague().getId(), f.getSeason());
+            }
         }
         // Eski id'leri set'ten çıkar (pencere dışına çıkmış olanlar): bellek
         // büyümesin. Sadece pencere içindeki id'leri tut.
@@ -114,10 +132,54 @@ public class FinishedMatchFinalSyncJob {
         for (Fixture f : finished) currentWindow.add(f.getId());
         finalizedIds.retainAll(currentWindow);
 
-        if (processed > 0) {
-            log.info("FT-final sync: {} maç finalize edildi, {} zaten yapılmıştı.",
-                    processed, skipped);
+        // Maçı yeni biten liglerin gol kralı / asist / kart tablolarını tazele.
+        // Böylece kimse lig sayfasını açmasa bile top-scorer, maç bitiminden
+        // ~MIN_AGE (30dk) sonra güncellenir. Kapsam bayrağı olmayan ligde API
+        // çağrısı yapılmaz; lig başına en çok 4 çağrı (idempotent).
+        int topRefreshedLeagues = 0;
+        for (var entry : leaguesToRefresh.entrySet()) {
+            if (refreshTopPlayers(entry.getKey(), entry.getValue())) {
+                topRefreshedLeagues++;
+            }
         }
+
+        if (processed > 0) {
+            log.info("FT-final sync: {} maç finalize edildi, {} zaten yapılmıştı, "
+                            + "{} lig top-scorer tazelendi.",
+                    processed, skipped, topRefreshedLeagues);
+        }
+    }
+
+    /**
+     * Bir lig+sezon için gol kralı / asist / sarı-kırmızı kart tablolarını
+     * yeniden çeker — yalnız sezonun ilgili coverage bayrağı varsa. En çok 4
+     * API çağrısı. {@code true} döner: en az bir kategori için çağrı denendi.
+     */
+    private boolean refreshTopPlayers(Long leagueId, Integer season) {
+        Optional<Season> seasonOpt = seasonRepository.findByLeagueIdAndYear(leagueId, season);
+        if (seasonOpt.isEmpty()) {
+            return false;
+        }
+        Season s = seasonOpt.get();
+        boolean any = false;
+        if (s.isCoverageTopScorers()) {
+            runQuietly("topScorers", leagueId,
+                    () -> topPlayersSyncService.sync(leagueId, season, Category.SCORERS));
+            any = true;
+        }
+        if (s.isCoverageTopAssists()) {
+            runQuietly("topAssists", leagueId,
+                    () -> topPlayersSyncService.sync(leagueId, season, Category.ASSISTS));
+            any = true;
+        }
+        if (s.isCoverageTopCards()) {
+            runQuietly("topYellow", leagueId,
+                    () -> topPlayersSyncService.sync(leagueId, season, Category.YELLOW_CARDS));
+            runQuietly("topRed", leagueId,
+                    () -> topPlayersSyncService.sync(leagueId, season, Category.RED_CARDS));
+            any = true;
+        }
+        return any;
     }
 
     /** Bir maç için stats / playerStats / lineups / events tek seferlik sync. */
@@ -129,15 +191,15 @@ public class FinishedMatchFinalSyncJob {
         runQuietly("events", id, () -> eventsSyncService.sync(id));
     }
 
-    private void runQuietly(String module, Long fixtureId, Runnable r) {
+    private void runQuietly(String module, Long refId, Runnable r) {
         try {
             r.run();
         } catch (ApiException ex) {
-            log.warn("FT-final {} sync başarısız (API): fixtureId={} — {}",
-                    module, fixtureId, ex.getMessage());
+            log.warn("FT-final {} sync başarısız (API): ref={} — {}",
+                    module, refId, ex.getMessage());
         } catch (RuntimeException ex) {
-            log.warn("FT-final {} sync beklenmedik hata: fixtureId={} — {}",
-                    module, fixtureId, ex.getMessage());
+            log.warn("FT-final {} sync beklenmedik hata: ref={} — {}",
+                    module, refId, ex.getMessage());
         }
     }
 }

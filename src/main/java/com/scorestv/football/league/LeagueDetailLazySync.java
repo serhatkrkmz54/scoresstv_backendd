@@ -62,8 +62,13 @@ public class LeagueDetailLazySync {
     private static final Duration FRESH_FIXTURES_CURRENT = Duration.ofHours(1);
     private static final Duration FRESH_FIXTURES_OLD = Duration.ofHours(24);
 
-    /** Top scorers/assists/cards tazeleme: API gunde birkac kez. */
-    private static final Duration FRESH_TOP_PLAYERS = Duration.ofHours(6);
+    /**
+     * Top scorers/assists/cards tazeleme. Gol krali tablosu her maticten sonra
+     * degisir; standings ile ayni hizda tutmak icin guncel sezon kisa (30dk),
+     * biten sezonlar artik degismedigi icin uzun (24sa).
+     */
+    private static final Duration FRESH_TOP_PLAYERS_CURRENT = Duration.ofMinutes(30);
+    private static final Duration FRESH_TOP_PLAYERS_OLD = Duration.ofHours(24);
 
     /**
      * Inline sync edilecek sezon sayisi (current). Bunun otesindeki onceki
@@ -261,15 +266,19 @@ public class LeagueDetailLazySync {
                 () -> fixtureRepository.countByLeagueIdAndSeason(leagueId, year) == 0,
                 () -> fixtureSyncService.syncLeagueSeason(leagueId, year));
 
-        // Top scorers / assists / cards — her birinin coverage'i ayri
+        // Top scorers / assists / cards — her birinin coverage'i ayri.
+        // Guncel sezon 30dk, biten sezon 24sa (artik degismez).
+        Duration tpFresh = isCurrentLeagueSeason
+                ? FRESH_TOP_PLAYERS_CURRENT
+                : FRESH_TOP_PLAYERS_OLD;
         if (season.isCoverageTopScorers()) {
-            runIfNeeded("topScorers:" + leagueId + "-" + year, FRESH_TOP_PLAYERS,
+            runIfNeeded("topScorers:" + leagueId + "-" + year, tpFresh,
                     () -> topPlayerRepository.findByLeagueSeasonCategory(
                             leagueId, year, Category.SCORERS).isEmpty(),
                     () -> topPlayersSyncService.sync(leagueId, year, Category.SCORERS));
         }
         if (season.isCoverageTopAssists()) {
-            runIfNeeded("topAssists:" + leagueId + "-" + year, FRESH_TOP_PLAYERS,
+            runIfNeeded("topAssists:" + leagueId + "-" + year, tpFresh,
                     () -> topPlayerRepository.findByLeagueSeasonCategory(
                             leagueId, year, Category.ASSISTS).isEmpty(),
                     () -> topPlayersSyncService.sync(leagueId, year, Category.ASSISTS));
@@ -277,11 +286,11 @@ public class LeagueDetailLazySync {
         // Cards coverage'i tek bayrakta tutuyoruz ama 2 ayri API endpoint.
         // Yellow ve red icin ayri ensure et.
         if (season.isCoverageTopCards()) {
-            runIfNeeded("topYellow:" + leagueId + "-" + year, FRESH_TOP_PLAYERS,
+            runIfNeeded("topYellow:" + leagueId + "-" + year, tpFresh,
                     () -> topPlayerRepository.findByLeagueSeasonCategory(
                             leagueId, year, Category.YELLOW_CARDS).isEmpty(),
                     () -> topPlayersSyncService.sync(leagueId, year, Category.YELLOW_CARDS));
-            runIfNeeded("topRed:" + leagueId + "-" + year, FRESH_TOP_PLAYERS,
+            runIfNeeded("topRed:" + leagueId + "-" + year, tpFresh,
                     () -> topPlayerRepository.findByLeagueSeasonCategory(
                             leagueId, year, Category.RED_CARDS).isEmpty(),
                     () -> topPlayersSyncService.sync(leagueId, year, Category.RED_CARDS));
