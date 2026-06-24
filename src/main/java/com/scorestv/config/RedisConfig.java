@@ -93,6 +93,8 @@ public class RedisConfig {
         // B-Faz6: Basketbol standings sayfasi — saatlik API guncellemesi,
         // 5 dk client cache yeterli.
         caches.put("BASKETBALL_STANDINGS_PAGE", baseConfig(Duration.ofMinutes(5)));
+        // Voleybol mac detayi — basketbol ile ayni cadence (30 sn).
+        caches.put("VOLLEYBALL_GAME_DETAIL", baseConfig(Duration.ofSeconds(30)));
 
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(defaultConfig)

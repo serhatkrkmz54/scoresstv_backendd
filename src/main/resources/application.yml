@@ -183,6 +183,34 @@ scorestv:
     # Logo/bayrak aynalama (CDN) cron — saatlik :15.
     image-mirror-cron: ${BASKETBALL_IMAGE_MIRROR_CRON:0 15 * * * *}
   # ============================================================
+  # Voleybol (API-Volleyball v1) — football/basketball'dan TAMAMEN ayri modul.
+  # api-key football ile AYNI API-Sports anahtari (API_FOOTBALL_KEY).
+  # Voleybol API LEANER (oyuncu/mac-bazli stats yok). enabled=false ise
+  # sync/job hic calismaz. live-enabled ayrica canli skor cekimini acar.
+  # ============================================================
+  volleyball:
+    enabled: ${VOLLEYBALL_ENABLED:true}
+    base-url: ${VOLLEYBALL_BASE_URL:https://v1.volleyball.api-sports.io}
+    api-key: ${API_FOOTBALL_KEY:}
+    requests-per-minute: ${VOLLEYBALL_RPM:450}
+    timezone: Europe/Istanbul
+    today-cron: ${VOLLEYBALL_TODAY_CRON:0 */30 * * * *}
+    live-enabled: ${VOLLEYBALL_LIVE_ENABLED:true}
+    live-interval-seconds: ${VOLLEYBALL_LIVE_INTERVAL:15}
+    # Kayan pencere: ±7 gun.
+    window-days-before: ${VOLLEYBALL_WINDOW_BEFORE:7}
+    window-days-after: ${VOLLEYBALL_WINDOW_AFTER:7}
+    window-cron: ${VOLLEYBALL_WINDOW_CRON:0 0 4 * * *}
+    # Ulke + lig referans seed cron (haftalik, Pazartesi 03:00).
+    reference-cron: ${VOLLEYBALL_REFERENCE_CRON:0 0 3 * * 1}
+    # Logo/bayrak aynalama (CDN) cron — saatlik :15.
+    image-mirror-cron: ${VOLLEYBALL_IMAGE_MIRROR_CRON:0 15 * * * *}
+    # Takim kadrosu (lig+sezon junction) cron — gunluk 04:30.
+    team-sync-cron: ${VOLLEYBALL_TEAM_SYNC_CRON:0 30 4 * * *}
+    serving:
+      # One cikan voleybol lig id'leri — su an bos (ileride doldurulacak).
+      featured-league-ids: ${VOLLEYBALL_FEATURED_LEAGUE_IDS:}
+  # ============================================================
   # Highlightly maç özeti/highlight entegrasyonu (soccer.highlightly.net).
   # Anahtar yalnız sunucuda (x-rapidapi-key). enabled=false iken hiç çağrı yok.
   # Açmak için: HIGHLIGHTLY_ENABLED=true + HIGHLIGHTLY_API_KEY=...

@@ -5,6 +5,10 @@ import com.scorestv.basketball.BasketballPlayerProfileSyncService;
 import com.scorestv.basketball.BasketballTeamProfileSyncService;
 import com.scorestv.basketball.BasketballTeamStatisticsSyncService;
 import com.scorestv.basketball.BasketballTopPlayersSyncService;
+import com.scorestv.volleyball.VolleyballLeaguesSyncService;
+import com.scorestv.volleyball.VolleyballStandingsSyncService;
+import com.scorestv.volleyball.VolleyballTeamProfileSyncService;
+import com.scorestv.volleyball.VolleyballTeamStatisticsSyncService;
 import com.scorestv.football.sync.CoachesSyncService;
 import com.scorestv.football.sync.PlayerCareerTeamsSyncService;
 import com.scorestv.football.sync.PlayerProfileSyncService;
@@ -62,6 +66,12 @@ public class SyncJobExecutor {
     private final BasketballTeamProfileSyncService basketballTeamProfileSyncService;
     private final BasketballTeamStatisticsSyncService basketballTeamStatisticsSyncService;
 
+    // Voleybol sync servisleri
+    private final VolleyballLeaguesSyncService volleyballLeaguesSyncService;
+    private final VolleyballTeamProfileSyncService volleyballTeamProfileSyncService;
+    private final VolleyballTeamStatisticsSyncService volleyballTeamStatisticsSyncService;
+    private final VolleyballStandingsSyncService volleyballStandingsSyncService;
+
     public SyncJobExecutor(SquadSyncService squadSyncService,
                            TransfersSyncService transfersSyncService,
                            CoachesSyncService coachesSyncService,
@@ -78,7 +88,11 @@ public class SyncJobExecutor {
                            BasketballTopPlayersSyncService basketballTopPlayersSyncService,
                            BasketballPlayerProfileSyncService basketballPlayerProfileSyncService,
                            BasketballTeamProfileSyncService basketballTeamProfileSyncService,
-                           BasketballTeamStatisticsSyncService basketballTeamStatisticsSyncService) {
+                           BasketballTeamStatisticsSyncService basketballTeamStatisticsSyncService,
+                           VolleyballLeaguesSyncService volleyballLeaguesSyncService,
+                           VolleyballTeamProfileSyncService volleyballTeamProfileSyncService,
+                           VolleyballTeamStatisticsSyncService volleyballTeamStatisticsSyncService,
+                           VolleyballStandingsSyncService volleyballStandingsSyncService) {
         this.squadSyncService = squadSyncService;
         this.transfersSyncService = transfersSyncService;
         this.coachesSyncService = coachesSyncService;
@@ -96,6 +110,10 @@ public class SyncJobExecutor {
         this.basketballPlayerProfileSyncService = basketballPlayerProfileSyncService;
         this.basketballTeamProfileSyncService = basketballTeamProfileSyncService;
         this.basketballTeamStatisticsSyncService = basketballTeamStatisticsSyncService;
+        this.volleyballLeaguesSyncService = volleyballLeaguesSyncService;
+        this.volleyballTeamProfileSyncService = volleyballTeamProfileSyncService;
+        this.volleyballTeamStatisticsSyncService = volleyballTeamStatisticsSyncService;
+        this.volleyballStandingsSyncService = volleyballStandingsSyncService;
     }
 
     /**
@@ -171,6 +189,29 @@ public class SyncJobExecutor {
                         true);
                 yield saved.isPresent() ? 1 : 0;
             }
+
+            // ---- Voleybol ----
+            case VOLLEYBALL_LEAGUE_INFO_SYNC -> {
+                var saved = volleyballLeaguesSyncService.syncLeagueInfo(
+                        asLong(p, "leagueId"));
+                yield saved != null ? 1 : 0;
+            }
+            case VOLLEYBALL_TEAM_PROFILE_SYNC -> {
+                var saved = volleyballTeamProfileSyncService.syncProfile(
+                        asLong(p, "teamId"), true);
+                yield saved.isPresent() ? 1 : 0;
+            }
+            case VOLLEYBALL_TEAM_STATS_SYNC -> {
+                var saved = volleyballTeamStatisticsSyncService.sync(
+                        asLong(p, "teamId"),
+                        asLong(p, "leagueId"),
+                        asString(p, "season"),
+                        true);
+                yield saved.isPresent() ? 1 : 0;
+            }
+            case VOLLEYBALL_STANDINGS_SYNC ->
+                volleyballStandingsSyncService.sync(
+                        asLong(p, "leagueId"), asString(p, "season"));
         };
     }
 

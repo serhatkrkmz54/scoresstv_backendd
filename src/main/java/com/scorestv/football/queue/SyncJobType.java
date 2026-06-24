@@ -90,5 +90,35 @@ public enum SyncJobType {
      * {@code /teams/statistics?team=X&league=Y&season=Z}.
      * Payload: {@code {teamId, leagueId, season}}.
      */
-    BASKETBALL_TEAM_STATS_SYNC
+    BASKETBALL_TEAM_STATS_SYNC,
+
+    // ============================================================
+    // Voleybol job tipleri (VOLLEYBALL_ prefix ile ayri executor dispatch).
+    // Voleybol API LEANER — oyuncu/top-players job yok.
+    // ============================================================
+
+    /**
+     * Bir voleybol ligi icin full info + sezonlar sync.
+     * {@code /leagues?id=X}. Payload: {@code {leagueId}}.
+     */
+    VOLLEYBALL_LEAGUE_INFO_SYNC,
+
+    /**
+     * Bir voleybol takimi icin tam profil sync.
+     * {@code /teams?id=X}. Payload: {@code {teamId}}.
+     */
+    VOLLEYBALL_TEAM_PROFILE_SYNC,
+
+    /**
+     * Bir voleybol takimi + lig + sezon icin sezon istatistikleri sync.
+     * {@code /teams/statistics?team=X&league=Y&season=Z}.
+     * Payload: {@code {teamId, leagueId, season}}.
+     */
+    VOLLEYBALL_TEAM_STATS_SYNC,
+
+    /**
+     * Bir voleybol ligi + sezon icin standings sync.
+     * {@code /standings?league=X&season=Y}. Payload: {@code {leagueId, season}}.
+     */
+    VOLLEYBALL_STANDINGS_SYNC
 }

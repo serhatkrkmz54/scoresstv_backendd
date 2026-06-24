@@ -41,6 +41,16 @@ public final class FcmTopics {
         return "bg" + gameId;
     }
 
+    /** Voleybol takım olayı: {@code vt{teamId}_{suffix}} (suffix: basladi/set/bitti). */
+    public static String volleyballTeamEvent(long teamId, String suffix) {
+        return "vt" + teamId + "_" + suffix;
+    }
+
+    /** Voleybol favori maç (tüm olaylar): {@code vg{gameId}}. */
+    public static String volleyballGame(long gameId) {
+        return "vg" + gameId;
+    }
+
     /** Outbox notifType → topic suffix (mobil pref anahtarı). */
     public static String suffixFor(String notifType) {
         if (notifType == null) return "";
@@ -52,7 +62,7 @@ public final class FcmTopics {
     }
 
     /**
-     * ≤5 topic'i FCM condition string'ine çevirir:
+     * ≤5 topic'i FCM condition string'ine cevirir:
      * {@code 't549_gol' in topics || 'fix12345' in topics}.
      */
     public static String orCondition(List<String> topics) {
