@@ -389,3 +389,7 @@ scorestv:
   cors:
     # Virgulle ayrilmis origin listesi. Prod'da CORS_ALLOWED_ORIGINS ile verilir.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+  mail:
+    # Sifre sifirlama e-postasindaki baglantinin temel adresi (frontend sayfasi).
+    password-reset-url: ${PASSWORD_RESET_URL:https://scorestv.com/reset-password}
