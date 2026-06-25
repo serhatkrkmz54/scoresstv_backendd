@@ -56,6 +56,25 @@ public record BasketballLeagueDetailResponse(
         BasketballLeagueSeoResponse seo
 ) implements Serializable {
 
+    /**
+     * Ince (thin) yanit mi? Standings, recent/upcoming games ve 3 kategori
+     * top players HEPSI bos/null ise true — lazy sync henuz veriyi cekmemis
+     * demektir. Cache katmani thin yaniti cache'lememeli ki client auto-retry
+     * async sync tamamlaninca dolu veriyi alabilsin.
+     */
+    public boolean isThin() {
+        return isEmpty(standings)
+                && isEmpty(recentGames)
+                && isEmpty(upcomingGames)
+                && isEmpty(topScorers)
+                && isEmpty(topRebounders)
+                && isEmpty(topAssists);
+    }
+
+    private static boolean isEmpty(List<?> list) {
+        return list == null || list.isEmpty();
+    }
+
     public record Country(
             String name,
             String code,

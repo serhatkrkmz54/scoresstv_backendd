@@ -6,6 +6,9 @@ import com.scorestv.basketball.BasketballSyncService;
 import com.scorestv.basketball.BasketballTopPlayersSyncService;
 import com.scorestv.basketball.domain.BasketballLeague;
 import com.scorestv.basketball.domain.BasketballLeagueRepository;
+import com.scorestv.basketball.domain.BasketballSeason;
+import com.scorestv.basketball.domain.BasketballSeasonRepository;
+import com.scorestv.basketball.domain.BasketballStandingRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -50,23 +53,32 @@ public class BasketballLeagueDetailLazySync {
     /** Top players refresh penceresi — saatlik. */
     private static final Duration TOP_PLAYERS_FRESHNESS = Duration.ofHours(1);
 
+    /** Standings refresh penceresi — saatlik (API saatlik tazeler). */
+    private static final Duration STANDINGS_FRESHNESS = Duration.ofHours(1);
+
     private final BasketballLeagueRepository leagueRepo;
     private final BasketballLeaguesSyncService leaguesSyncService;
     private final BasketballTopPlayersSyncService topPlayersSyncService;
     private final BasketballStandingsSyncService standingsSyncService;
     private final BasketballSyncService gamesSyncService;
+    private final BasketballStandingRepository standingRepo;
+    private final BasketballSeasonRepository seasonRepo;
 
     public BasketballLeagueDetailLazySync(
             BasketballLeagueRepository leagueRepo,
             BasketballLeaguesSyncService leaguesSyncService,
             BasketballTopPlayersSyncService topPlayersSyncService,
             BasketballStandingsSyncService standingsSyncService,
-            BasketballSyncService gamesSyncService) {
+            BasketballSyncService gamesSyncService,
+            BasketballStandingRepository standingRepo,
+            BasketballSeasonRepository seasonRepo) {
         this.leagueRepo = leagueRepo;
         this.leaguesSyncService = leaguesSyncService;
         this.topPlayersSyncService = topPlayersSyncService;
         this.standingsSyncService = standingsSyncService;
         this.gamesSyncService = gamesSyncService;
+        this.standingRepo = standingRepo;
+        this.seasonRepo = seasonRepo;
     }
 
     /**
@@ -91,7 +103,13 @@ public class BasketballLeagueDetailLazySync {
                 : league.getCurrentSeason();
         if (effectiveSeason == null || effectiveSeason.isBlank()) return;
 
-        // 2) Top players — saatlik freshness, current sezon icin
+        // 2) Standings — sayfanin ana modulu. Bos veya 1sa eskimisse async
+        //    tetikle (her sayfa acilisinda API'yi yormamak icin gate'li).
+        if (isStandingsStale(leagueId, effectiveSeason)) {
+            refreshStandingsAsync(leagueId, effectiveSeason);
+        }
+
+        // 3) Top players — saatlik freshness, current sezon icin
         if (effectiveSeason.equals(league.getCurrentSeason())
                 && isStale(league.getLastTopPlayersSyncedAt(), TOP_PLAYERS_FRESHNESS)) {
             refreshTopPlayersAsync(leagueId, effectiveSeason);
@@ -105,6 +123,7 @@ public class BasketballLeagueDetailLazySync {
     public void forceRefresh(Long leagueId, String season) {
         refreshLeagueInfoAsync(leagueId);
         if (season != null && !season.isBlank()) {
+            refreshStandingsAsync(leagueId, season);
             refreshTopPlayersAsync(leagueId, season);
         }
     }
@@ -120,6 +139,17 @@ public class BasketballLeagueDetailLazySync {
     }
 
     @Async
+    public CompletableFuture<Void> refreshStandingsAsync(Long leagueId, String season) {
+        try {
+            standingsSyncService.sync(leagueId, season);
+        } catch (Exception e) {
+            log.warn("Basketbol standings async sync hata id={} season={}: {}",
+                    leagueId, season, e.toString());
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+
+    @Async
     public CompletableFuture<Void> refreshTopPlayersAsync(Long leagueId, String season) {
         try {
             topPlayersSyncService.syncLeagueSeason(leagueId, season);
@@ -128,6 +158,21 @@ public class BasketballLeagueDetailLazySync {
                     leagueId, season, e.toString());
         }
         return CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Standings tazeleme gerekiyor mu? {@code BasketballStandingsPageService
+     * .ensureFresh} ile ayni gate: hic satir yoksa ya da son sync 1sa'ten
+     * eskiyse true. Boylece her sayfa acilisinda API'yi yormayiz.
+     */
+    private boolean isStandingsStale(Long leagueId, String season) {
+        long count = standingRepo.countByLeagueIdAndSeason(leagueId, season);
+        Instant lastSync = seasonRepo.findByLeagueIdAndSeason(leagueId, season)
+                .map(BasketballSeason::getStandingsLastSyncedAt)
+                .orElse(null);
+        boolean stale = lastSync == null
+                || Instant.now().isAfter(lastSync.plus(STANDINGS_FRESHNESS));
+        return count == 0 || stale;
     }
 
     private static boolean isStale(Instant lastSyncedAt, Duration freshness) {

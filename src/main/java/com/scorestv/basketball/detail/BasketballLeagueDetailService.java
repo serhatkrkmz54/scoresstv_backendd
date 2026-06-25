@@ -112,7 +112,8 @@ public class BasketballLeagueDetailService {
      */
     @Cacheable(
             value = "basketballLeagueDetail",
-            key = "#slug + ':' + (#season != null ? #season : 'current') + ':' + #lang")
+            key = "#slug + ':' + (#season != null ? #season : 'current') + ':' + #lang",
+            unless = "#result == null || #result.isThin()")
     @Transactional(readOnly = true)
     public BasketballLeagueDetailResponse getDetail(String slug, String season, String lang) {
         Long leagueId = SlugUtil.extractLeagueId(slug);

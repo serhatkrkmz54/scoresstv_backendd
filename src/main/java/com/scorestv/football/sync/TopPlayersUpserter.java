@@ -51,12 +51,18 @@ public class TopPlayersUpserter {
         League leagueRef = leagueRepository.getReferenceById(leagueId);
         int rank = 1;
         int written = 0;
+        // Ayni oyuncu bir kategoride iki kez gelebilir (sezon ortasi transfer vb.);
+        // dedup etmezsek 2. insert (league,season,category,player_id) 23505 dup key verir.
+        java.util.Set<Long> seenPlayerIds = new java.util.HashSet<>();
         for (TopPlayerApiDto item : items) {
             // player_name NOT NULL kolonu: isim bos gelirse insert 23502 verip
             // @Transactional replace tx'ini kirletir, kalan satirlar 25P02 duser.
             if (item == null || item.player() == null || item.player().id() == null
                     || item.player().name() == null || item.player().name().isBlank()) {
                 continue;
+            }
+            if (!seenPlayerIds.add(item.player().id())) {
+                continue; // ayni oyuncu kategoride tekrar geldi — atla
             }
             LeagueTopPlayer row = toEntity(leagueRef, season, category, rank, item);
             if (row == null) {
