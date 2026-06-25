@@ -11,6 +11,7 @@ import com.scorestv.basketball.domain.BasketballSeasonRepository;
 import com.scorestv.basketball.domain.BasketballStandingRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
@@ -63,6 +64,8 @@ public class BasketballLeagueDetailLazySync {
     private final BasketballSyncService gamesSyncService;
     private final BasketballStandingRepository standingRepo;
     private final BasketballSeasonRepository seasonRepo;
+    /** Self-referans — @Async proxy'sinin uygulanmasi icin (self-invocation bypass'ini onler). */
+    private final BasketballLeagueDetailLazySync self;
 
     public BasketballLeagueDetailLazySync(
             BasketballLeagueRepository leagueRepo,
@@ -71,7 +74,8 @@ public class BasketballLeagueDetailLazySync {
             BasketballStandingsSyncService standingsSyncService,
             BasketballSyncService gamesSyncService,
             BasketballStandingRepository standingRepo,
-            BasketballSeasonRepository seasonRepo) {
+            BasketballSeasonRepository seasonRepo,
+            @Lazy BasketballLeagueDetailLazySync self) {
         this.leagueRepo = leagueRepo;
         this.leaguesSyncService = leaguesSyncService;
         this.topPlayersSyncService = topPlayersSyncService;
@@ -79,6 +83,7 @@ public class BasketballLeagueDetailLazySync {
         this.gamesSyncService = gamesSyncService;
         this.standingRepo = standingRepo;
         this.seasonRepo = seasonRepo;
+        this.self = self;
     }
 
     /**
@@ -94,7 +99,7 @@ public class BasketballLeagueDetailLazySync {
 
         // 1) Lig info — sezonlar listesi sayfanin temeli, ozenle tazele
         if (isStale(league.getLastInfoSyncedAt(), LEAGUE_INFO_FRESHNESS)) {
-            refreshLeagueInfoAsync(leagueId);
+            self.refreshLeagueInfoAsync(leagueId);
         }
 
         // Secili sezon yoksa current'a dus
@@ -106,13 +111,13 @@ public class BasketballLeagueDetailLazySync {
         // 2) Standings — sayfanin ana modulu. Bos veya 1sa eskimisse async
         //    tetikle (her sayfa acilisinda API'yi yormamak icin gate'li).
         if (isStandingsStale(leagueId, effectiveSeason)) {
-            refreshStandingsAsync(leagueId, effectiveSeason);
+            self.refreshStandingsAsync(leagueId, effectiveSeason);
         }
 
         // 3) Top players — saatlik freshness, current sezon icin
         if (effectiveSeason.equals(league.getCurrentSeason())
                 && isStale(league.getLastTopPlayersSyncedAt(), TOP_PLAYERS_FRESHNESS)) {
-            refreshTopPlayersAsync(leagueId, effectiveSeason);
+            self.refreshTopPlayersAsync(leagueId, effectiveSeason);
         }
     }
 
@@ -121,10 +126,10 @@ public class BasketballLeagueDetailLazySync {
      * Inline cagri yok, tum sync'ler async fire-and-forget.
      */
     public void forceRefresh(Long leagueId, String season) {
-        refreshLeagueInfoAsync(leagueId);
+        self.refreshLeagueInfoAsync(leagueId);
         if (season != null && !season.isBlank()) {
-            refreshStandingsAsync(leagueId, season);
-            refreshTopPlayersAsync(leagueId, season);
+            self.refreshStandingsAsync(leagueId, season);
+            self.refreshTopPlayersAsync(leagueId, season);
         }
     }
 
