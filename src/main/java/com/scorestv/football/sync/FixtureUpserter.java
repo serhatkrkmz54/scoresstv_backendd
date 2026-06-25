@@ -174,11 +174,11 @@ public class FixtureUpserter {
             return null;
         }
         return cache.computeIfAbsent(v.id(), id -> {
-            Venue e = venueRepository.findById(id).orElseGet(Venue::new);
-            e.setId(id);
-            e.setName(v.name());
-            e.setCity(v.city());
-            return venueRepository.save(e);
+            // Yaris-guvenli upsert (ON CONFLICT) — es zamanli lazy sync'lerin ayni
+            // venue'yu INSERT edip venues_pkey 23505 ile tum fikstur batch'ini abort
+            // etmesini onler. Upsert sonrasi managed entity'yi don.
+            venueRepository.upsert(id, v.name(), v.city());
+            return venueRepository.findById(id).orElse(null);
         });
     }
 
