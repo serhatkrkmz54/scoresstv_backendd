@@ -13,7 +13,10 @@ import com.scorestv.search.events.EntityIndexedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -43,17 +46,25 @@ public class FixtureUpserter {
     private final LeagueRepository leagueRepository;
     private final VenueRepository venueRepository;
     private final ApplicationEventPublisher events;
+    /**
+     * Kendine referans — {@link #doUpsertVenue}'yu Spring proxy uzerinden
+     * cagirmak icin. Self-invocation'da @Transactional(REQUIRES_NEW) devreye
+     * GIRMEZ; proxy uzerinden cagirinca girer. @Lazy ile kurulum dongusu kirilir.
+     */
+    private final FixtureUpserter self;
 
     public FixtureUpserter(FixtureRepository fixtureRepository,
                            TeamRepository teamRepository,
                            LeagueRepository leagueRepository,
                            VenueRepository venueRepository,
-                           ApplicationEventPublisher events) {
+                           ApplicationEventPublisher events,
+                           @Lazy FixtureUpserter self) {
         this.fixtureRepository = fixtureRepository;
         this.teamRepository = teamRepository;
         this.leagueRepository = leagueRepository;
         this.venueRepository = venueRepository;
         this.events = events;
+        this.self = self;
     }
 
     /**
@@ -174,12 +185,30 @@ public class FixtureUpserter {
             return null;
         }
         return cache.computeIfAbsent(v.id(), id -> {
-            // Yaris-guvenli upsert (ON CONFLICT) — es zamanli lazy sync'lerin ayni
-            // venue'yu INSERT edip venues_pkey 23505 ile tum fikstur batch'ini abort
-            // etmesini onler. Upsert sonrasi managed entity'yi don.
-            venueRepository.upsert(id, v.name(), v.city());
+            // Yaris-guvenli + deadlock-suz venue upsert (PlayerUpserter ile ayni
+            // desen). Yazma AYRI REQUIRES_NEW tx'inde + ON CONFLICT ile yapilir:
+            //   - Kilit ayri micro-tx'te aninda birakilir → es zamanli lazy
+            //     sync'ler arasinda venues uzerinde deadlock (40P01) olusmaz.
+            //   - ON CONFLICT dup-key (23505) firlatmaz → fikstur batch'i artik
+            //     abort olmaz, kismi veri kaybi yok.
+            // self proxy uzerinden cagrilir ki REQUIRES_NEW gercekten devreye girsin.
+            try {
+                self.doUpsertVenue(id, v.name(), v.city());
+            } catch (DataIntegrityViolationException ignored) {
+                // baska tx ayni venue'yu yazdi — temiz rollback, yapilacak sey yok
+            }
             return venueRepository.findById(id).orElse(null);
         });
+    }
+
+    /**
+     * Stadyum upsert'inin REQUIRES_NEW govdesi — race/deadlock izolasyonu icin
+     * AYRI tx'te calisir. {@code public} olmali ki Spring proxy @Transactional'i
+     * uygulayabilsin (self proxy uzerinden cagrilir).
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void doUpsertVenue(Long id, String name, String city) {
+        venueRepository.upsert(id, name, city);
     }
 
     /**
