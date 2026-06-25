@@ -1,5 +1,8 @@
 package com.scorestv.basketball.web.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.io.Serializable;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -18,6 +21,7 @@ import java.util.List;
  * current sezonu kullanilir. {@code selectedSeason} alani frontend dropdown
  * vurgusu icin.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record BasketballLeagueDetailResponse(
         Long id,
         /** SEO slug — "nba" / "euroleague" / "tr-basketbol-super-ligi". */
@@ -61,7 +65,13 @@ public record BasketballLeagueDetailResponse(
      * top players HEPSI bos/null ise true — lazy sync henuz veriyi cekmemis
      * demektir. Cache katmani thin yaniti cache'lememeli ki client auto-retry
      * async sync tamamlaninca dolu veriyi alabilsin.
+     *
+     * <p>{@code @JsonIgnore}: bu turetilmis getter Redis cache JSON'una "thin"
+     * alani olarak yazilmamali — record'da karsiligi olmadigi icin geri okurken
+     * UnrecognizedPropertyException firlatip 500'e yol aciyordu. SpEL
+     * {@code #result.isThin()} reflection ile cagrildigindan etkilenmez.
      */
+    @JsonIgnore
     public boolean isThin() {
         return isEmpty(standings)
                 && isEmpty(recentGames)
