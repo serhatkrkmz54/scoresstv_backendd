@@ -2,6 +2,7 @@ package com.scorestv.basketball.web;
 
 import com.scorestv.basketball.detail.BasketballTeamDetailService;
 import com.scorestv.basketball.seo.BasketballTeamDetailSeoBuilder;
+import com.scorestv.basketball.web.dto.BasketballPopularTeamView;
 import com.scorestv.basketball.web.dto.BasketballTeamDetailResponse;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -10,12 +11,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 
 /**
  * Basketbol takim detay public endpoint'i.
  *
- * <p>URL: {@code GET /api/v1/basketball/teams/{slug}} — tam detay.
+ * <p>URL: {@code GET /api/v1/basketball/teams/popular} — sol ray popüler takimlar.
+ * <br>URL: {@code GET /api/v1/basketball/teams/{slug}} — tam detay.
  * <br>URL: {@code POST /api/v1/basketball/teams/{slug}/refresh} — pull-to-refresh.
  * <br>URL: {@code GET  /api/v1/basketball/teams/{slug}/seo} — SEO paketi (OG/JSON-LD).
  *
@@ -28,11 +31,27 @@ public class PublicBasketballTeamController {
 
     private final BasketballTeamDetailService detailService;
     private final BasketballTeamDetailSeoBuilder seoBuilder;
+    private final BasketballPopularTeamsService popularTeamsService;
 
     public PublicBasketballTeamController(BasketballTeamDetailService detailService,
-                                            BasketballTeamDetailSeoBuilder seoBuilder) {
+                                            BasketballTeamDetailSeoBuilder seoBuilder,
+                                            BasketballPopularTeamsService popularTeamsService) {
         this.detailService = detailService;
         this.seoBuilder = seoBuilder;
+        this.popularTeamsService = popularTeamsService;
+    }
+
+    /**
+     * Sol ray "Popüler Takimlar" listesi (config'ten, elle seçilmiş).
+     * Not: "/popular" literal yolu, "/{slug}" pattern'indan ÖNCE eşleşmesi
+     * için ilk sırada tanımlandı (futbol PublicTeamController ile aynı gotcha).
+     *
+     * @param lang "tr" → Türkçe ad/slug; aksi halde "en"
+     */
+    @GetMapping("/popular")
+    public List<BasketballPopularTeamView> popular(
+            @RequestParam(required = false, defaultValue = "en") String lang) {
+        return popularTeamsService.getPopular("tr".equalsIgnoreCase(lang));
     }
 
     /** Takim detay sayfasi yanit DTO'su. */

@@ -8,6 +8,7 @@ import com.scorestv.basketball.detail.BasketballStandingsPageService;
 import com.scorestv.basketball.web.dto.BasketballLeagueDetailResponse;
 import com.scorestv.basketball.web.dto.BasketballLeagueHubResponse;
 import com.scorestv.basketball.web.dto.BasketballLeagueTeamView;
+import com.scorestv.basketball.web.dto.BasketballPopularLeagueView;
 import com.scorestv.basketball.web.dto.BasketballStandingsPageResponse;
 import com.scorestv.common.SlugUtil;
 import org.springframework.cache.CacheManager;
@@ -25,6 +26,7 @@ import java.util.List;
  * için hafif veri. Mobile bunu accordion'a doldurur.
  *
  * <p>URL: {@code GET /api/v1/basketball/leagues/hub} → ülke gruplu lig listesi.
+ * <br>URL: {@code GET /api/v1/basketball/leagues/popular} → sol ray popüler ligler.
  * <br>URL: {@code GET /api/v1/basketball/leagues/{id}/teams} → lig içi takımlar.
  */
 @RestController
@@ -36,6 +38,7 @@ public class BasketballLeagueController {
     private final BasketballStandingsPageService standingsPageService;
     private final BasketballLeagueDetailService leagueDetailService;
     private final BasketballLeagueDetailLazySync leagueDetailLazySync;
+    private final BasketballPopularLeaguesService popularLeaguesService;
     private final CacheManager cacheManager;
 
     public BasketballLeagueController(BasketballLeagueHubService hubService,
@@ -43,13 +46,28 @@ public class BasketballLeagueController {
                                       BasketballStandingsPageService standingsPageService,
                                       BasketballLeagueDetailService leagueDetailService,
                                       BasketballLeagueDetailLazySync leagueDetailLazySync,
+                                      BasketballPopularLeaguesService popularLeaguesService,
                                       CacheManager cacheManager) {
         this.hubService = hubService;
         this.teamsService = teamsService;
         this.standingsPageService = standingsPageService;
         this.leagueDetailService = leagueDetailService;
         this.leagueDetailLazySync = leagueDetailLazySync;
+        this.popularLeaguesService = popularLeaguesService;
         this.cacheManager = cacheManager;
+    }
+
+    /**
+     * Sol ray "Popüler Ligler" listesi (config'ten, elle seçilmiş).
+     * Not: "/popular" literal yolu, "/{slug}" pattern'larından ÖNCE eşleşmesi
+     * için ilk sırada tanımlandı (futbol PublicLeagueController ile aynı gotcha).
+     *
+     * @param lang "tr" → Türkçe ad/slug; aksi halde "en"
+     */
+    @GetMapping("/popular")
+    public List<BasketballPopularLeagueView> popular(
+            @RequestParam(required = false, defaultValue = "en") String lang) {
+        return popularLeaguesService.getPopular("tr".equalsIgnoreCase(lang));
     }
 
     /**
