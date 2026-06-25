@@ -362,4 +362,30 @@ scorestv:
       # olarak yorumlanir — bu yuzden YAML list syntax kullaniyoruz (Spring
       # virgullu string default'ini parse edemez, YAML list'i dogru bind eder).
       # Kabul edilen Google OAuth client id'leri (idToken aud kontrolu).
-      
+      # 1. Admin/web client (admin paneli Google girisi) — ihtiyaten korunuyor.
+      # 2-4. Yeni Firebase projesi (scorestv-e889c): Android + iOS + Web client'lari.
+      #      Mobil serverClientId kullanmadigi icin token aud = platform client id
+      #      (Android'de Android, iOS'ta iOS client). Web ileride gerekebilir.
+      client-ids:
+        - 850334764490-nihi94238mnse9mr04i32qsd1b41913r.apps.googleusercontent.com
+        - 202204490934-9drjggq97fft8nrhqbio911m6aspgv3j.apps.googleusercontent.com
+        - 202204490934-2ll3r48acje0d64vmuacgkoj0qf4n5vu.apps.googleusercontent.com
+        - 202204490934-qthde1dld01aodqn930ioes4om69pofm.apps.googleusercontent.com
+    apple:
+      # Sign in with Apple — kabul edilen audience'lar:
+      #   - iOS App ID bundle id (iOS native akış) = com.scorestv.scorestvMobile
+      # Sign in with Apple — kabul edilen audience'lar (token.aud):
+      #   - iOS App ID bundle id (iOS native akış)
+      #   - Service ID (web + Android web akışı) = com.scorestv.signin
+      # NOT: iOS bundle id Android'den (com.scorestv.mobile) FARKLI.
+      # HEDEF: com.scorestv.mobile (Firebase + Android ile ayni — tek kimlik).
+      # Gecis donemi icin eski varyantlar da kabul; netlesince sadece
+      # com.scorestv.mobile + com.scorestv.signin birakilabilir.
+      client-ids:
+        - com.scorestv.mobile
+        - com.scorestv.scorestv
+        - com.scorestv.scorestvMobile
+        - com.scorestv.signin
+  cors:
+    # Virgulle ayrilmis origin listesi. Prod'da CORS_ALLOWED_ORIGINS ile verilir.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
