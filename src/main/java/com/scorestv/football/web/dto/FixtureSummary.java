@@ -33,7 +33,14 @@ public record FixtureSummary(
         Team homeTeam,
         Team awayTeam,
         Score score,
-        Venue venue
+        Venue venue,
+        /**
+         * Ev/deplasman takımının bu maçta gördüğü KIRMIZI KART sayısı (0+).
+         * Anasayfa canlı tab'ında takım adının yanında rozet olarak gösterilir.
+         * Eski cache'lerden migrasyon için null gelebilir (frontend 0 sayar).
+         */
+        Integer homeRedCards,
+        Integer awayRedCards
 ) implements Serializable {
 
     /**

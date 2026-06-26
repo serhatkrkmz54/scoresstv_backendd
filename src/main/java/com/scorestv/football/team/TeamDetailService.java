@@ -522,7 +522,10 @@ public class TeamDetailService {
                         away.getLogoKey() != null ? storage.publicUrl(away.getLogoKey()) : null,
                         SlugUtil.teamSlug(awayName, away.getId())),
                 new FixtureSummary.Score(f.getHomeGoals(), f.getAwayGoals()),
-                toVenueSummary(f, turkish));
+                toVenueSummary(f, turkish),
+                // Takım fikstür listesinde kırmızı kart rozeti gösterilmiyor.
+                0,
+                0);
     }
 
     /**

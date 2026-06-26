@@ -7,6 +7,7 @@ import com.scorestv.football.FootballProperties;
 import com.scorestv.football.domain.Country;
 import com.scorestv.football.domain.CountryRepository;
 import com.scorestv.football.domain.Fixture;
+import com.scorestv.football.domain.FixtureEventRepository;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.football.domain.League;
 import com.scorestv.football.domain.Team;
@@ -63,6 +64,7 @@ public class FixtureQueryService {
     private static final Set<String> UPCOMING_STATUSES = Set.of("NS", "TBD");
 
     private final FixtureRepository fixtureRepository;
+    private final FixtureEventRepository fixtureEventRepository;
     private final CountryRepository countryRepository;
     private final FootballProperties footballProperties;
     private final MinioStorageService storage;
@@ -70,12 +72,14 @@ public class FixtureQueryService {
     private final LiveFixtureMapper liveFixtureMapper;
 
     public FixtureQueryService(FixtureRepository fixtureRepository,
+                               FixtureEventRepository fixtureEventRepository,
                                CountryRepository countryRepository,
                                FootballProperties footballProperties,
                                MinioStorageService storage,
                                FootballMessages messages,
                                LiveFixtureMapper liveFixtureMapper) {
         this.fixtureRepository = fixtureRepository;
+        this.fixtureEventRepository = fixtureEventRepository;
         this.countryRepository = countryRepository;
         this.footballProperties = footballProperties;
         this.storage = storage;
@@ -172,13 +176,16 @@ public class FixtureQueryService {
                         Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(Fixture::getId);
 
+        // Kırmızı kart sayıları — tek toplu sorgu (canlı tab rozeti için).
+        Map<Long, Map<Long, Integer>> redCards = redCardCounts(filtered);
+
         List<LeagueGroup> groups = new ArrayList<>();
         for (List<Fixture> leagueFixtures : byLeague.values()) {
             leagueFixtures.sort(byKickoff);
             League league = leagueFixtures.get(0).getLeague();
             List<FixtureSummary> summaries = new ArrayList<>();
             for (Fixture fixture : leagueFixtures) {
-                summaries.add(toSummary(fixture, turkish));
+                summaries.add(toSummary(fixture, turkish, redCards));
             }
             groups.add(new LeagueGroup(toLeagueInfo(league, countriesByName, turkish), summaries));
         }
@@ -229,9 +236,14 @@ public class FixtureQueryService {
         return ZoneId.of(footballProperties.sync().timezone());
     }
 
-    private FixtureSummary toSummary(Fixture fixture, boolean turkish) {
+    private FixtureSummary toSummary(Fixture fixture, boolean turkish,
+                                     Map<Long, Map<Long, Integer>> redCardsByFixture) {
         Team home = fixture.getHomeTeam();
         Team away = fixture.getAwayTeam();
+        Map<Long, Integer> rc = (redCardsByFixture == null)
+                ? null : redCardsByFixture.get(fixture.getId());
+        int homeRed = (rc == null) ? 0 : rc.getOrDefault(home.getId(), 0);
+        int awayRed = (rc == null) ? 0 : rc.getOrDefault(away.getId(), 0);
         return new FixtureSummary(
                 fixture.getId(),
                 // Slug dile göre lokalize: TR'de name_tr (varsa), yoksa orijinal ad —
@@ -258,7 +270,31 @@ public class FixtureQueryService {
                         period(fixture.getScoreHtHome(), fixture.getScoreHtAway()),
                         period(fixture.getScoreEtHome(), fixture.getScoreEtAway()),
                         period(fixture.getScorePenHome(), fixture.getScorePenAway())),
-                toVenue(fixture.getVenue(), turkish));
+                toVenue(fixture.getVenue(), turkish),
+                homeRed,
+                awayRed);
+    }
+
+    /**
+     * Verilen maçlar için kırmızı kart sayılarını TOPLU sorgu ile çözer:
+     * {@code fixtureId -> (teamId -> adet)}. Boş liste için boş map.
+     */
+    private Map<Long, Map<Long, Integer>> redCardCounts(List<Fixture> fixtures) {
+        if (fixtures == null || fixtures.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = new ArrayList<>(fixtures.size());
+        for (Fixture f : fixtures) {
+            ids.add(f.getId());
+        }
+        Map<Long, Map<Long, Integer>> out = new HashMap<>();
+        for (Object[] row : fixtureEventRepository.countRedCardsByFixtureIds(ids)) {
+            Long fixtureId = ((Number) row[0]).longValue();
+            Long teamId = ((Number) row[1]).longValue();
+            int count = ((Number) row[2]).intValue();
+            out.computeIfAbsent(fixtureId, k -> new HashMap<>()).put(teamId, count);
+        }
+        return out;
     }
 
     /** Tek bir maca ait lig ozeti (FixtureSummary icine). */
@@ -426,9 +462,10 @@ public class FixtureQueryService {
                 .comparing(Fixture::getKickoffAt,
                         Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(Fixture::getId));
+        Map<Long, Map<Long, Integer>> redCards = redCardCounts(fixtures);
         List<FixtureSummary> out = new ArrayList<>(fixtures.size());
         for (Fixture f : fixtures) {
-            out.add(toSummary(f, turkish));
+            out.add(toSummary(f, turkish, redCards));
         }
         return out;
     }

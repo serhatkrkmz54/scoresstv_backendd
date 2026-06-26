@@ -454,7 +454,10 @@ public class LeagueDetailService {
                         away.getLogoKey() != null ? storage.publicUrl(away.getLogoKey()) : null,
                         SlugUtil.teamSlug(displayName(away, turkish), away.getId())),
                 new FixtureSummary.Score(f.getHomeGoals(), f.getAwayGoals()),
-                toVenueSummary(f, turkish));
+                toVenueSummary(f, turkish),
+                // Lig fikstür listesinde kırmızı kart rozeti gösterilmiyor.
+                0,
+                0);
     }
 
     /**
