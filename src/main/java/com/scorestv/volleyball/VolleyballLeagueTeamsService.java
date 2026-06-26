@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Bir voleybol liginin takim listesini hafif DTO olarak doner.
@@ -31,17 +32,20 @@ public class VolleyballLeagueTeamsService {
     private final VolleyballTeamRepository teamRepository;
     private final VolleyballTeamLeagueSeasonRepository junctionRepository;
     private final VolleyballTeamSyncService teamSyncService;
+    private final VolleyballReferenceService referenceService;
     private final MinioStorageService storage;
 
     public VolleyballLeagueTeamsService(VolleyballLeagueRepository leagueRepository,
                                         VolleyballTeamRepository teamRepository,
                                         VolleyballTeamLeagueSeasonRepository junctionRepository,
                                         VolleyballTeamSyncService teamSyncService,
+                                        VolleyballReferenceService referenceService,
                                         MinioStorageService storage) {
         this.leagueRepository = leagueRepository;
         this.teamRepository = teamRepository;
         this.junctionRepository = junctionRepository;
         this.teamSyncService = teamSyncService;
+        this.referenceService = referenceService;
         this.storage = storage;
     }
 
@@ -51,6 +55,12 @@ public class VolleyballLeagueTeamsService {
         if (resolvedSeason == null || resolvedSeason.isBlank()) {
             VolleyballLeague league = leagueRepository.findById(leagueId).orElse(null);
             resolvedSeason = league != null ? league.getCurrentSeason() : null;
+            // current_season bos → ligi API'den tazele (sezonlar + currentSeason),
+            // boylece onboarding manuel bootstrap olmadan kendi iyilesir (futbolla ayni).
+            if (resolvedSeason == null || resolvedSeason.isBlank()) {
+                VolleyballLeague refreshed = referenceService.syncOneLeague(leagueId);
+                if (refreshed != null) resolvedSeason = refreshed.getCurrentSeason();
+            }
         }
 
         // 1) Junction katmani — kanonik kaynak.
@@ -85,7 +95,7 @@ public class VolleyballLeagueTeamsService {
         }
         return ids.stream()
                 .map(byId::get)
-                .filter(t -> t != null)
+                .filter(Objects::nonNull)
                 .map(t -> toView(t, turkish))
                 .sorted((a, b) -> a.name().compareToIgnoreCase(b.name()))
                 .toList();

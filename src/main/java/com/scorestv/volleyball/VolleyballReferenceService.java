@@ -26,13 +26,36 @@ public class VolleyballReferenceService {
     private final VolleyballApiClient client;
     private final VolleyballCountryRepository countryRepo;
     private final VolleyballLeagueRepository leagueRepo;
+    private final VolleyballLeagueUpserter leagueUpserter;
 
     public VolleyballReferenceService(VolleyballApiClient client,
                                       VolleyballCountryRepository countryRepo,
-                                      VolleyballLeagueRepository leagueRepo) {
+                                      VolleyballLeagueRepository leagueRepo,
+                                      VolleyballLeagueUpserter leagueUpserter) {
         this.client = client;
         this.countryRepo = countryRepo;
         this.leagueRepo = leagueRepo;
+        this.leagueUpserter = leagueUpserter;
+    }
+
+    /**
+     * Tek ligi API'den ({@code /leagues?id=X}) tazeler — sezonlar + currentSeason
+     * dahil. Onboarding "favori takim sec" akisinda ligin currentSeason'i null
+     * ise lazy cagrilir; boylece sistem manuel bootstrap olmadan kendi iyilesir.
+     *
+     * @return tazelenen lig veya null (API bos/hata).
+     */
+    @Transactional
+    public VolleyballLeague syncOneLeague(long leagueId) {
+        List<VbLeagueDto> list;
+        try {
+            list = client.fetchLeagueById(leagueId);
+        } catch (Exception e) {
+            log.warn("Voleybol /leagues?id={} tazeleme hatasi: {}", leagueId, e.toString());
+            return null;
+        }
+        if (list == null || list.isEmpty()) return null;
+        return leagueUpserter.upsertFromApi(list.getFirst());
     }
 
     @Transactional
