@@ -3,6 +3,8 @@ package com.scorestv.volleyball;
 import com.scorestv.storage.MinioStorageService;
 import com.scorestv.volleyball.domain.VolleyballLeague;
 import com.scorestv.volleyball.domain.VolleyballLeagueRepository;
+import com.scorestv.volleyball.domain.VolleyballStanding;
+import com.scorestv.volleyball.domain.VolleyballStandingRepository;
 import com.scorestv.volleyball.domain.VolleyballTeam;
 import com.scorestv.volleyball.domain.VolleyballTeamLeagueSeasonRepository;
 import com.scorestv.volleyball.domain.VolleyballTeamRepository;
@@ -12,7 +14,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,6 +37,8 @@ public class VolleyballLeagueTeamsService {
     private final VolleyballTeamLeagueSeasonRepository junctionRepository;
     private final VolleyballTeamSyncService teamSyncService;
     private final VolleyballReferenceService referenceService;
+    private final VolleyballStandingRepository standingRepository;
+    private final VolleyballStandingsSyncService standingsSyncService;
     private final MinioStorageService storage;
 
     public VolleyballLeagueTeamsService(VolleyballLeagueRepository leagueRepository,
@@ -40,50 +46,85 @@ public class VolleyballLeagueTeamsService {
                                         VolleyballTeamLeagueSeasonRepository junctionRepository,
                                         VolleyballTeamSyncService teamSyncService,
                                         VolleyballReferenceService referenceService,
+                                        VolleyballStandingRepository standingRepository,
+                                        VolleyballStandingsSyncService standingsSyncService,
                                         MinioStorageService storage) {
         this.leagueRepository = leagueRepository;
         this.teamRepository = teamRepository;
         this.junctionRepository = junctionRepository;
         this.teamSyncService = teamSyncService;
         this.referenceService = referenceService;
+        this.standingRepository = standingRepository;
+        this.standingsSyncService = standingsSyncService;
         this.storage = storage;
     }
 
     @Transactional
     public List<VolleyballLeagueTeamView> getTeams(Long leagueId, String season, boolean turkish) {
+        // 1) Verilen ya da DB'deki current_season ile dene.
         String resolvedSeason = season;
         if (resolvedSeason == null || resolvedSeason.isBlank()) {
             VolleyballLeague league = leagueRepository.findById(leagueId).orElse(null);
             resolvedSeason = league != null ? league.getCurrentSeason() : null;
-            // current_season bos → ligi API'den tazele (sezonlar + currentSeason),
-            // boylece onboarding manuel bootstrap olmadan kendi iyilesir (futbolla ayni).
-            if (resolvedSeason == null || resolvedSeason.isBlank()) {
-                VolleyballLeague refreshed = referenceService.syncOneLeague(leagueId);
-                if (refreshed != null) resolvedSeason = refreshed.getCurrentSeason();
-            }
+        }
+        List<VolleyballLeagueTeamView> teams = collectTeams(leagueId, resolvedSeason, turkish);
+        if (!teams.isEmpty()) {
+            return teams;
         }
 
-        // 1) Junction katmani — kanonik kaynak.
-        if (resolvedSeason != null && !resolvedSeason.isBlank()) {
-            List<Long> ids = junctionRepository.findTeamIdsByLeagueAndSeason(leagueId, resolvedSeason);
-            if (!ids.isEmpty()) {
-                return mapByIds(ids, turkish);
-            }
-            // 2) Junction bos — senkron doldur (onboarding'de kabul edilebilir dur).
-            try {
-                int n = teamSyncService.syncIfMissing(leagueId, resolvedSeason);
-                if (n > 0) {
-                    List<Long> freshIds = junctionRepository.findTeamIdsByLeagueAndSeason(
-                            leagueId, resolvedSeason);
+        // 2) Bos → ligi API'den tazele (gercek current_season'i al) ve sezon
+        //    farkliysa tekrar dene. Bizdeki current_season NULL ya da BAYAT
+        //    olabilir (orn. Efeler 172: API'de current=2025 ama bizde eski/yok).
+        //    Bu, manuel mudahale olmadan onboarding'i kendi iyilestirir.
+        VolleyballLeague refreshed = referenceService.syncOneLeague(leagueId);
+        String freshSeason = refreshed != null ? refreshed.getCurrentSeason() : null;
+        if (freshSeason != null && !freshSeason.isBlank()
+                && !freshSeason.equals(resolvedSeason)) {
+            teams = collectTeams(leagueId, freshSeason, turkish);
+        }
+        return teams;
+    }
+
+    /**
+     * Bir lig + sezon icin katmanli takim arama:
+     * junction → standings (voleybolda EN guvenilir) → /teams sync → games.
+     */
+    private List<VolleyballLeagueTeamView> collectTeams(Long leagueId, String resolvedSeason,
+                                                        boolean turkish) {
+        if (resolvedSeason == null || resolvedSeason.isBlank()) {
+            return List.of();
+        }
+
+        // 1) Junction katmani — kanonik kaynak (zaten doluysa hizli yol).
+        List<Long> ids = junctionRepository.findTeamIdsByLeagueAndSeason(leagueId, resolvedSeason);
+        if (!ids.isEmpty()) {
+            return mapByIds(ids, turkish);
+        }
+
+        // 2) Standings'ten takimlar — /teams?league&season cogu ligde bos doner;
+        //    standings dolu ve her satirda takim var (sync takimlari upsert eder).
+        List<VolleyballLeagueTeamView> fromStandings =
+                teamsFromStandings(leagueId, resolvedSeason, turkish);
+        if (!fromStandings.isEmpty()) {
+            return fromStandings;
+        }
+
+        // 3) /teams junction sync — bazi liglerde calisir.
+        try {
+            int n = teamSyncService.syncIfMissing(leagueId, resolvedSeason);
+            if (n > 0) {
+                List<Long> freshIds = junctionRepository.findTeamIdsByLeagueAndSeason(
+                        leagueId, resolvedSeason);
+                if (!freshIds.isEmpty()) {
                     return mapByIds(freshIds, turkish);
                 }
-            } catch (Exception e) {
-                log.warn("Voleybol getTeams junction lazy sync hata league={} season={}: {}",
-                        leagueId, resolvedSeason, e.toString());
             }
+        } catch (Exception e) {
+            log.warn("Voleybol getTeams junction lazy sync hata league={} season={}: {}",
+                    leagueId, resolvedSeason, e.toString());
         }
 
-        // 3) Son care: games fallback.
+        // 4) Son care: games fallback.
         List<VolleyballTeam> teams = teamRepository.findTeamsInLeague(leagueId, resolvedSeason);
         return teams.stream().map(t -> toView(t, turkish)).toList();
     }
@@ -99,6 +140,35 @@ public class VolleyballLeagueTeamsService {
                 .map(t -> toView(t, turkish))
                 .sorted((a, b) -> a.name().compareToIgnoreCase(b.name()))
                 .toList();
+    }
+
+    /**
+     * Takimlari standings'ten turetir — voleybolda en guvenilir kaynak. DB'de
+     * standings yoksa once sync eder (takimlar upsert edilir), sonra benzersiz
+     * takimlari (ada gore sirali) doner.
+     */
+    private List<VolleyballLeagueTeamView> teamsFromStandings(Long leagueId, String season,
+                                                              boolean turkish) {
+        List<VolleyballStanding> rows = standingRepository.findByLeagueAndSeason(leagueId, season);
+        if (rows.isEmpty()) {
+            try {
+                standingsSyncService.sync(leagueId, season);
+            } catch (Exception e) {
+                log.warn("Voleybol getTeams standings sync hata league={} season={}: {}",
+                        leagueId, season, e.toString());
+            }
+            rows = standingRepository.findByLeagueAndSeason(leagueId, season);
+        }
+        Map<Long, VolleyballLeagueTeamView> byId = new LinkedHashMap<>();
+        for (VolleyballStanding s : rows) {
+            VolleyballTeam t = s.getTeam();
+            if (t != null && !byId.containsKey(t.getId())) {
+                byId.put(t.getId(), toView(t, turkish));
+            }
+        }
+        List<VolleyballLeagueTeamView> out = new ArrayList<>(byId.values());
+        out.sort((a, b) -> a.name().compareToIgnoreCase(b.name()));
+        return out;
     }
 
     private VolleyballLeagueTeamView toView(VolleyballTeam t, boolean turkish) {
