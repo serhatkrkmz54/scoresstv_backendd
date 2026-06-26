@@ -137,13 +137,21 @@ public class PlayerDetailService {
         // Sezon dropdown: career_teams'ten gelen tum yillar + DB stats'tan
         List<PlayerCareerTeam> careerTeams =
                 careerTeamRepository.findByPlayerIdWithTeam(playerId);
+        // TreeSet ters-siralayici null-guvenli DEGIL: career_teams.seasons veya
+        // stat yillari icinde null bir yil olursa Integer.compareTo(null) NPE atar.
+        // Bu yuzden null yillari ekleme oncesi ele.
         Set<Integer> seasonsUnion = new TreeSet<>(Comparator.reverseOrder());
         for (PlayerCareerTeam ct : careerTeams) {
-            if (ct.getSeasons() != null) seasonsUnion.addAll(ct.getSeasons());
+            if (ct.getSeasons() == null) continue;
+            for (Integer yr : ct.getSeasons()) {
+                if (yr != null) seasonsUnion.add(yr);
+            }
         }
         // İstatistiği OLAN sezonlar (yeni → eski). Pozisyon fallback'i bunu kullanır.
         List<Integer> statSeasonYears = statRepository.findSeasonYearsByPlayer(playerId);
-        seasonsUnion.addAll(statSeasonYears);
+        for (Integer yr : statSeasonYears) {
+            if (yr != null) seasonsUnion.add(yr);
+        }
         List<Integer> seasons = new ArrayList<>(seasonsUnion);
 
         Integer selectedSeason = season != null

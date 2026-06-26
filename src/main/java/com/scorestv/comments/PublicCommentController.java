@@ -63,6 +63,17 @@ public class PublicCommentController {
         return doList("BASKETBALL", gameId, page, size, sort, currentUser);
     }
 
+    /** Bir voleybol macinin yorumlari. */
+    @GetMapping("/volleyball/{gameId}")
+    public CommentPageResponse listVolleyball(
+            @PathVariable Long gameId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size,
+            @RequestParam(defaultValue = "newest") String sort,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        return doList("VOLLEYBALL", gameId, page, size, sort, currentUser);
+    }
+
     private CommentPageResponse doList(String sport, Long matchId, int page, int size,
                                        String sort, CurrentUser currentUser) {
         int safePage = Math.max(0, page);
@@ -92,6 +103,16 @@ public class PublicCommentController {
             @Valid @RequestBody CommentCreateRequest req,
             @AuthenticationPrincipal CurrentUser currentUser) {
         return service.create(gameId, "BASKETBALL", currentUser.id(), req);
+    }
+
+    /** Yeni voleybol yorumu (auth gerekli). */
+    @PostMapping("/volleyball/{gameId}")
+    @ResponseStatus(HttpStatus.CREATED)
+    public CommentView createVolleyball(
+            @PathVariable Long gameId,
+            @Valid @RequestBody CommentCreateRequest req,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        return service.create(gameId, "VOLLEYBALL", currentUser.id(), req);
     }
 
     /** Yorum sil (sahibi veya admin, auth gerekli). */

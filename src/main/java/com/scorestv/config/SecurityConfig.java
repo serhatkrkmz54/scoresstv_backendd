@@ -58,6 +58,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/fixtures", "/api/v1/fixtures/**").permitAll()
                 // Basketbol maclari — public (fikstur + canli skor).
                 .requestMatchers("/api/v1/basketball/**").permitAll()
+                // Voleybol maclari — public (fikstur + canli skor + detay).
+                .requestMatchers("/api/v1/volleyball", "/api/v1/volleyball/**").permitAll()
                 // Lig detay sayfasi — public.
                 .requestMatchers("/api/v1/leagues", "/api/v1/leagues/**").permitAll()
                 .requestMatchers("/api/v1/countries", "/api/v1/countries/**").permitAll()
