@@ -52,4 +52,19 @@ public class MobileDeviceTokenController {
         return updated ? ResponseEntity.noContent().build()
                        : ResponseEntity.notFound().build();
     }
+
+    /**
+     * FIFA + UEFA Ulke siralama bildirimleri toggle.
+     *
+     * <p>Mobile Ayarlar > "Sıralama bildirimleri" satirindan cagrilir.
+     * {@code enabled=false} → ulkeye gore siralama bildirimi gonderilmez.
+     */
+    @PatchMapping("/rankings-country-enabled")
+    public ResponseEntity<Void> setRankingsCountryEnabled(
+            @RequestParam String fcmToken,
+            @RequestParam boolean enabled) {
+        boolean updated = service.setRankingsCountryEnabled(fcmToken, enabled);
+        return updated ? ResponseEntity.noContent().build()
+                       : ResponseEntity.notFound().build();
+    }
 }

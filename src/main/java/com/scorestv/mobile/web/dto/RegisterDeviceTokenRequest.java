@@ -19,5 +19,11 @@ public record RegisterDeviceTokenRequest(
         /** Sematik versiyon — debug icin yararli, opsiyonel. */
         String appVersion,
         /** "tr" | "en" — bildirim icerigi bu dilde uretilir. Default "tr". */
-        String locale
+        String locale,
+        /**
+         * Cihaz ulke kodu — ISO-3 / futbol federasyon kodu (orn. "TUR",
+         * "ENG"). FIFA + UEFA Ulke siralama bildirimleri icin hedefleme.
+         * Opsiyonel; null/bos gelirse mevcut deger korunur (eski app surumu).
+         */
+        String countryCode
 ) {}

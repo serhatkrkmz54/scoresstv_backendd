@@ -74,4 +74,12 @@ public class UserNotificationPref extends BaseEntity {
     /** "İkinci yarı başladı" bildirimi. */
     @Column(name = "notify_second_half", nullable = false)
     private boolean notifySecondHalf = true;
+
+    /**
+     * UEFA Kulüp sıralaması değiştiğinde bu takım için bildirim. Default TRUE.
+     * Favori (takip edilen) takımın UEFA kulüp katsayı sırası değişince
+     * tetiklenir; sıralama bildirim dispatch'i bu kolonu filtre olarak kullanır.
+     */
+    @Column(name = "notify_rankings_club", nullable = false)
+    private boolean notifyRankingsClub = true;
 }

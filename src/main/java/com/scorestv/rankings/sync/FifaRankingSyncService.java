@@ -3,6 +3,8 @@ package com.scorestv.rankings.sync;
 import com.scorestv.football.FootballCacheNames;
 import com.scorestv.rankings.domain.FifaRanking;
 import com.scorestv.rankings.domain.FifaRankingRepository;
+import com.scorestv.rankings.notify.RankingChange;
+import com.scorestv.rankings.notify.RankingChangePublisher;
 import com.scorestv.rankings.sync.dto.FifaRankingApiDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,7 +13,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * FIFA Erkek Milli Takim Siralamasi senkronu.
@@ -26,11 +31,14 @@ public class FifaRankingSyncService {
 
     private final RankingsHttpClient httpClient;
     private final FifaRankingRepository repository;
+    private final RankingChangePublisher changePublisher;
 
     public FifaRankingSyncService(RankingsHttpClient httpClient,
-                                  FifaRankingRepository repository) {
+                                  FifaRankingRepository repository,
+                                  RankingChangePublisher changePublisher) {
         this.httpClient = httpClient;
         this.repository = repository;
+        this.changePublisher = changePublisher;
     }
 
     /**
@@ -47,9 +55,18 @@ public class FifaRankingSyncService {
             return 0;
         }
 
+        // Degisim tespiti: delete'ten ONCE eski siralari snapshot'la (teamId→rank).
+        Map<String, Integer> oldRanks = new HashMap<>();
+        for (FifaRanking old : repository.findAll()) {
+            if (old.getTeamId() != null && old.getRank() != null) {
+                oldRanks.put(old.getTeamId(), old.getRank());
+            }
+        }
+
         repository.deleteAllRows();
         Instant now = Instant.now();
         int written = 0;
+        List<RankingChange> changes = new ArrayList<>();
         for (FifaRankingApiDto.Row row : response.Results()) {
             if (row.IdTeam() == null || row.Rank() == null
                     || row.TotalPoints() == null) {
@@ -70,8 +87,18 @@ public class FifaRankingSyncService {
             entity.setLastSyncedAt(now);
             repository.save(entity);
             written++;
+
+            Integer oldRank = oldRanks.get(entity.getTeamId());
+            if (oldRank != null && !oldRank.equals(entity.getRank())
+                    && entity.getCountryCode() != null
+                    && !entity.getCountryCode().isBlank()) {
+                changes.add(RankingChange.fifa(entity.getTeamName(),
+                        entity.getCountryCode(), oldRank, entity.getRank()));
+            }
         }
-        log.info("FIFA ranking sync: {} satir yazildi", written);
+        log.info("FIFA ranking sync: {} satir yazildi, {} sira degisimi",
+                written, changes.size());
+        changePublisher.publishAfterCommit(changes);
         return written;
     }
 
@@ -79,6 +106,6 @@ public class FifaRankingSyncService {
     private static String extractTeamName(List<FifaRankingApiDto.TeamName> names) {
         if (names == null || names.isEmpty()) return "";
         // Genelde sadece tek dil dondurur — ilki yeterli.
-        return names.get(0).Description() != null ? names.get(0).Description() : "";
+        return names.getFirst().Description() != null ? names.getFirst().Description() : "";
     }
 }

@@ -52,4 +52,23 @@ public class MobileDeviceToken extends BaseEntity {
      */
     @Column(name = "notifications_enabled", nullable = false)
     private boolean notificationsEnabled = true;
+
+    /**
+     * Cihazin ulke kodu — ISO-3 / futbol federasyon kodu (orn. "TUR",
+     * "ENG", "ITA"). FIFA + UEFA Ulke siralamasi bildirimleri bu koda gore
+     * hedeflenir. Mobile profil ulkesinden (yoksa locale'den) turetip POST
+     * eder; null ise siralama bildirimi gonderilmez. FIFA ve UEFA ayni
+     * 3-harfli kodu kullandigi icin eslesme tutarlidir.
+     */
+    @Column(name = "country_code", length = 10)
+    private String countryCode;
+
+    /**
+     * FIFA + UEFA Ulke siralama bildirimleri toggle. Default TRUE (acik).
+     * Mobile Ayarlar'dan PATCH
+     * {@code /api/v1/mobile/device-tokens/rankings-country-enabled} ile
+     * degistirilir. Ulkeye gore siralama bildirimi gonderiminde filtre.
+     */
+    @Column(name = "notify_rankings_country", nullable = false)
+    private boolean notifyRankingsCountry = true;
 }

@@ -3,6 +3,8 @@ package com.scorestv.rankings.sync;
 import com.scorestv.football.FootballCacheNames;
 import com.scorestv.rankings.domain.UefaClubRanking;
 import com.scorestv.rankings.domain.UefaClubRankingRepository;
+import com.scorestv.rankings.notify.RankingChange;
+import com.scorestv.rankings.notify.RankingChangePublisher;
 import com.scorestv.rankings.sync.dto.UefaCoefficientApiDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +13,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * UEFA Kulup Katsayisi senkronu.
@@ -29,11 +35,14 @@ public class UefaClubRankingSyncService {
 
     private final RankingsHttpClient httpClient;
     private final UefaClubRankingRepository repository;
+    private final RankingChangePublisher changePublisher;
 
     public UefaClubRankingSyncService(RankingsHttpClient httpClient,
-                                       UefaClubRankingRepository repository) {
+                                       UefaClubRankingRepository repository,
+                                       RankingChangePublisher changePublisher) {
         this.httpClient = httpClient;
         this.repository = repository;
+        this.changePublisher = changePublisher;
     }
 
     /**
@@ -49,9 +58,19 @@ public class UefaClubRankingSyncService {
             log.warn("UEFA club ranking: targetSeasonYear null, sync atlandi");
             return 0;
         }
+        // Degisim tespiti: delete'ten ONCE eski siralari snapshot'la (clubId→rank).
+        Map<String, Integer> oldRanks = new HashMap<>();
+        for (UefaClubRanking old :
+                repository.findByTargetSeasonYearOrderByRankAsc(targetSeasonYear)) {
+            if (old.getClubId() != null && old.getRank() != null) {
+                oldRanks.put(old.getClubId(), old.getRank());
+            }
+        }
+
         repository.deleteByTargetSeasonYear(targetSeasonYear);
         Instant now = Instant.now();
         int totalWritten = 0;
+        List<RankingChange> changes = new ArrayList<>();
 
         for (int page = 1; page <= MAX_PAGES; page++) {
             UefaCoefficientApiDto response = httpClient.fetchUefaCoefficient(
@@ -61,18 +80,22 @@ public class UefaClubRankingSyncService {
                     || response.data().members().isEmpty()) {
                 break;
             }
-            int written = writeMembers(response.data().members(), targetSeasonYear, now);
+            int written = writeMembers(response.data().members(), targetSeasonYear,
+                    now, oldRanks, changes);
             totalWritten += written;
             // Sayfada 50'den az kayit varsa son sayfa
             if (response.data().members().size() < 50) break;
         }
-        log.info("UEFA club ranking sync: {} kulup yazildi (season={})",
-                totalWritten, targetSeasonYear);
+        log.info("UEFA club ranking sync: {} kulup yazildi (season={}), {} sira degisimi",
+                totalWritten, targetSeasonYear, changes.size());
+        changePublisher.publishAfterCommit(changes);
         return totalWritten;
     }
 
     private int writeMembers(java.util.List<UefaCoefficientApiDto.Member> members,
-                             Integer targetSeasonYear, Instant now) {
+                             Integer targetSeasonYear, Instant now,
+                             Map<String, Integer> oldRanks,
+                             List<RankingChange> changes) {
         int written = 0;
         for (UefaCoefficientApiDto.Member m : members) {
             if (m.member() == null || m.overallRanking() == null) continue;
@@ -113,6 +136,13 @@ public class UefaClubRankingSyncService {
             entity.setLastSyncedAt(now);
             repository.save(entity);
             written++;
+
+            Integer oldRank = oldRanks.get(entity.getClubId());
+            if (oldRank != null && !oldRank.equals(entity.getRank())) {
+                changes.add(RankingChange.uefaClub(entity.getClubName(),
+                        entity.getCountryCode(), entity.getClubShortName(),
+                        entity.getTeamCode(), oldRank, entity.getRank()));
+            }
         }
         return written;
     }

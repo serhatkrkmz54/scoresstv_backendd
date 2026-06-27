@@ -75,4 +75,14 @@ public interface UserNotificationPrefRepository
             + "WHERE p.team.id = :teamId AND p.notifySecondHalf = true "
             + "AND p.deviceToken.notificationsEnabled = true")
     List<UserNotificationPref> findRecipientsForSecondHalf(@Param("teamId") Long teamId);
+
+    /**
+     * UEFA Kulup siralamasi degisince bu takimi takip eden (notify_rankings_club
+     * acik) cihazlar. RankingNotificationService kullanir.
+     */
+    @Query("SELECT p FROM UserNotificationPref p "
+            + "JOIN FETCH p.deviceToken "
+            + "WHERE p.team.id = :teamId AND p.notifyRankingsClub = true "
+            + "AND p.deviceToken.notificationsEnabled = true")
+    List<UserNotificationPref> findRankingClubRecipients(@Param("teamId") Long teamId);
 }

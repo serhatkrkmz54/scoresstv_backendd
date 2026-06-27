@@ -38,14 +38,21 @@ public class MobileDeviceTokenService {
         String locale = (req.locale() == null || req.locale().isBlank())
                 ? "tr" : req.locale().toLowerCase(Locale.ROOT);
 
+        String countryCode = normalizeCountry(req.countryCode());
+
         MobileDeviceToken existing = repository.findByFcmToken(token).orElse(null);
         if (existing != null) {
             existing.setPlatform(platform);
             existing.setAppVersion(req.appVersion());
             existing.setLocale(locale);
+            // Eski app surumu country gondermezse mevcut degeri koru.
+            if (countryCode != null) {
+                existing.setCountryCode(countryCode);
+            }
             existing.setLastSeenAt(Instant.now());
             repository.save(existing);
-            log.debug("Device token guncellendi: id={} platform={}", existing.getId(), platform);
+            log.debug("Device token guncellendi: id={} platform={} country={}",
+                    existing.getId(), platform, existing.getCountryCode());
             return new DeviceTokenResponse(existing.getId(), false);
         }
 
@@ -54,6 +61,7 @@ public class MobileDeviceTokenService {
         fresh.setPlatform(platform);
         fresh.setAppVersion(req.appVersion());
         fresh.setLocale(locale);
+        fresh.setCountryCode(countryCode);
         fresh.setLastSeenAt(Instant.now());
         MobileDeviceToken saved = repository.save(fresh);
         log.info("Yeni device token kaydedildi: id={} platform={} version={}",
@@ -89,5 +97,32 @@ public class MobileDeviceTokenService {
         log.info("Device {} notifications {}",
                 existing.getId(), enabled ? "ACILDI" : "KAPATILDI");
         return true;
+    }
+
+    /**
+     * FIFA + UEFA Ulke siralama bildirimleri toggle. Mobile Ayarlar ekrani
+     * cagirir. Token bulunamazsa false doner — caller 404 yapabilir.
+     */
+    @Transactional
+    public boolean setRankingsCountryEnabled(String fcmToken, boolean enabled) {
+        MobileDeviceToken existing =
+                repository.findByFcmToken(fcmToken.trim()).orElse(null);
+        if (existing == null) {
+            log.debug("setRankingsCountryEnabled: token bulunamadi {}", fcmToken);
+            return false;
+        }
+        existing.setNotifyRankingsCountry(enabled);
+        existing.setLastSeenAt(Instant.now());
+        repository.save(existing);
+        log.info("Device {} ranking-country bildirimi {}",
+                existing.getId(), enabled ? "ACILDI" : "KAPATILDI");
+        return true;
+    }
+
+    /** Ulke kodunu normalize eder: trim + upper-case; bos ise null. */
+    private static String normalizeCountry(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim();
+        return trimmed.isEmpty() ? null : trimmed.toUpperCase(Locale.ROOT);
     }
 }
