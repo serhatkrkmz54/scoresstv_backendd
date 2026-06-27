@@ -1,5 +1,6 @@
 package com.scorestv.volleyball;
 
+import com.scorestv.football.ApiQuotaTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
@@ -8,6 +9,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
 import java.util.List;
@@ -35,8 +38,16 @@ public class VolleyballApiClient {
     private final boolean keyConfigured;
     private final long minIntervalMs;
     private volatile long lastRequestAt = 0L;
+    /**
+     * Paylasilan 429 cooldown — futbol/basketbol/voleybol AYNI API-Sports
+     * key + AYNI sunucu IP'sinden cikiyor (API koruma IP bazinda da topluyor).
+     * Biri 429 yiyince hepsi ayni cooldown'a uymali (firewall blok riski).
+     */
+    private final ApiQuotaTracker quotaTracker;
 
-    public VolleyballApiClient(VolleyballProperties props) {
+    public VolleyballApiClient(VolleyballProperties props,
+                               ApiQuotaTracker quotaTracker) {
+        this.quotaTracker = quotaTracker;
         this.keyConfigured = props.apiKey() != null && !props.apiKey().isBlank();
         this.minIntervalMs = props.requestsPerMinute() > 0
                 ? Math.round(60_000.0 / props.requestsPerMinute())
@@ -66,21 +77,48 @@ public class VolleyballApiClient {
             String path,
             Map<String, ?> queryParams,
             ParameterizedTypeReference<VolleyballApiResponse<T>> typeRef) {
+        guardCooldown();
         throttle();
-        ResponseEntity<VolleyballApiResponse<T>> entity = http.get()
-                .uri(builder -> {
-                    builder.path(path);
-                    if (queryParams != null) {
-                        queryParams.forEach((k, v) -> {
-                            if (v != null) builder.queryParam(k, v);
-                        });
-                    }
-                    return builder.build();
-                })
-                .retrieve()
-                .toEntity(typeRef);
-        logQuota(entity.getHeaders());
-        return entity.getBody();
+        try {
+            ResponseEntity<VolleyballApiResponse<T>> entity = http.get()
+                    .uri(builder -> {
+                        builder.path(path);
+                        if (queryParams != null) {
+                            queryParams.forEach((k, v) -> {
+                                if (v != null) builder.queryParam(k, v);
+                            });
+                        }
+                        return builder.build();
+                    })
+                    .retrieve()
+                    .toEntity(typeRef);
+            logQuota(entity.getHeaders());
+            return entity.getBody();
+        } catch (RestClientResponseException ex) {
+            reportIf429(ex);
+            throw ex;
+        }
+    }
+
+    /**
+     * Paylasilan 429 cooldown aktifse network'e HIC dokunmadan hizli reddet.
+     * (Futbol/basketbol bir 429 yeyip cooldown'a girince voleybol da beklemeli —
+     * ayni IP+key. Aksi halde hammer'lama firewall blok riski.)
+     */
+    private void guardCooldown() {
+        long ms = quotaTracker.cooldownRemainingMillis();
+        if (ms > 0) {
+            throw new RestClientException(
+                    "API-Sports rate limit cooldown aktif (" + ms + " ms kaldi).");
+        }
+    }
+
+    /** Yanit 429 ise paylasilan cooldown baslat (tum sporlar beklesin). */
+    private void reportIf429(RestClientResponseException ex) {
+        if (ex.getStatusCode().value() == 429) {
+            quotaTracker.startCooldown(Duration.ofSeconds(10));
+            log.warn("API-Volleyball 429 (rate limit) — paylasilan cooldown baslatildi");
+        }
     }
 
     /** API-Sports kota header'larini loglar — voleybol gunluk limiti ayri. */
@@ -268,8 +306,9 @@ public class VolleyballApiClient {
      */
     public java.util.Optional<VbTeamStatisticsDto> fetchTeamStatistics(
             long teamId, long leagueId, String season) {
-        throttle();
         try {
+            guardCooldown();
+            throttle();
             @SuppressWarnings("unchecked")
             Map<String, Object> raw = http.get()
                     .uri(b -> b.path("/teams/statistics")
@@ -293,6 +332,9 @@ public class VolleyballApiClient {
             VbTeamStatisticsDto dto = STATS_MAPPER.convertValue(
                     responseField, VbTeamStatisticsDto.class);
             return java.util.Optional.ofNullable(dto);
+        } catch (RestClientResponseException ex) {
+            reportIf429(ex);
+            return java.util.Optional.empty();
         } catch (Exception e) {
             log.debug("Team statistics cagri hata team={} league={} season={}: {}",
                     teamId, leagueId, season, e.toString());

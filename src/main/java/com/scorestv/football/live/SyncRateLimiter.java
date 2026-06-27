@@ -104,7 +104,7 @@ public class SyncRateLimiter {
     private long baseIntervalSeconds(SyncType type) {
         FootballProperties.Sync sync = properties.sync();
         return switch (type) {
-            case EVENTS -> 30L;   // baseline: LiveEventsJob @Scheduled aralığıyla uyumlu
+            case EVENTS -> 15L;   // baseline: LiveEventsJob @Scheduled aralığıyla (15sn) uyumlu
             case STATISTICS -> sync.liveStatisticsIntervalSeconds();
             case PLAYER_STATS -> sync.livePlayerStatsIntervalSeconds();
         };

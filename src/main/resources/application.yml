@@ -166,9 +166,11 @@ scorestv:
     enabled: ${BASKETBALL_ENABLED:true}
     base-url: ${BASKETBALL_BASE_URL:https://v1.basketball.api-sports.io}
     api-key: ${API_FOOTBALL_KEY:}
-    # Basketbol kendi dakikalik limitine sahip (footballdan BAGIMSIZ sayac).
-    # Ayri env ile ayarlanir; ileride basketbol limiti ayri artarsa bumple.
-    requests-per-minute: ${BASKETBALL_RPM:450}
+    # NOT: API-Sports rate limit IP bazinda da toplaniyor (firewall) — futbol +
+    # basketbol + voleybol AYNI sunucu IP'sinden cikiyor, birlikte sayiliyorlar.
+    # Plan 20 istek/sn; ucu birlikte bu tavani asmasin diye 360/dk (~6/sn).
+    # Futbol ~6/sn + bk 6/sn + vb 6/sn ≈ 18/sn (20'nin altinda guvenli pay).
+    requests-per-minute: ${BASKETBALL_RPM:360}
     timezone: Europe/Istanbul
     today-cron: ${BASKETBALL_TODAY_CRON:0 */30 * * * *}
     live-enabled: ${BASKETBALL_LIVE_ENABLED:true}
@@ -201,7 +203,9 @@ scorestv:
     enabled: ${VOLLEYBALL_ENABLED:true}
     base-url: ${VOLLEYBALL_BASE_URL:https://v1.volleyball.api-sports.io}
     api-key: ${API_FOOTBALL_KEY:}
-    requests-per-minute: ${VOLLEYBALL_RPM:450}
+    # IP bazli ortak limit — bkz. basketbol notu. 360/dk (~6/sn) → futbol+bk+vb
+    # birlikte ~18/sn, planin 20/sn tavaninin altinda.
+    requests-per-minute: ${VOLLEYBALL_RPM:360}
     timezone: Europe/Istanbul
     today-cron: ${VOLLEYBALL_TODAY_CRON:0 */30 * * * *}
     live-enabled: ${VOLLEYBALL_LIVE_ENABLED:true}
@@ -290,6 +294,11 @@ scorestv:
       # WebSocket /topic/fixtures/live/{lang} kanallarina yayilir.
       live-enabled: ${FOOTBALL_LIVE_ENABLED:false}
       live-interval-seconds: ${FOOTBALL_LIVE_INTERVAL:15}
+      # Canli olay (gol/kart/penalti) yoklama araligi. Kaynak (/fixtures/events)
+      # 15sn'de bir tazelenir; golun timeline detayini kaynakla AYNI hiza
+      # cektik. Custom600 plani (600 req/dk) rahat tasir. NOT: SyncRateLimiter
+      # EVENTS baseline'i ile uyumlu tutulmali (ikisi de 15sn).
+      live-events-interval-seconds: ${FOOTBALL_EVENTS_INTERVAL:15}
       # Yaklasan-mac kadro yoklayicisi: kickoff'a 0-2 saat olanlar icin
       # her 15 dk'da bir /fixtures/lineups cagrisi. Ilk kadro geldiginde
       # /topic/fixtures/{id}/lineups WS push yapilir.
@@ -299,8 +308,8 @@ scorestv:
       # API'nin onerdigi 60sn; pik gunlerde kota icin 90/120 yapabilirsin.
       live-statistics-interval-seconds: ${FOOTBALL_STATS_INTERVAL:60}
       # Canli oyuncu istatistik (rating, dakika, gol, asist, ...) yoklama
-      # araligi. Skor kadar kritik degil; varsayilan 120sn kota dostu.
-      live-player-stats-interval-seconds: ${FOOTBALL_PLAYER_STATS_INTERVAL:120}
+      # araligi. Kaynak dakikada bir tazelenir; kaynakla esitledik (60sn).
+      live-player-stats-interval-seconds: ${FOOTBALL_PLAYER_STATS_INTERVAL:60}
       # "Covered" isaretli olmayan (alt ligler) maclar icin yoklama
       # araliklarinin carpani. 4 = non-covered icin events 30->120sn,
       # stats 60->240sn, player_stats 120->480sn. Pik kotayi koruyor.

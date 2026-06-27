@@ -1,5 +1,6 @@
 package com.scorestv.basketball;
 
+import com.scorestv.football.ApiQuotaTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
@@ -8,6 +9,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
 import java.util.List;
@@ -30,8 +33,17 @@ public class BasketballApiClient {
     private final boolean keyConfigured;
     private final long minIntervalMs;
     private volatile long lastRequestAt = 0L;
+    /**
+     * Paylasilan 429 cooldown — futbol/basketbol/voleybol AYNI API-Sports
+     * key + AYNI sunucu IP'sinden cikiyor; API koruma katmani IP bazinda da
+     * topluyor. Biri 429 yiyince hepsi ayni cooldown'a uymali, yoksa firewall
+     * blok riski. ApiQuotaTracker cooldown'u Redis'te paylasimli tutar.
+     */
+    private final ApiQuotaTracker quotaTracker;
 
-    public BasketballApiClient(BasketballProperties props) {
+    public BasketballApiClient(BasketballProperties props,
+                               ApiQuotaTracker quotaTracker) {
+        this.quotaTracker = quotaTracker;
         this.keyConfigured = props.apiKey() != null && !props.apiKey().isBlank();
         this.minIntervalMs = props.requestsPerMinute() > 0
                 ? Math.round(60_000.0 / props.requestsPerMinute())
@@ -61,21 +73,48 @@ public class BasketballApiClient {
             String path,
             Map<String, ?> queryParams,
             ParameterizedTypeReference<BasketballApiResponse<T>> typeRef) {
+        guardCooldown();
         throttle();
-        ResponseEntity<BasketballApiResponse<T>> entity = http.get()
-                .uri(builder -> {
-                    builder.path(path);
-                    if (queryParams != null) {
-                        queryParams.forEach((k, v) -> {
-                            if (v != null) builder.queryParam(k, v);
-                        });
-                    }
-                    return builder.build();
-                })
-                .retrieve()
-                .toEntity(typeRef);
-        logQuota(entity.getHeaders());
-        return entity.getBody();
+        try {
+            ResponseEntity<BasketballApiResponse<T>> entity = http.get()
+                    .uri(builder -> {
+                        builder.path(path);
+                        if (queryParams != null) {
+                            queryParams.forEach((k, v) -> {
+                                if (v != null) builder.queryParam(k, v);
+                            });
+                        }
+                        return builder.build();
+                    })
+                    .retrieve()
+                    .toEntity(typeRef);
+            logQuota(entity.getHeaders());
+            return entity.getBody();
+        } catch (RestClientResponseException ex) {
+            reportIf429(ex);
+            throw ex;
+        }
+    }
+
+    /**
+     * Paylasilan 429 cooldown aktifse network'e HIC dokunmadan hizli reddet.
+     * (Futbol bir 429 yeyip cooldown'a girince basketbol da beklemeli — ayni
+     * IP+key. Aksi halde hammer'lama firewall blok riski.)
+     */
+    private void guardCooldown() {
+        long ms = quotaTracker.cooldownRemainingMillis();
+        if (ms > 0) {
+            throw new RestClientException(
+                    "API-Sports rate limit cooldown aktif (" + ms + " ms kaldi).");
+        }
+    }
+
+    /** Yanit 429 ise paylasilan cooldown baslat (tum sporlar beklesin). */
+    private void reportIf429(RestClientResponseException ex) {
+        if (ex.getStatusCode().value() == 429) {
+            quotaTracker.startCooldown(Duration.ofSeconds(10));
+            log.warn("API-Basketball 429 (rate limit) — paylasilan cooldown baslatildi");
+        }
     }
 
     /**
@@ -358,8 +397,9 @@ public class BasketballApiClient {
      */
     public java.util.Optional<BkTeamStatisticsDto> fetchTeamStatistics(
             long teamId, long leagueId, String season) {
-        throttle();
         try {
+            guardCooldown();
+            throttle();
             @SuppressWarnings("unchecked")
             Map<String, Object> raw = http.get()
                     .uri(b -> b.path("/statistics")
@@ -383,6 +423,9 @@ public class BasketballApiClient {
             BkTeamStatisticsDto dto = STATS_MAPPER.convertValue(
                     responseField, BkTeamStatisticsDto.class);
             return java.util.Optional.ofNullable(dto);
+        } catch (RestClientResponseException ex) {
+            reportIf429(ex);
+            return java.util.Optional.empty();
         } catch (Exception e) {
             log.debug("Team statistics cagri hata team={} league={} season={}: {}",
                     teamId, leagueId, season, e.toString());
