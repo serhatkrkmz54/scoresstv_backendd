@@ -9,6 +9,7 @@ import com.scorestv.user.dto.ForgotPasswordRequest;
 import com.scorestv.user.dto.GoogleLoginRequest;
 import com.scorestv.user.dto.LoginRequest;
 import com.scorestv.user.dto.RegisterRequest;
+import com.scorestv.user.dto.ResetPasswordCodeRequest;
 import com.scorestv.user.dto.ResetPasswordRequest;
 import com.scorestv.user.dto.TokenRequest;
 import com.scorestv.user.dto.UpdateProfileRequest;
@@ -98,6 +99,24 @@ public class AuthController {
     @PostMapping("/reset-password")
     public MessageResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         passwordResetService.resetPassword(request.token(), request.newPassword());
+        return new MessageResponse(
+                "Şifreniz güncellendi. Yeni şifrenizle giriş yapabilirsiniz.");
+    }
+
+    // ---- Kod tabanli (OTP) sifre sifirlama — mobil ----
+
+    @PostMapping("/forgot-password-code")
+    public MessageResponse forgotPasswordCode(@Valid @RequestBody ForgotPasswordRequest body,
+                                              HttpServletRequest request) {
+        passwordResetService.requestResetCode(body.email(), request.getRemoteAddr());
+        return new MessageResponse(
+                "Eğer bu e-posta kayıtlıysa, doğrulama kodu gönderildi.");
+    }
+
+    @PostMapping("/reset-password-code")
+    public MessageResponse resetPasswordCode(@Valid @RequestBody ResetPasswordCodeRequest request) {
+        passwordResetService.resetPasswordWithCode(
+                request.email(), request.code(), request.newPassword());
         return new MessageResponse(
                 "Şifreniz güncellendi. Yeni şifrenizle giriş yapabilirsiniz.");
     }

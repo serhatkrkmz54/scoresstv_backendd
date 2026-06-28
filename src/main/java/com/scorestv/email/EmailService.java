@@ -26,16 +26,19 @@ public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
     private static final String RESET_TEMPLATE_PATH = "email/password-reset.html";
+    private static final String RESET_CODE_TEMPLATE_PATH = "email/password-reset-code.html";
 
     private final JavaMailSender mailSender;
     private final String from;
     private final String resetTemplate;
+    private final String resetCodeTemplate;
 
     public EmailService(JavaMailSender mailSender,
                         @Value("${spring.mail.username:}") String from) {
         this.mailSender = mailSender;
         this.from = from;
         this.resetTemplate = loadTemplate(RESET_TEMPLATE_PATH);
+        this.resetCodeTemplate = loadTemplate(RESET_CODE_TEMPLATE_PATH);
     }
 
     /** Sifre sifirlama e-postasini arka planda (async) gonderir. */
@@ -68,6 +71,36 @@ public class EmailService {
             log.info("Sifre sifirlama e-postasi gonderildi: {}", to);
         } catch (Exception e) {
             log.error("Sifre sifirlama e-postasi gonderilemedi ({}): {}", to, e.getMessage());
+        }
+    }
+
+    /** 6 haneli sifre sifirlama kodunu (mobil OTP akisi) arka planda gonderir. */
+    @Async
+    public void sendPasswordResetCodeEmail(String to, String code) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            if (!from.isBlank()) {
+                helper.setFrom(from, "scorestv");
+            }
+            helper.setTo(to);
+            helper.setSubject("scorestv - Şifre Sıfırlama Kodu");
+
+            String html = resetCodeTemplate.replace("{{code}}", code);
+            String plainText = """
+                    Şifre sıfırlama kodun: %s
+
+                    Bu kodu uygulamadaki ekrana gir. Kod 15 dakika geçerlidir.
+                    Bu isteği sen yapmadıysan bu e-postayı yok sayabilirsin.
+
+                    scorestv
+                    """.formatted(code);
+            helper.setText(plainText, html);
+
+            mailSender.send(message);
+            log.info("Sifre sifirlama kodu gonderildi: {}", to);
+        } catch (Exception e) {
+            log.error("Sifre sifirlama kodu gonderilemedi ({}): {}", to, e.getMessage());
         }
     }
 
