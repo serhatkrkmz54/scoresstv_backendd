@@ -31,6 +31,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -152,20 +153,32 @@ public class ImageMirrorService {
      */
     public List<PlaceholderCandidate> detectPlaceholderCandidates(int sample) {
         int budget = Math.max(1, sample);
+        List<String> urls = new ArrayList<>();
+        for (Team t : teamRepository.findAll(PageRequest.of(0, budget))) {
+            if (t.getLogoUrl() != null) urls.add(t.getLogoUrl());
+        }
+        for (Player p : playerRepository.findAll(PageRequest.of(0, budget))) {
+            if (p.getPhotoUrl() != null) urls.add(p.getPhotoUrl());
+        }
+        List<PlaceholderCandidate> out = detectFromUrls(urls);
+        log.info("Placeholder kesfi (futbol): {} aday hash (sample={}).",
+                out.size(), budget);
+        return out;
+    }
+
+    /**
+     * Verilen URL listesinden placeholder hash adaylarini bulur — basketbol/
+     * voleybol gibi diger modullerin AYNI kesif mantigini yeniden kullanmasi
+     * icin public. URL'leri indirir, SHA-256'larini sayar, >=2 kez tekrar
+     * edenleri (placeholder'lar yuzlerce varlikta birebir aynidir) sik->seyrek
+     * doner.
+     */
+    public List<PlaceholderCandidate> detectFromUrls(Collection<String> urls) {
         Map<String, Integer> counts = new HashMap<>();
         Map<String, String> example = new HashMap<>();
-
-        List<Team> teams = teamRepository
-                .findAll(PageRequest.of(0, budget)).getContent();
-        for (Team t : teams) {
-            tallyHash(t.getLogoUrl(), counts, example);
+        for (String url : urls) {
+            tallyHash(url, counts, example);
         }
-        List<Player> players = playerRepository
-                .findAll(PageRequest.of(0, budget)).getContent();
-        for (Player p : players) {
-            tallyHash(p.getPhotoUrl(), counts, example);
-        }
-
         List<PlaceholderCandidate> out = new ArrayList<>();
         for (Map.Entry<String, Integer> e : counts.entrySet()) {
             if (e.getValue() >= 2) {
@@ -174,8 +187,6 @@ public class ImageMirrorService {
             }
         }
         out.sort(Comparator.comparingInt(PlaceholderCandidate::count).reversed());
-        log.info("Placeholder kesfi: {} aday hash bulundu (sample={}).",
-                out.size(), budget);
         return out;
     }
 
@@ -188,6 +199,24 @@ public class ImageMirrorService {
         if (h.isEmpty()) return;
         counts.merge(h, 1, Integer::sum);
         example.putIfAbsent(h, url);
+    }
+
+    /** Placeholder filtresi aktif mi? (IMAGE_PLACEHOLDER_SHA256 bos degilse). */
+    public boolean placeholderFilterEnabled() {
+        return !placeholderHashes.isEmpty();
+    }
+
+    /**
+     * Kaynak URL'den indirip placeholder mi diye bakar — bk/vb purge'unun
+     * yeniden kullanmasi icin public sarmalayici (throttle'li, hata=false).
+     */
+    public boolean isPlaceholderAtUrl(String url) {
+        return isPlaceholderAt(url);
+    }
+
+    /** MinIO nesnesini sessizce siler — bk/vb purge'unun kullanmasi icin public. */
+    public void deleteObject(String key) {
+        deleteQuiet(key);
     }
 
     /**

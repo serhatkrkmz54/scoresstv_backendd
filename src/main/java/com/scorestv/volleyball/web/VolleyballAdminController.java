@@ -1,5 +1,6 @@
 package com.scorestv.volleyball.web;
 
+import com.scorestv.football.image.PlaceholderCandidate;
 import com.scorestv.volleyball.VolleyballImageMirrorService;
 import com.scorestv.volleyball.VolleyballReferenceService;
 import com.scorestv.volleyball.VolleyballStandingsSyncService;
@@ -7,6 +8,7 @@ import com.scorestv.volleyball.VolleyballSyncService;
 import com.scorestv.volleyball.VolleyballTeamSyncService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -125,5 +128,22 @@ public class VolleyballAdminController {
     @PostMapping("/images/mirror")
     public Map<String, Object> mirrorImages() {
         return Map.of("mirrored", imageMirror.mirrorAll());
+    }
+
+    /**
+     * Voleybol placeholder hash adaylarini kesfeder. En ust {@code sha256}'yi
+     * IMAGE_PLACEHOLDER_SHA256'ya ekle.
+     */
+    @GetMapping("/images/detect-placeholders")
+    public List<PlaceholderCandidate> detectPlaceholders(
+            @RequestParam(defaultValue = "200") int sample) {
+        return imageMirror.detectPlaceholders(sample);
+    }
+
+    /** Mevcut voleybol placeholder'larini temizler (asenkron — loglardan izle). */
+    @PostMapping("/images/purge-placeholders")
+    public Map<String, Object> purgePlaceholders() {
+        imageMirror.purgePlaceholdersAsync();
+        return Map.of("status", "Voleybol placeholder temizligi baslatildi — loglardan izle.");
     }
 }

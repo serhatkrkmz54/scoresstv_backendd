@@ -3,8 +3,10 @@ package com.scorestv.basketball.web;
 import com.scorestv.basketball.BasketballImageMirrorService;
 import com.scorestv.basketball.BasketballReferenceService;
 import com.scorestv.basketball.BasketballSyncService;
+import com.scorestv.football.image.PlaceholderCandidate;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -12,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -81,5 +84,22 @@ public class BasketballAdminController {
     @PostMapping("/images/mirror")
     public Map<String, Object> mirrorImages() {
         return Map.of("mirrored", imageMirror.mirrorAll());
+    }
+
+    /**
+     * Basketbol placeholder hash adaylarini kesfeder (futbolunkinden farkli
+     * olabilir). En ust {@code sha256}'yi IMAGE_PLACEHOLDER_SHA256'ya ekle.
+     */
+    @GetMapping("/images/detect-placeholders")
+    public List<PlaceholderCandidate> detectPlaceholders(
+            @RequestParam(defaultValue = "200") int sample) {
+        return imageMirror.detectPlaceholders(sample);
+    }
+
+    /** Mevcut basketbol placeholder'larini temizler (asenkron — loglardan izle). */
+    @PostMapping("/images/purge-placeholders")
+    public Map<String, Object> purgePlaceholders() {
+        imageMirror.purgePlaceholdersAsync();
+        return Map.of("status", "Basketbol placeholder temizligi baslatildi — loglardan izle.");
     }
 }
