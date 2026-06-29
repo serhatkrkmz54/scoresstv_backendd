@@ -54,6 +54,14 @@ public class VolleyballGameController {
         return service.byIds(capped, isTr(lang));
     }
 
+    /** {@code GET /api/v1/volleyball/games/popular-today?lang=tr&limit=15} — widget. */
+    @GetMapping("/popular-today")
+    public List<VolleyballGameView> popularToday(
+            @RequestParam(required = false, defaultValue = "en") String lang,
+            @RequestParam(required = false, defaultValue = "15") int limit) {
+        return service.popularToday(isTr(lang), limit);
+    }
+
     /** {@code GET /api/v1/volleyball/games/{id}} — tekil mac. */
     @GetMapping("/{id}")
     public VolleyballGameView byId(

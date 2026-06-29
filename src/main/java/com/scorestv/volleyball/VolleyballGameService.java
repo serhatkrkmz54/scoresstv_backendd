@@ -10,6 +10,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -76,5 +78,40 @@ public class VolleyballGameService {
         return gameRepo.findByIdsWithDetails(ids).stream()
                 .map(g -> VolleyballGameView.from(g, turkish, logo))
                 .toList();
+    }
+
+    /**
+     * Bugunun POPULER lig maclari — ana ekran widget'i icin. Canli → yaklasan →
+     * biten sirali, {@code limit} ile sinirli. Populer lig listesi BOSSA bugunun
+     * TUM voleybolu kullanilir (voleybol az oldugu icin guvenli fallback).
+     */
+    @Transactional(readOnly = true)
+    public List<VolleyballGameView> popularToday(boolean turkish, int limit) {
+        LocalDate today = LocalDate.now(ZoneId.of(props.timezone()));
+        List<VolleyballGameView> dayGames = byDate(today, turkish);
+        List<Long> ids = props.serving().popularLeagueIds();
+        List<VolleyballGameView> base = dayGames;
+        if (ids != null && !ids.isEmpty()) {
+            Set<Long> popular = new HashSet<>(ids);
+            List<VolleyballGameView> filtered = dayGames.stream()
+                    .filter(g -> g.league() != null && popular.contains(g.league().id()))
+                    .toList();
+            // Populer ligde bugun mac yoksa voleybol bos kalmasin diye tumune dus.
+            if (!filtered.isEmpty()) base = filtered;
+        }
+        return base.stream()
+                .sorted(Comparator
+                        .comparingInt((VolleyballGameView g) -> statusRank(g.status().shortCode()))
+                        .thenComparing(VolleyballGameView::startAt,
+                                Comparator.nullsLast(Comparator.naturalOrder())))
+                .limit(limit > 0 ? limit : Long.MAX_VALUE)
+                .toList();
+    }
+
+    /** Sira anahtari: canli=0, baslamamis=1, biten/diger=2. */
+    private static int statusRank(String shortCode) {
+        if (LIVE_STATUSES.contains(shortCode)) return 0;
+        if ("NS".equals(shortCode)) return 1;
+        return 2;
     }
 }

@@ -223,6 +223,10 @@ scorestv:
     serving:
       # One cikan voleybol lig id'leri — su an bos (ileride doldurulacak).
       featured-league-ids: ${VOLLEYBALL_FEATURED_LEAGUE_IDS:}
+      # Ana ekran widget'i "gunun maclari" icin populer voleybol lig id'leri.
+      # BOS ya da bugun bu liglerde mac yoksa bugunun TUM voleybolu kullanilir
+      # (fallback). 172 = Efeler Ligi (TR erkekler). Daha fazla id ekleyebilirsin.
+      popular-league-ids: [172,97,113,174,100,185,223,248,167,251]
   # ============================================================
   # Highlightly maç özeti/highlight entegrasyonu (soccer.highlightly.net).
   # Anahtar yalnız sunucuda (x-rapidapi-key). enabled=false iken hiç çağrı yok.

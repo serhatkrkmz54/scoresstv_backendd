@@ -31,6 +31,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -90,6 +91,42 @@ public class FixtureQueryService {
     /** Site saat dilimine göre bugünün tarihi. */
     public LocalDate today() {
         return LocalDate.now(zone());
+    }
+
+    /**
+     * Bugünün POPÜLER lig maçları — ana ekran widget'ı için kompakt liste.
+     * Sıralama: canlı → yaklaşan → biten (her grup içinde kickoff'a göre).
+     * Popüler lig listesi (application.yml) boşsa boş liste döner.
+     *
+     * @param limit en fazla kaç maç (<=0 ise sınırsız)
+     */
+    @Transactional(readOnly = true)
+    public List<FixtureSummary> popularToday(boolean turkish, int limit) {
+        List<Long> ids = footballProperties.serving().popularLeagueIds();
+        if (ids == null || ids.isEmpty()) return List.of();
+        Set<Long> popular = new HashSet<>(ids);
+        FixtureDayResponse day =
+                getFixturesByDate(today(), FixtureStatusFilter.ALL, turkish);
+        List<FixtureSummary> out = new ArrayList<>();
+        for (LeagueGroup g : day.leagues()) {
+            if (g.league() != null && popular.contains(g.league().id())) {
+                out.addAll(g.fixtures());
+            }
+        }
+        out.sort(Comparator
+                .comparingInt((FixtureSummary f) -> statusRank(f.status().shortCode()))
+                .thenComparing(FixtureSummary::kickoff,
+                        Comparator.nullsLast(Comparator.naturalOrder())));
+        return (limit > 0 && out.size() > limit)
+                ? new ArrayList<>(out.subList(0, limit))
+                : out;
+    }
+
+    /** Sıra anahtarı: canlı=0, yaklaşan=1, biten/diğer=2. */
+    private static int statusRank(String shortCode) {
+        if (LIVE_STATUSES.contains(shortCode)) return 0;
+        if (UPCOMING_STATUSES.contains(shortCode)) return 1;
+        return 2;
     }
 
     /**

@@ -47,8 +47,12 @@ public record VolleyballProperties(
      * Serving (mobile/web sunum) ayarlari.
      *
      * @param featuredLeagueIds one cikan voleybol lig id'leri (su an bos liste).
+     * @param popularLeagueIds  ana ekran widget'i "gunun maclari" icin populer
+     *                          voleybol lig id'leri. Bos ise bugunun TUM voleybol
+     *                          maclari kullanilir (fallback).
      */
     public record Serving(
-            @DefaultValue List<Long> featuredLeagueIds
+            @DefaultValue List<Long> featuredLeagueIds,
+            @DefaultValue List<Long> popularLeagueIds
     ) {}
 }

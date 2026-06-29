@@ -111,4 +111,15 @@ public class PublicFixtureController {
             @RequestParam(required = false, defaultValue = "en") String lang) {
         return queryService.byIds(ids, "tr".equalsIgnoreCase(lang));
     }
+
+    /**
+     * Bugünün popüler lig maçları — ana ekran widget'ı için. Canlı → yaklaşan →
+     * biten sıralı, {@code limit} ile sınırlı (varsayılan 15).
+     */
+    @GetMapping("/popular-today")
+    public List<FixtureSummary> popularToday(
+            @RequestParam(required = false, defaultValue = "en") String lang,
+            @RequestParam(required = false, defaultValue = "15") int limit) {
+        return queryService.popularToday("tr".equalsIgnoreCase(lang), limit);
+    }
 }
