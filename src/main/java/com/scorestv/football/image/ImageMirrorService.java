@@ -27,11 +27,15 @@ import org.springframework.web.client.RestClient;
 import java.net.URI;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -115,6 +119,73 @@ public class ImageMirrorService {
     private boolean isPlaceholderImage(byte[] data) {
         if (placeholderHashes.isEmpty()) return false;
         return placeholderHashes.contains(sha256Hex(data));
+    }
+
+    /** Throttle'li indirme — hata/bos durumda null (loglamaz). */
+    private byte[] downloadQuiet(String url) {
+        try {
+            Thread.sleep(THROTTLE_MS);
+            byte[] data = downloadClient.get().uri(URI.create(url))
+                    .retrieve().toEntity(byte[].class).getBody();
+            return (data != null && data.length > 0) ? data : null;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    /**
+     * Placeholder hash'(ler)ini KESFEDER — env'e elle hash bulmaya gerek kalmadan.
+     *
+     * <p>Mantik: API-Football "Image not available" gorseli, logosu olmayan
+     * YUZLERCE takim/oyuncuda BIREBIR AYNI bayttir; gercek logolar ise benzersiz.
+     * Bu yuzden bir ornek kume indirilip SHA-256'lari sayilirsa, en sik tekrar
+     * eden hash(ler) placeholder'dir. Donen en ust hash'i (count yuksek) alip
+     * {@code IMAGE_PLACEHOLDER_SHA256} env'ine yaz, yeniden baslat, purge cagir.
+     *
+     * @param sample taranacak takim + oyuncu sayisi (ust sinir; orn. 400)
+     * @return >=2 kez tekrar eden hash'ler, en siktan aza dogru
+     */
+    public List<PlaceholderCandidate> detectPlaceholderCandidates(int sample) {
+        int budget = Math.max(1, sample);
+        Map<String, Integer> counts = new HashMap<>();
+        Map<String, String> example = new HashMap<>();
+
+        List<Team> teams = teamRepository
+                .findAll(PageRequest.of(0, budget)).getContent();
+        for (Team t : teams) {
+            tallyHash(t.getLogoUrl(), counts, example);
+        }
+        List<Player> players = playerRepository
+                .findAll(PageRequest.of(0, budget)).getContent();
+        for (Player p : players) {
+            tallyHash(p.getPhotoUrl(), counts, example);
+        }
+
+        List<PlaceholderCandidate> out = new ArrayList<>();
+        for (Map.Entry<String, Integer> e : counts.entrySet()) {
+            if (e.getValue() >= 2) {
+                out.add(new PlaceholderCandidate(
+                        e.getKey(), e.getValue(), example.get(e.getKey())));
+            }
+        }
+        out.sort(Comparator.comparingInt(PlaceholderCandidate::count).reversed());
+        log.info("Placeholder kesfi: {} aday hash bulundu (sample={}).",
+                out.size(), budget);
+        return out;
+    }
+
+    private void tallyHash(String url, Map<String, Integer> counts,
+                           Map<String, String> example) {
+        if (url == null || url.isEmpty()) return;
+        byte[] data = downloadQuiet(url);
+        if (data == null) return;
+        String h = sha256Hex(data);
+        if (h.isEmpty()) return;
+        counts.merge(h, 1, Integer::sum);
+        example.putIfAbsent(h, url);
     }
 
     /**
