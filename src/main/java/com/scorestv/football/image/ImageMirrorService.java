@@ -22,7 +22,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.net.URI;
 import java.security.MessageDigest;
@@ -511,6 +513,17 @@ public class ImageMirrorService {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             log.warn("Görsel aynalama yarıda kesildi.");
+            return null;
+        } catch (HttpClientErrorException.NotFound ex) {
+            // Kaynak 404 — bu varlik icin gorsel YOK (orn. basketball/teams).
+            // Kalici durum: PLACEHOLDER doneriz; caller url'i null'lar, boylece
+            // her dongude tekrar denenmez ve 404 HTML govdesi loglara basilmaz.
+            log.info("Gorsel yok (404): {}", sourceUrl);
+            return PLACEHOLDER;
+        } catch (RestClientResponseException ex) {
+            // Diger HTTP hatalari (403/5xx) — gecici olabilir, tekrar denenir.
+            // Govdeyi DEGIL yalniz durum kodunu logla (HTML cop basmasin).
+            log.warn("Görsel aynalanamadı ({}): {}", ex.getStatusCode().value(), sourceUrl);
             return null;
         } catch (RuntimeException ex) {
             log.warn("Görsel aynalanamadı: {} — {}", sourceUrl, ex.getMessage());
