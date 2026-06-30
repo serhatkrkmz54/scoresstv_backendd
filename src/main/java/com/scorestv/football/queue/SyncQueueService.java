@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
@@ -93,6 +94,26 @@ public class SyncQueueService {
      *  freni icin kullanir (worker'dan hizli is basip backlog sismesin). */
     public long pendingCount() {
         return repository.countByStatus(SyncJobStatus.PENDING);
+    }
+
+    /**
+     * Eski terminal (COMPLETED/FAILED) job'lari siler — tablo sismesin diye.
+     * {@code AutoEnqueueScheduler} gunluk cagirir. PENDING/IN_PROGRESS dokunulmaz,
+     * yani isleyen kuyruk etkilenmez. Tablo kucuk kalinca dedup/claim sorgulari
+     * hizli kalir (autovacuum da rahatlar).
+     *
+     * @param retentionDays bu kadar gunden ESKI terminal job'lar silinir
+     * @return silinen satir sayisi
+     */
+    @Transactional
+    public int cleanupOlderThan(int retentionDays) {
+        Instant before = Instant.now().minus(Duration.ofDays(Math.max(1, retentionDays)));
+        int deleted = repository.deleteOlderThan(before);
+        if (deleted > 0) {
+            log.info("Sync queue temizligi: {} eski COMPLETED/FAILED job silindi (> {} gun)",
+                    deleted, retentionDays);
+        }
+        return deleted;
     }
 
     /** Bulk enqueue — coklu job'u tek tx'te ekler (transactional batch). */

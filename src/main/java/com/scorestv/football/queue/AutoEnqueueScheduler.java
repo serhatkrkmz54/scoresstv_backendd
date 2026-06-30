@@ -74,6 +74,15 @@ public class AutoEnqueueScheduler {
      *  hizina kendini ayarlar). */
     @Value("${scorestv.football.sync.continuous-max-pending-queue:500}")
     private int continuousMaxPendingQueue;
+    /** sync_queue temizligi: bu kadar gunden eski COMPLETED/FAILED job'lar silinir.
+     *  Tablo sismesin → dedup/claim sorgulari tam tarama yapmasin. */
+    @Value("${scorestv.football.sync.queue-retention-days:2}")
+    private int queueRetentionDays;
+    /** Saatlik isim-hidratasyonu freni: PENDING bu degeri asarsa o saat HIC
+     *  ekleme yapma. BULK kuyrugu worker drenajini gecip sismesin (continuous
+     *  refresh'teki ayni mantik) — yer acilinca sonraki saatlerde devam eder. */
+    @Value("${scorestv.football.sync.hydrate-max-pending-queue:1000}")
+    private int hydrateMaxPendingQueue;
 
     public AutoEnqueueScheduler(SyncQueueService queueService,
                                 TeamRepository teamRepository,
@@ -318,6 +327,15 @@ public class AutoEnqueueScheduler {
             zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
     @SchedulerLock(name = "autoEnqueueHourlyHydrateMissingPlayerNames", lockAtMostFor = "PT15M")
     public void hourlyHydrateMissingPlayerNames() {
+        // Kuyruk-derinligi freni — PENDING zaten yuksekse bu saat HIC ekleme.
+        // Boylece hidratasyon worker drenajini gecip kuyrugu sismez; yer acilinca
+        // sonraki saatlerde devam eder (oyuncular kaybolmaz, sadece beklerler).
+        long pending = queueService.pendingCount();
+        if (pending > hydrateMaxPendingQueue) {
+            log.debug("Hourly hydrate atlandi — PENDING {} > {} (fren)",
+                    pending, hydrateMaxPendingQueue);
+            return;
+        }
         Integer season = LocalDate.now().getYear();
         int added = 0;
         var batch = playerRepository.findBatchNeedingProfileHydration();
@@ -463,6 +481,21 @@ public class AutoEnqueueScheduler {
         m.put(k1, v1);
         if (v2 != null) m.put(k2, v2);
         return m;
+    }
+
+    /**
+     * Her gun 04:45 — eski COMPLETED/FAILED sync job'larini siler. Bu temizlik
+     * OLMADAN sync_queue siserek (yuz binlerce satir) dedup/claim sorgularini
+     * tam tablo taramasina dusuruyor ve Postgres CPU'sunu bir cekirdek dolduruyordu.
+     * PENDING/IN_PROGRESS dokunulmaz — isleyen kuyruk etkilenmez.
+     */
+    @Scheduled(
+            cron = "${scorestv.football.sync.queue-cleanup-cron:0 45 4 * * *}",
+            zone = "${scorestv.football.sync.timezone:Europe/Istanbul}")
+    @SchedulerLock(name = "syncQueueCleanup", lockAtMostFor = "PT15M")
+    public void cleanupOldQueueJobs() {
+        int deleted = queueService.cleanupOlderThan(queueRetentionDays);
+        log.info("Sync queue gunluk temizlik tamamlandi: {} eski job silindi", deleted);
     }
 
     // Basketbol covered ligler gunluk tazeleme:
