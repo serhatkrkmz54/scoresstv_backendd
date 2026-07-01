@@ -34,6 +34,8 @@ public record PlayerDetailResponse(
         String nationality,
         /** Dile cevrilmis milliyet ("Türkiye" / "Turkey"). */
         String nationalityText,
+        /** Uyruk ulke bayragi URL'i (Country.flagKey/flagUrl'den cozulur). */
+        String nationalityFlag,
         String photo,
         /** API "190 cm" gibi ham string. */
         String height,
@@ -96,6 +98,8 @@ public record PlayerDetailResponse(
      */
     public record CareerTeamView(
             TeamRef team,
+            /** Milli takim mi (true) — kulüplerden ayirmak icin. */
+            boolean national,
             /** Sezon yili dizisi, yeni → eski. */
             List<Integer> seasons
     ) implements Serializable {}

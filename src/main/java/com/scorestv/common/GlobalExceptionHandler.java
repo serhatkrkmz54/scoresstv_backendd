@@ -8,6 +8,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +52,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(ErrorResponse.of(HttpStatus.FORBIDDEN.value(),
                         "Bu işlem için yetkiniz yok"));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex) {
+        // Var olmayan statik kaynak / yol — cogunlukla bot/tarayici probe'lari
+        // (/admin, /vendor/..., *.php) veya yanlis URL. ERROR + stack-trace ile
+        // loglamak gereksiz gurultu; ayrica 500 degil 404 dogru statustur.
+        if (log.isDebugEnabled()) {
+            log.debug("404 kaynak yok: {}", ex.getResourcePath());
+        }
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ErrorResponse.of(HttpStatus.NOT_FOUND.value(),
+                        "Kaynak bulunamadı"));
     }
 
     @ExceptionHandler(Exception.class)

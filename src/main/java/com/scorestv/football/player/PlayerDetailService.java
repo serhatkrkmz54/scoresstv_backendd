@@ -175,6 +175,7 @@ public class PlayerDetailService {
                     player.getBirthCountry(), countryText);
         }
         String nationalityText = resolveCountryText(player.getNationality(), turkish);
+        String nationalityFlag = resolveCountryFlag(player.getNationality());
         String photo = player.getPhotoKey() != null
                 ? storage.publicUrl(player.getPhotoKey())
                 : player.getPhotoUrl();
@@ -225,6 +226,7 @@ public class PlayerDetailService {
                 player.getAge(),
                 player.getNationality(),
                 nationalityText,
+                nationalityFlag,
                 photo,
                 player.getHeight(),
                 player.getWeight(),
@@ -408,7 +410,8 @@ public class PlayerDetailService {
                             .filter(java.util.Objects::nonNull)
                             .sorted(Comparator.reverseOrder())
                             .toList();
-            out.add(new CareerTeamView(toTeamRef(ct.getTeam(), turkish), sortedSeasons));
+            out.add(new CareerTeamView(toTeamRef(ct.getTeam(), turkish),
+                    ct.getTeam() != null && ct.getTeam().isNational(), sortedSeasons));
         }
         return out;
     }
@@ -548,6 +551,17 @@ public class PlayerDetailService {
                 .map(c -> c.getNameTr() != null && !c.getNameTr().isBlank()
                         ? c.getNameTr() : c.getName())
                 .orElse(countryName);
+    }
+
+    /** Uyruk ulke adindan bayrak URL'i cozer (Country.flagKey → mirror
+     *  publicUrl, yoksa ham flagUrl). Bulunamazsa null. */
+    private String resolveCountryFlag(String countryName) {
+        if (countryName == null || countryName.isBlank()) return null;
+        return countryRepository.findByName(countryName)
+                .map(c -> c.getFlagKey() != null && !c.getFlagKey().isBlank()
+                        ? storage.publicUrl(c.getFlagKey())
+                        : c.getFlagUrl())
+                .orElse(null);
     }
 
     private static String displayName(TranslatableName entity, boolean turkish) {
