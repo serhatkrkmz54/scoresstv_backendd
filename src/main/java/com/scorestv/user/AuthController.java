@@ -18,6 +18,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -86,6 +87,17 @@ public class AuthController {
     public AuthResponse changePassword(@AuthenticationPrincipal CurrentUser currentUser,
                                        @Valid @RequestBody ChangePasswordRequest request) {
         return authService.changePassword(currentUser.id(), request);
+    }
+
+    /**
+     * Giris yapmis kullanicinin hesabini ve tum kisisel verilerini KALICI olarak
+     * siler (App Store 5.1.1(v) / Google Play zorunlulugu). Geri donusu yoktur;
+     * onay istemci tarafinda alinir. 204 No Content doner.
+     */
+    @DeleteMapping("/me")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteMe(@AuthenticationPrincipal CurrentUser currentUser) {
+        authService.deleteAccount(currentUser.id());
     }
 
     @PostMapping("/forgot-password")

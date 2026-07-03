@@ -309,6 +309,31 @@ public class AuthService {
         return issueTokens(user);
     }
 
+    /**
+     * Kullanicinin hesabini ve TUM kisisel verilerini KALICI olarak siler
+     * (App Store 5.1.1(v) ve Google Play "hesap silme" zorunlulugu).
+     *
+     * <p>{@code users} satiri silinince veritabanindaki {@code ON DELETE CASCADE}
+     * yabanci anahtarlari sayesinde su tablolardaki kayitlar da otomatik silinir:
+     * <ul>
+     *   <li>{@code refresh_tokens} — tum oturumlar</li>
+     *   <li>{@code fixture_comments} — kullanicinin yorumlari</li>
+     *   <li>{@code fixture_comment_likes} — yorum begenileri</li>
+     * </ul>
+     * Sifre sifirlama token'lari Redis'te TTL ile kendiliginden gecer (kullanici
+     * degil token bazli). Cihaz push token'lari kullanici degil CIHAZ bazli
+     * (anonim) oldugu icin bilincli olarak dokunulmaz.
+     *
+     * <p>Geri donusu yoktur; cagirmadan once istemci tarafinda kullanici onayi
+     * alinmalidir.
+     */
+    @Transactional
+    public void deleteAccount(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> ApiException.unauthorized("Kullanıcı bulunamadı"));
+        userRepository.delete(user);
+    }
+
     /** ADMIN: bir kullanicinin tum oturumlarini (refresh token'larini) sonlandirir. */
     @Transactional
     public int revokeAllSessions(Long userId) {
