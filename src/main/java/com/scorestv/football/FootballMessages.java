@@ -175,9 +175,12 @@ public class FootballMessages {
         if (type == null || type.isBlank()) {
             return type;
         }
-        String key = slug(type)
-                .replace("%", "percent")
-                .replaceAll("--+", "-");
+        // ONEMLI: "%" -> "percent" donusumu slug'DAN ONCE yapilmali. Aksi halde
+        // slug() '%' karakterini (alfasayisal olmayan) tireye cevirip atiyor ve
+        // "Passes %" -> "passes" oluyordu; boylece "passes-percent" anahtari
+        // bulunamayip ham "Passes %" donuyordu (TR'de cevrilmiyordu). Once
+        // metinde % -> " percent", sonra slug.
+        String key = slug(type.replace("%", " percent"));
         return messageSource.getMessage(
                 "football.statistic.type." + key, null, type, locale(turkish));
     }
