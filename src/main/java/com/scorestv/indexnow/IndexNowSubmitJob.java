@@ -8,6 +8,8 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +36,7 @@ import java.util.concurrent.TimeUnit;
  *       kayıtlarını temsil eder.</li>
  *   <li><b>Yeni biten maçlar:</b> {@code statusShort ∈ {FT, AET, PEN}} ve son
  *       {@link #LOOKBACK} içinde güncellenmiş
- *       ({@code findByStatusShortInAndUpdatedAtAfter}).</li>
+ *       ({@code findRecentlyFinishedUpdatedSince}, son 48 saatte oynanmış).</li>
  * </ul>
  *
  * <p>Job aralığından ({@code ~15dk}) biraz geniş bir {@link #LOOKBACK} penceresi
@@ -68,6 +70,19 @@ public class IndexNowSubmitJob {
     /** Sonucu kesinleşmiş "biten" maç statüleri — MatchDetailSeoBuilder ile aynı. */
     private static final Set<String> FINISHED_STATUSES = Set.of("FT", "AET", "PEN");
 
+    /**
+     * "Yeni biten maç" kolunda yalnız SON bu kadar süre içinde OYNANMIŞ maçlar
+     * gönderilir — eski biten maçların istatistik/hydrate senkronu {@code updatedAt}'i
+     * tazeleyince binlerce eski URL'nin yeniden gönderilmesini engeller.
+     */
+    private static final Duration FINISHED_KICKOFF_WINDOW = Duration.ofHours(48);
+
+    /**
+     * Bir turda gönderilecek MAKS URL — IndexNow'u sel gibi doldurup 429 almamak
+     * için tavan. Aşan maçlar zaten sitemap'ten taranır.
+     */
+    private static final int MAX_PER_RUN = 1000;
+
     private final FixtureRepository fixtureRepository;
     private final IndexNowService indexNowService;
     private final SeoProperties seoProperties;
@@ -98,16 +113,19 @@ public class IndexNowSubmitJob {
         Instant now = Instant.now();
         Instant since = now.minus(LOOKBACK);
         Instant until = now.plus(UPCOMING_WINDOW);
+        Instant finishedFrom = now.minus(FINISHED_KICKOFF_WINDOW);
+        Pageable limit = PageRequest.of(0, MAX_PER_RUN);
 
         String baseUrl = trimTrailingSlash(seoProperties.siteUrl());
 
-        // id → canonical URL (dedup; iki listede aynı maç olabilir).
+        // id → canonical URL (dedup; iki listede aynı maç olabilir). Her kol
+        // updatedAt DESC sıralı + MAX_PER_RUN limitli gelir.
         Map<Long, String> byId = new LinkedHashMap<>();
-        for (Fixture f : fixtureRepository.findUpcomingUpdatedSince(since, now, until)) {
+        for (Fixture f : fixtureRepository.findUpcomingUpdatedSince(since, now, until, limit)) {
             byId.put(f.getId(), canonicalUrl(baseUrl, f));
         }
         for (Fixture f : fixtureRepository
-                .findByStatusShortInAndUpdatedAtAfter(FINISHED_STATUSES, since)) {
+                .findRecentlyFinishedUpdatedSince(FINISHED_STATUSES, since, finishedFrom, limit)) {
             byId.put(f.getId(), canonicalUrl(baseUrl, f));
         }
 
@@ -115,6 +133,10 @@ public class IndexNowSubmitJob {
             return;
         }
         List<String> urls = new ArrayList<>(byId.values());
+        // İki kol birleşince tavanı aşabilir — toplamı da MAX_PER_RUN ile sınırla.
+        if (urls.size() > MAX_PER_RUN) {
+            urls = urls.subList(0, MAX_PER_RUN);
+        }
         indexNowService.submit(urls);
         log.info("IndexNow: {} maç URL'si gönderime verildi.", urls.size());
     }

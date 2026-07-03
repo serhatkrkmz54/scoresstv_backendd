@@ -424,21 +424,33 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
     @Query("SELECT f FROM Fixture f "
             + "JOIN FETCH f.homeTeam "
             + "JOIN FETCH f.awayTeam "
-            + "WHERE f.updatedAt > :since AND f.kickoffAt BETWEEN :now AND :until")
+            + "WHERE f.updatedAt > :since AND f.kickoffAt BETWEEN :now AND :until "
+            + "ORDER BY f.updatedAt DESC")
     List<Fixture> findUpcomingUpdatedSince(@Param("since") Instant since,
                                            @Param("now") Instant now,
-                                           @Param("until") Instant until);
+                                           @Param("until") Instant until,
+                                           org.springframework.data.domain.Pageable pageable);
 
     /**
-     * Verilen durum kodlarında olup son {@code since} anından beri güncellenen
-     * maçlar — {@link com.scorestv.indexnow.IndexNowSubmitJob} "yeni biten maç"
-     * kolu (FT/AET/PEN) için. Takım adları canonical slug için JOIN FETCH edilir.
+     * YAKIN zamanda oynanıp ({@code kickoffAt > recentCutoff}) sonucu kesinleşmiş
+     * (FT/AET/PEN) ve son {@code since} anından beri güncellenen maçlar —
+     * {@link com.scorestv.indexnow.IndexNowSubmitJob} "yeni biten maç" kolu için.
+     *
+     * <p>{@code recentCutoff} (ör. son 48 saat) ŞART: aksi halde eski biten
+     * maçların istatistik/hydrate senkronu {@code updatedAt}'i tazeleyince binlerce
+     * eski maç yeniden IndexNow'a gönderiliyordu. En taze güncellenenler önce
+     * gelsin diye {@code updatedAt DESC} sıralı; çağıran {@code Pageable} ile
+     * üst sınır koyar. Takım adları canonical slug için JOIN FETCH edilir.
      */
     @Query("SELECT f FROM Fixture f "
             + "JOIN FETCH f.homeTeam "
             + "JOIN FETCH f.awayTeam "
-            + "WHERE f.statusShort IN :statuses AND f.updatedAt > :since")
-    List<Fixture> findByStatusShortInAndUpdatedAtAfter(
+            + "WHERE f.statusShort IN :statuses AND f.updatedAt > :since "
+            + "AND f.kickoffAt > :recentCutoff "
+            + "ORDER BY f.updatedAt DESC")
+    List<Fixture> findRecentlyFinishedUpdatedSince(
             @Param("statuses") Collection<String> statuses,
-            @Param("since") Instant since);
+            @Param("since") Instant since,
+            @Param("recentCutoff") Instant recentCutoff,
+            org.springframework.data.domain.Pageable pageable);
 }
