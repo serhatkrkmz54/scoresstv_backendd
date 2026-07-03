@@ -210,6 +210,18 @@ public class MatchDetailSeoBuilder {
         Map<String, Object> organizer = new LinkedHashMap<>();
         organizer.put("@type", "Organization");
         organizer.put("name", leagueName);
+        // organizer.url — lig sayfası (Google Event "organizer.url" önerisi).
+        // baseUrl = canonicalUrl'in son segmenti (fikstür slug'ı) atılmışı.
+        if (fixture.getLeague() != null && canonicalUrl != null
+                && canonicalUrl.lastIndexOf('/') > 0) {
+            String baseUrl = canonicalUrl.substring(0, canonicalUrl.lastIndexOf('/'));
+            String leagueSlug = SlugUtil.slugify(fixture.getLeague().getName());
+            if (leagueSlug.isEmpty()) {
+                leagueSlug = "league";
+            }
+            organizer.put("url",
+                    baseUrl + "/league/" + leagueSlug + "-" + fixture.getLeague().getId());
+        }
         root.put("organizer", organizer);
 
         // subEvent — TV yayını (BroadcastEvent). Kanal varsa "nerede izlenir"
@@ -260,10 +272,20 @@ public class MatchDetailSeoBuilder {
             Map<String, Object> location = new LinkedHashMap<>();
             location.put("@type", "Place");
             location.put("name", venue.getName());
+            // address — Google Event "location.address" önerisi. Şehir varsa
+            // addressLocality, ayrıca lig ülkesi varsa addressCountry ekle.
+            Map<String, Object> address = new LinkedHashMap<>();
+            address.put("@type", "PostalAddress");
             if (venue.getCity() != null && !venue.getCity().isBlank()) {
-                Map<String, Object> address = new LinkedHashMap<>();
-                address.put("@type", "PostalAddress");
                 address.put("addressLocality", venue.getCity());
+            }
+            String venueCountry = fixture.getLeague() != null
+                    ? fixture.getLeague().getCountryName() : null;
+            if (venueCountry != null && !venueCountry.isBlank()) {
+                address.put("addressCountry", venueCountry);
+            }
+            // Yalnızca @type varsa (hiç alan yoksa) address ekleme.
+            if (address.size() > 1) {
                 location.put("address", address);
             }
             return location;
