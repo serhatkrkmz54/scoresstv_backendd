@@ -357,6 +357,19 @@ scorestv:
     site-url: ${SEO_SITE_URL:http://localhost:3000}
     # SEO tarih gosteriminin saat dilimi.
     timezone: Europe/Istanbul
+  # ============================================================
+  # IndexNow (Bing/Yandex hizli indeksleme). Yeni olusan ve yeni biten
+  # maclarin canonical URL'leri periyodik olarak IndexNow'a gonderilir.
+  # enabled=false varsayilan — deploy guvenli olsun, sonra INDEXNOW_ENABLED=true
+  # + INDEXNOW_KEY ile acilir. key = web tarafinda public/<key>.txt ile eslesir;
+  # host + keyLocation seo.site-url'den turetilir.
+  # ============================================================
+  indexnow:
+    enabled: ${INDEXNOW_ENABLED:true}
+    key: ${INDEXNOW_KEY:}
+    # Gonderim araligi (dakika) — job her bu kadar surede son ~20dk'da degisen
+    # (yeni/biten) maclari tarar. Kod: IndexNowSubmitJob.
+    submit-interval-minutes: ${INDEXNOW_SUBMIT_INTERVAL:15}
   storage:
     # MinIO baglanti adresi (S3 API). Local: localhost; prod'da app icin http://minio:9000.
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

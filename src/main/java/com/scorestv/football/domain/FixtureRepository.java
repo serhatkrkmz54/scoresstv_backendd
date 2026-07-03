@@ -410,4 +410,35 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
     List<Fixture> findPreviousByTeamBefore(@Param("teamId") Long teamId,
                                            @Param("ref") Instant ref,
                                            org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * Son {@code since} anından beri güncellenen, HENÜZ oynanmamış (gelecek)
+     * maçlar — {@link com.scorestv.indexnow.IndexNowSubmitJob} "yeni oluşan maç"
+     * kolu için. Fixture entity'sinde {@code createdAt} yok (kendi @Id'si
+     * atanmış, BaseEntity extend etmez); bunun yerine {@code updatedAt} +
+     * "kickoff gelecekte" ile yeni fikstür kayıtları yakalanır (canlı/biten
+     * maçlar bu koldan hariç, kendi kolunda gelir).
+     *
+     * <p>Takım adları canonical slug için lazımdır; JOIN FETCH ile yüklenir.
+     */
+    @Query("SELECT f FROM Fixture f "
+            + "JOIN FETCH f.homeTeam "
+            + "JOIN FETCH f.awayTeam "
+            + "WHERE f.updatedAt > :since AND f.kickoffAt BETWEEN :now AND :until")
+    List<Fixture> findUpcomingUpdatedSince(@Param("since") Instant since,
+                                           @Param("now") Instant now,
+                                           @Param("until") Instant until);
+
+    /**
+     * Verilen durum kodlarında olup son {@code since} anından beri güncellenen
+     * maçlar — {@link com.scorestv.indexnow.IndexNowSubmitJob} "yeni biten maç"
+     * kolu (FT/AET/PEN) için. Takım adları canonical slug için JOIN FETCH edilir.
+     */
+    @Query("SELECT f FROM Fixture f "
+            + "JOIN FETCH f.homeTeam "
+            + "JOIN FETCH f.awayTeam "
+            + "WHERE f.statusShort IN :statuses AND f.updatedAt > :since")
+    List<Fixture> findByStatusShortInAndUpdatedAtAfter(
+            @Param("statuses") Collection<String> statuses,
+            @Param("since") Instant since);
 }
