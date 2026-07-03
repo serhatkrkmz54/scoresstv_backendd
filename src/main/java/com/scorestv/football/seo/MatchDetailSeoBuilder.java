@@ -16,6 +16,7 @@ import org.springframework.context.MessageSource;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Maç detay sayfası için tam SEO paketini ({@link MatchSeoResponse}) üretir:
@@ -69,12 +71,27 @@ public class MatchDetailSeoBuilder {
     }
 
     /**
-     * Verilen maç ve dil için tam SEO paketini üretir.
+     * Verilen maç ve dil için tam SEO paketini üretir (yayın bilgisi olmadan).
      *
      * @param fixture lig + takım ilişkileri yüklenmiş bir maç entity'si
      * @param lang    "tr" → Türkçe; aksi halde İngilizce
      */
     public MatchSeoResponse build(Fixture fixture, String lang) {
+        return build(fixture, lang, List.of());
+    }
+
+    /**
+     * Verilen maç, dil ve yayın kanalları için tam SEO paketini üretir.
+     *
+     * <p>Yaklaşan (oynanmamış) maçlarda başlık/açıklama "saat kaçta / hangi
+     * kanalda" niyetine göre üretilir; {@code channelNames} doluysa kanal(lar)
+     * açıklamaya ve JSON-LD {@code BroadcastEvent}'e işlenir.
+     *
+     * @param fixture      maç entity'si
+     * @param lang         "tr" → Türkçe; aksi halde İngilizce
+     * @param channelNames yayın kanalı adları (dile göre çözülmüş); boş olabilir
+     */
+    public MatchSeoResponse build(Fixture fixture, String lang, List<String> channelNames) {
         boolean turkish = "tr".equalsIgnoreCase(lang);
         Locale locale = turkish ? TURKISH : ENGLISH;
         String localeCode = turkish ? "tr" : "en";
@@ -96,6 +113,7 @@ public class MatchDetailSeoBuilder {
 
         // Title/desc/keywords — messages_tr veya messages_en'den.
         Object[] args = {homeName, awayName, leagueName, date};
+        String channel = joinChannels(channelNames);
         String title;
         String description;
         if (isFinishedWithScore(fixture)) {
@@ -103,7 +121,21 @@ public class MatchDetailSeoBuilder {
             title = buildFinishedTitle(fixture, locale, homeName, awayName);
             description = buildFinishedDescription(
                     fixture, locale, homeName, awayName, leagueName, date);
+        } else if (isUpcoming(fixture)) {
+            // Oynanmamış maç — "saat kaçta / hangi kanalda" niyeti. Kanal DOLUYSA
+            // hem başlık hem açıklama "hangi kanalda" ifadesini içerir; kanal yoksa
+            // yalnız saat/ne-zaman odaklı (başlıkta cevaplayamayacağımız soruyu sormayız).
+            String time = formatTime(fixture, locale);
+            Object[] sArgs = {homeName, awayName, date, time, channel, leagueName};
+            boolean hasChannel = !channel.isBlank();
+            title = messageSource.getMessage(
+                    hasChannel ? "seo.fixture.title.scheduled.tv" : "seo.fixture.title.scheduled",
+                    sArgs, locale);
+            description = messageSource.getMessage(
+                    hasChannel ? "seo.fixture.description.scheduled.tv" : "seo.fixture.description.scheduled",
+                    sArgs, locale);
         } else {
+            // Devam eden / canlı maç — genel "canlı skor" başlığı.
             title = messageSource.getMessage("seo.fixture.title", args, locale);
             description = messageSource.getMessage("seo.fixture.description", args, locale);
         }
@@ -127,7 +159,8 @@ public class MatchDetailSeoBuilder {
                 image);
 
         String jsonLd = buildJsonLd(
-                fixture, canonicalUrl, homeName, awayName, leagueName, image, description);
+                fixture, canonicalUrl, homeName, awayName, leagueName, image,
+                description, channelNames);
 
         List<MatchSeoResponse.Breadcrumb> breadcrumbs = buildBreadcrumbs(
                 fixture, homeName, awayName, leagueName, slug, turkish, baseUrl);
@@ -142,7 +175,8 @@ public class MatchDetailSeoBuilder {
     /** Schema.org SportsEvent JSON-LD'sini hazır string olarak üretir. */
     private String buildJsonLd(Fixture fixture, String canonicalUrl,
                                String homeName, String awayName, String leagueName,
-                               String image, String description) {
+                               String image, String description,
+                               List<String> channelNames) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("@context", "https://schema.org");
         root.put("@type", "SportsEvent");
@@ -177,6 +211,30 @@ public class MatchDetailSeoBuilder {
         organizer.put("@type", "Organization");
         organizer.put("name", leagueName);
         root.put("organizer", organizer);
+
+        // subEvent — TV yayını (BroadcastEvent). Kanal varsa "nerede izlenir"
+        // bilgisini geçerli Schema.org ile verir (yayıncı = publishedOn).
+        if (channelNames != null && !channelNames.isEmpty()) {
+            List<Map<String, Object>> subEvents = new ArrayList<>();
+            for (String ch : channelNames.stream().limit(3).toList()) {
+                if (ch == null || ch.isBlank()) {
+                    continue;
+                }
+                Map<String, Object> be = new LinkedHashMap<>();
+                be.put("@type", "BroadcastEvent");
+                be.put("name", homeName + " vs " + awayName);
+                be.put("startDate", fixture.getKickoffAt().toString());
+                be.put("isLiveBroadcast", true);
+                Map<String, Object> publishedOn = new LinkedHashMap<>();
+                publishedOn.put("@type", "BroadcastService");
+                publishedOn.put("name", ch);
+                be.put("publishedOn", publishedOn);
+                subEvents.add(be);
+            }
+            if (!subEvents.isEmpty()) {
+                root.put("subEvent", subEvents);
+            }
+        }
 
         if (image != null) {
             root.put("image", image);
@@ -413,6 +471,35 @@ public class MatchDetailSeoBuilder {
                 .withLocale(locale)
                 .withZone(ZoneId.of(seoProperties.timezone()))
                 .format(fixture.getKickoffAt());
+    }
+
+    /** Başlangıç saatini site saat dilimine göre kısa biçimde döner (örn "22:00"). */
+    private String formatTime(Fixture fixture, Locale locale) {
+        return DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+                .withLocale(locale)
+                .withZone(ZoneId.of(seoProperties.timezone()))
+                .format(fixture.getKickoffAt());
+    }
+
+    /**
+     * Maç oynanmamış (yaklaşan) mı? Kesin sonuç yok VE başlangıç anı gelecekte.
+     * Böylece canlı/devam eden maçlar bu daldan hariç tutulur.
+     */
+    private static boolean isUpcoming(Fixture f) {
+        return !isFinishedWithScore(f)
+                && f.getKickoffAt() != null
+                && f.getKickoffAt().isAfter(Instant.now());
+    }
+
+    /** İlk 2 kanal adını virgülle birleştirir (boşları eler, yoksa boş string). */
+    private static String joinChannels(List<String> channelNames) {
+        if (channelNames == null || channelNames.isEmpty()) {
+            return "";
+        }
+        return channelNames.stream()
+                .filter(c -> c != null && !c.isBlank())
+                .limit(2)
+                .collect(Collectors.joining(", "));
     }
 
     /** Dil "tr" ise ve Türkçe karşılığı girilmişse Türkçe ad; aksi halde İngilizce. */

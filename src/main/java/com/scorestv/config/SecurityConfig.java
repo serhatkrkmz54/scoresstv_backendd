@@ -60,6 +60,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/fixtures", "/api/v1/fixtures/**").permitAll()
                 // Fikstür lookup ucu (sıradaki/önceki maç) — public.
                 .requestMatchers("/api/v1/football/fixtures/**").permitAll()
+                // Canlı Maç Programı / TV rehberi hub'ı — public (SEO).
+                .requestMatchers("/api/v1/football/tv-guide", "/api/v1/football/tv-guide/**").permitAll()
                 // Basketbol maclari — public (fikstur + canli skor).
                 .requestMatchers("/api/v1/basketball/**").permitAll()
                 // Voleybol maclari — public (fikstur + canli skor + detay).

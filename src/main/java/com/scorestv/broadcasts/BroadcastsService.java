@@ -90,6 +90,60 @@ public class BroadcastsService {
         return result;
     }
 
+    /**
+     * Bir LİG için (mac override YOK) yalnizca sezonluk varsayilan kanallarin
+     * GÖRÜNEN adlarini doner — TV programi hub'i (canli-mac-programi) icin.
+     *
+     * <p>{@link #resolveForFixture}'daki lig-default dalinin adi-yalnizca
+     * karsiligidir: {@code findByLeagueIdAndSeasonAndCountryCodeOrderBySortOrderAsc}
+     * ile kanallar sirali gelir, her kanalin {@code turkish && name_tr} varsa
+     * name_tr'si, yoksa {@code name}'i alinir. Tekrarlar elenir, ilk 3 kanal
+     * dondurulur. Season/leagueId eksikse bos liste.
+     *
+     * @param leagueId lig id (null → bos)
+     * @param season   sezon (null → bos)
+     * @param country  kullanici ulke kodu (null → "TR")
+     * @param turkish  true ise kanal.name_tr varsa kullan
+     */
+    @Transactional(readOnly = true)
+    public List<String> leagueDefaultChannels(Long leagueId, Integer season,
+                                              String country, boolean turkish) {
+        if (leagueId == null || season == null) {
+            return List.of();
+        }
+        String countryCode = (country != null && !country.isBlank())
+                ? country.trim().toUpperCase(Locale.ROOT)
+                : DEFAULT_COUNTRY;
+
+        List<LeagueBroadcaster> defaults = leagueRepository
+                .findByLeagueIdAndSeasonAndCountryCodeOrderBySortOrderAsc(
+                        leagueId, season, countryCode);
+
+        List<String> names = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (LeagueBroadcaster lb : defaults) {
+            TvChannel ch = lb.getChannel();
+            if (ch == null) {
+                continue;
+            }
+            String displayName = ch.getName();
+            if (turkish && ch.getNameTr() != null && !ch.getNameTr().isBlank()) {
+                displayName = ch.getNameTr();
+            }
+            if (displayName == null || displayName.isBlank()) {
+                continue;
+            }
+            if (!seen.add(displayName)) {
+                continue;
+            }
+            names.add(displayName);
+            if (names.size() >= 3) {
+                break;
+            }
+        }
+        return names;
+    }
+
     private static BroadcastView toView(TvChannel ch, String notes, String source,
                                          boolean turkish) {
         String displayName = ch.getName();

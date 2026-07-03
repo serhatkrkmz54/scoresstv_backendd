@@ -1,5 +1,6 @@
 package com.scorestv.football.detail;
 
+import com.scorestv.broadcasts.BroadcastsService;
 import com.scorestv.common.ApiException;
 import com.scorestv.common.SlugUtil;
 import com.scorestv.football.FootballCacheNames;
@@ -77,6 +78,14 @@ public class MatchDetailService {
 
     /** Henüz başlamamış maç durumları — bunlar için olay/istatistik vs. yüklenmez. */
     private static final Set<String> NOT_STARTED = Set.of("NS", "TBD");
+
+    /**
+     * SEO meta/JSON-LD için kanal çözümünde kullanılan BİRİNCİL PAZAR ülke kodu.
+     * Yayın kanalları ülke ülke çoklu geldiğinden, "hangi kanalda" cevabı
+     * ziyaretçi coğrafyasına (özellikle Googlebot) göre değişmemeli; daima TR
+     * yayıncısı verilir. Yanıttaki "nerede izlenir" kullanıcı ülkesini gösterir.
+     */
+    private static final String SEO_COUNTRY = "TR";
 
     /**
      * API-Football'un istatistik döndürdüğü standart tip sıralaması.
@@ -271,7 +280,25 @@ public class MatchDetailService {
         // Slug dile göre lokalize (TR'de name_tr, yoksa orijinal). id ile çözülür.
         String slug = SlugUtil.fixtureSlug(displayName(home, turkish), displayName(away, turkish), fixture.getId());
         String lang = turkish ? "tr" : "en";
-        MatchSeoResponse seo = seoBuilder.build(fixture, lang);
+
+        // TV yayin — YANIT icin kullanicinin ulkesine gore kanallar
+        // (frontend "nerede izlenir" sekmesi kendi ulkesini gorur).
+        var broadcasts = broadcastsService.resolveForFixture(fixture, country, turkish);
+
+        // SEO icin kanallar DAIMA birincil pazar (TR) uzerinden cozulur:
+        // kanallar ulke ulke coklu geldigi icin ziyaretci/Googlebot cografyasina
+        // gore degisen bir meta KARARSIZ olur. "Mac saat kacta hangi kanalda"
+        // Turkce bir arama -> cevap her zaman TR yayincisi olmali. Country zaten
+        // TR ise ustteki sonucu yeniden kullan (ekstra sorgu yok).
+        var seoBroadcasts = (country == null || SEO_COUNTRY.equalsIgnoreCase(country.trim()))
+                ? broadcasts
+                : broadcastsService.resolveForFixture(fixture, SEO_COUNTRY, turkish);
+        List<String> channelNames = seoBroadcasts.stream()
+                .map(BroadcastsService.BroadcastView::channelName)
+                .filter(n -> n != null && !n.isBlank())
+                .distinct()
+                .toList();
+        MatchSeoResponse seo = seoBuilder.build(fixture, lang, channelNames);
 
         // Maç başlamadıysa olay sorgusunu hiç yapma — gereksiz DB tur.
         List<EventSummary> events = isStarted(fixture)
@@ -310,8 +337,7 @@ public class MatchDetailService {
         List<InjuryGroup> injuries = loadInjuries(fixture, turkish);
         PredictionView prediction = loadPrediction(fixture.getId(), turkish);
 
-        // TV yayin — ulke ve dile gore kanal listesi
-        var broadcasts = broadcastsService.resolveForFixture(fixture, country, turkish);
+        // (broadcasts + channelNames yukarida, SEO oncesi cozuldu.)
 
         // Kupa eleme bracket'i — lig tipi "Cup" ise dolu; lig ise null.
         // matchSeason kullaniliyor — eski sezonlarda da o sezonun bracket'i.
