@@ -94,8 +94,13 @@ public class FootballMessages {
 
         // 1) Tüm değerin doğrudan çevirisi (Quarter-finals, Round of 16, Final...).
         try {
-            return messageSource.getMessage(
+            String msg = messageSource.getMessage(
                     "football.round." + slug(trimmed), null, loc);
+            // Sablon anahtari (orn. group-stage="Grup Maçı {0}") SAYISIZ bir round
+            // degeriyle (bare "Group Stage") eslesirse {0} bos kalir → "{0}" ekranda
+            // gorunur. Placeholder'i temizle. Sayili durum ("Group Stage - 1")
+            // adim 1'de eslesmez, adim 2'de {0} sayiyla doldurulur.
+            return msg.contains("{0}") ? msg.replace("{0}", "").trim() : msg;
         } catch (NoSuchMessageException ignored) {
             // sonraki adıma geç
         }

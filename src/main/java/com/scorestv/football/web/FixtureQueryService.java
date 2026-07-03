@@ -94,6 +94,15 @@ public class FixtureQueryService {
     }
 
     /**
+     * Site saat dilimi (application.yml {@code football.sync.timezone}).
+     * Lookup ucu gibi controller'ların referans günü {@code Instant}'a
+     * çevirirken aynı dilimi kullanabilmesi için public erişim.
+     */
+    public ZoneId zoneId() {
+        return zone();
+    }
+
+    /**
      * Bugünün POPÜLER lig maçları — ana ekran widget'ı için kompakt liste.
      * Sıralama: canlı → yaklaşan → biten (her grup içinde kickoff'a göre).
      * Popüler lig listesi (application.yml) boşsa boş liste döner.
@@ -505,6 +514,28 @@ public class FixtureQueryService {
             out.add(toSummary(f, turkish, redCards));
         }
         return out;
+    }
+
+    /**
+     * Tek bir maçı {@link FixtureSummary}'ye çevirir — anasayfa listesinde
+     * kullanılan KANONİK mapper'ın ({@link #toSummary}) tekil sarmalayıcısı.
+     * Kırmızı kart sayısı bu tek maç için toplu sorguyla çözülür.
+     *
+     * <p>Lookup ucu (sıradaki/önceki maç) gibi tek fikstür dönen akışların,
+     * istemcilerin zaten parse ettiği aynı DTO tipini üretmesi içindir —
+     * yeni bir maç DTO'su icat edilmez.
+     *
+     * <p>Çağrı, fikstürün lig/takım (gerekirse stadyum) ilişkilerinin yüklü
+     * olmasını bekler; lookup sorguları JOIN FETCH ile bunu garanti eder.
+     *
+     * @param fixture ilişkileri yüklü fikstür (null ise null döner)
+     * @param turkish dile göre TR/EN takım+lig adları
+     */
+    @Transactional(readOnly = true)
+    public FixtureSummary toSummary(Fixture fixture, boolean turkish) {
+        if (fixture == null) return null;
+        Map<Long, Map<Long, Integer>> redCards = redCardCounts(List.of(fixture));
+        return toSummary(fixture, turkish, redCards);
     }
 
     /**

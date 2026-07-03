@@ -58,6 +58,8 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/api/v1/fixtures", "/api/v1/fixtures/**").permitAll()
+                // Fikstür lookup ucu (sıradaki/önceki maç) — public.
+                .requestMatchers("/api/v1/football/fixtures/**").permitAll()
                 // Basketbol maclari — public (fikstur + canli skor).
                 .requestMatchers("/api/v1/basketball/**").permitAll()
                 // Voleybol maclari — public (fikstur + canli skor + detay).

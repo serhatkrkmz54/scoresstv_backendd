@@ -369,4 +369,45 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
             + "ORDER BY f.season DESC")
     List<Integer> findSeasonYearsByTeam(@Param("teamId") Long teamId);
+
+    /**
+     * Lookup ucu icin: bir takimin verilen referans andan SONRA baslayan ilk
+     * maci (yakin → uzak). {@link #findUpcomingByTeam}'den farki status filtresi
+     * yoktur; yalnizca {@code kickoffAt >= :ref} bakilir. Anasayfa gun bazli
+     * filtrede "aranan takimin o gun maci yoksa siradaki maci öner" akisi icin.
+     *
+     * <p>Pageable ile limit 1 verilir; JOIN FETCH ile lig/takimlar tek sorguda
+     * yuklenir (FixtureQueryService.toSummary lazy proxy'lere dokunur).
+     */
+    @Query("SELECT f FROM Fixture f "
+            + "JOIN FETCH f.league "
+            + "JOIN FETCH f.homeTeam "
+            + "JOIN FETCH f.awayTeam "
+            + "LEFT JOIN FETCH f.venue "
+            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "  AND f.kickoffAt >= :ref "
+            + "ORDER BY f.kickoffAt ASC")
+    List<Fixture> findNextByTeamAfter(@Param("teamId") Long teamId,
+                                      @Param("ref") Instant ref,
+                                      org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * Lookup ucu icin: bir takimin verilen referans andan ÖNCE baslayan son
+     * maci (yeni → eski). {@link #findRecentByTeam}'den farki status filtresi
+     * yoktur; yalnizca {@code kickoffAt < :ref} bakilir.
+     *
+     * <p>Pageable ile limit 1 verilir; JOIN FETCH ile lig/takimlar tek sorguda
+     * yuklenir.
+     */
+    @Query("SELECT f FROM Fixture f "
+            + "JOIN FETCH f.league "
+            + "JOIN FETCH f.homeTeam "
+            + "JOIN FETCH f.awayTeam "
+            + "LEFT JOIN FETCH f.venue "
+            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "  AND f.kickoffAt < :ref "
+            + "ORDER BY f.kickoffAt DESC")
+    List<Fixture> findPreviousByTeamBefore(@Param("teamId") Long teamId,
+                                           @Param("ref") Instant ref,
+                                           org.springframework.data.domain.Pageable pageable);
 }
