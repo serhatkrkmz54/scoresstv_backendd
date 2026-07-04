@@ -56,6 +56,12 @@ public class SecurityConfig {
                         "/api/v1/auth/forgot-password-code",
                         "/api/v1/auth/reset-password-code").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                // Diğer TÜM actuator uçları (metrics, prometheus, loggers, env,
+                // heapdump, threaddump...) yalnız ADMIN. Aksi halde herhangi bir
+                // giriş yapmış USER heapdump/env çekip secret sızdırabilir.
+                // NOT: Prometheus scraper varsa admin kimliğiyle veya ağ düzeyinde
+                // erişmeli; gerekirse /actuator/prometheus için ayrı permitAll eklenir.
+                .requestMatchers("/actuator/**").hasRole("ADMIN")
                 .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/api/v1/fixtures", "/api/v1/fixtures/**").permitAll()
                 // Fikstür lookup ucu (sıradaki/önceki maç) — public.

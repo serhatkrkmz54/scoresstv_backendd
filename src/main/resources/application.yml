@@ -144,7 +144,8 @@ scorestv:
   # ============================================================
   social:
     enabled: ${SOCIAL_ENABLED:true}
-    api-key: ${SOCIALDATA_API_KEY:9174|d3RiUi8jsTXTm0cv99nouy9fAdPsGgbvYDvtdDTG6c4d6980}
+    # GÜVENLİK: gerçek anahtar varsayılanı kaldırıldı — env ile verilmeli (rotate et).
+    api-key: ${SOCIALDATA_API_KEY:}
     base-url: ${SOCIAL_BASE_URL:https://api.socialdata.tools}
     # Virgulle ayrilmis X kullanici adlari (@'siz).
     accounts: ${SOCIAL_ACCOUNTS:Fenerbahce,GalatasaraySK,Besiktas,Trabzonspor,FIFAWorldCup,TFF_Org}
@@ -235,7 +236,8 @@ scorestv:
   highlightly:
     enabled: ${HIGHLIGHTLY_ENABLED:true}
     base-url: ${HIGHLIGHTLY_BASE_URL:https://soccer.highlightly.net}
-    api-key: ${HIGHLIGHTLY_API_KEY:5ea9656d-99ff-4995-9188-c98969cae270}
+    # GÜVENLİK: gerçek anahtar varsayılanı kaldırıldı — env ile verilmeli (rotate et).
+    api-key: ${HIGHLIGHTLY_API_KEY:}
     timezone: ${HIGHLIGHTLY_TIMEZONE:Etc/UTC}
     limit: ${HIGHLIGHTLY_LIMIT:8}
     cache-ttl-minutes: ${HIGHLIGHTLY_CACHE_TTL:360}
@@ -251,7 +253,8 @@ scorestv:
   thesportsdb:
     enabled: ${THESPORTSDB_ENABLED:true}
     base-url: ${THESPORTSDB_BASE_URL:https://www.thesportsdb.com/api/v1/json}
-    api-key: ${THESPORTSDB_API_KEY:6361562776}
+    # GÜVENLİK: gerçek anahtar varsayılanı kaldırıldı — env ile verilmeli (rotate et).
+    api-key: ${THESPORTSDB_API_KEY:}
     timezone: ${THESPORTSDB_TIMEZONE:Etc/UTC}
     cache-ttl-minutes: ${THESPORTSDB_CACHE_TTL:720}
     empty-cache-ttl-minutes: ${THESPORTSDB_EMPTY_CACHE_TTL:180}

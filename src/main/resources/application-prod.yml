@@ -125,7 +125,9 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,loggers,env,heapdump,threaddump
+        # env/heapdump/threaddump KALDIRILDI — bellek/konfig dökümü secret sızdırır.
+        # Kalanlar da SecurityConfig'te ADMIN'e kısıtlı (health/info hariç).
+        include: health,info,metrics,prometheus,loggers
       base-path: /actuator
   endpoint:
     health:
