@@ -51,8 +51,21 @@ public class NewsSanitizer {
                 // Gorsel oznitelikleri (relaxed zaten img+src icerir; genislik/
                 // yukseklik + lazy-loading + alt/title'i acikca ekliyoruz).
                 .addAttributes("img", "src", "alt", "title", "width", "height", "loading")
-                // Figure/altyazi + kod bloklari (haber icerigi icin pratik).
-                .addTags("figure", "figcaption")
+                // relaxed'de OLMAYAN ama editorun urettigi etiketler:
+                //  - hr : yatay cizgi (ayrac)
+                //  - s  : ustu-cizili (TipTap <s> uretir; relaxed yalniz <strike>)
+                .addTags("figure", "figcaption", "hr", "s")
+                // Hizalama: TipTap TextAlign satir-ici "text-align" style verir.
+                // Icerik yalniz guvenilir EDITOR/ADMIN tarafindan uretilir ve
+                // jsoup script/onclick/js: URL'lerini zaten ayiklar; bu yuzden
+                // blok etiketlerde style'a (hizalama icin) izin veriyoruz.
+                .addAttributes("p", "style")
+                .addAttributes("h2", "style")
+                .addAttributes("h3", "style")
+                .addAttributes("h4", "style")
+                .addAttributes("blockquote", "style")
+                .addAttributes("figure", "style")
+                .addAttributes("img", "style")
                 // Baglantilara guvenli rel eklemek icin target'a izin.
                 .addAttributes("a", "target", "rel")
                 // Video gomulu (YouTube/Twitter). Yalniz asagidaki protokol +
