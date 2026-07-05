@@ -98,6 +98,10 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/broadcasts/**").permitAll()
                 // Maç sonucu tahmin oylaması — anonim okuma + oy (voterId).
                 .requestMatchers("/api/v1/predictions/**").permitAll()
+                // Haberler — public okuma (yalniz PUBLISHED). Yonetim
+                // /api/v1/admin/news/** ise anyRequest().authenticated() +
+                // controller seviyesinde @PreAuthorize ile korunur (EDITOR/ADMIN).
+                .requestMatchers(HttpMethod.GET, "/api/v1/news", "/api/v1/news/**").permitAll()
                 // Iletisim formu — public POST. Admin listeleme
                 // /api/v1/admin/contact ise anyRequest().authenticated() +
                 // @PreAuthorize("hasRole('ADMIN')") ile korunur.

@@ -57,6 +57,12 @@ dependencies {
 	// --- Excel (çeviri export/import: .xlsx üretme ve okuma) ---
 	implementation("org.apache.poi:poi-ooxml:5.4.0")
 
+	// --- HTML sanitizasyon (jsoup) ---
+	// Haber (news) govdesi editor'den ham HTML olarak gelir; persist ONCESI
+	// sunucuda Jsoup.clean + Safelist ile temizlenir (stored-XSS korunmasi).
+	// bkz. com.scorestv.news.NewsSanitizer
+	implementation("org.jsoup:jsoup:1.18.1")
+
 	// --- Firebase Cloud Messaging (push notifications) ---
 	// Mobile uygulamaya FCM ile bildirim gondermek icin Firebase Admin SDK.
 	// Service account JSON ile auth; bkz. FirebaseConfig.java.
