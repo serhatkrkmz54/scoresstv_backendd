@@ -49,6 +49,11 @@ public class MobileDeviceTokenService {
             if (countryCode != null) {
                 existing.setCountryCode(countryCode);
             }
+            // Eski app surumu notifyNews gondermezse mevcut degeri koru
+            // (countryCode ile ayni "null=koru" deseni).
+            if (req.notifyNews() != null) {
+                existing.setNotifyNews(req.notifyNews());
+            }
             existing.setLastSeenAt(Instant.now());
             repository.save(existing);
             log.debug("Device token guncellendi: id={} platform={} country={}",

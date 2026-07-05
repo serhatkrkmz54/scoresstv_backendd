@@ -25,5 +25,12 @@ public record RegisterDeviceTokenRequest(
          * "ENG"). FIFA + UEFA Ulke siralama bildirimleri icin hedefleme.
          * Opsiyonel; null/bos gelirse mevcut deger korunur (eski app surumu).
          */
-        String countryCode
+        String countryCode,
+        /**
+         * Haber (news) push bildirimleri toggle. Opsiyonel — null gelirse
+         * mevcut deger korunur (eski app surumu; entity default TRUE). Mobil
+         * "Haber bildirimleri" ayari bu alani gonderir; false ise cihaza
+         * yayin push'i gonderilmez. countryCode ile ayni "null=koru" deseni.
+         */
+        Boolean notifyNews
 ) {}
