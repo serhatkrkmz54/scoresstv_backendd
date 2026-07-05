@@ -60,6 +60,7 @@ public class NewsService {
     private final LeagueRepository leagueRepository;
     private final CountryRepository countryRepository;
     private final PlayerRepository playerRepository;
+    private final NewsPushPublisher pushPublisher;
 
     public NewsService(NewsArticleRepository articleRepository,
                        ArticleTeamLinkRepository teamLinkRepository,
@@ -73,7 +74,8 @@ public class NewsService {
                        TeamRepository teamRepository,
                        LeagueRepository leagueRepository,
                        CountryRepository countryRepository,
-                       PlayerRepository playerRepository) {
+                       PlayerRepository playerRepository,
+                       NewsPushPublisher pushPublisher) {
         this.articleRepository = articleRepository;
         this.teamLinkRepository = teamLinkRepository;
         this.leagueLinkRepository = leagueLinkRepository;
@@ -87,6 +89,7 @@ public class NewsService {
         this.leagueRepository = leagueRepository;
         this.countryRepository = countryRepository;
         this.playerRepository = playerRepository;
+        this.pushPublisher = pushPublisher;
     }
 
     // ============================================================
@@ -204,6 +207,8 @@ public class NewsService {
         replaceLinks(a.getId(), req.teamIds(), req.leagueIds(),
                 req.countryIds(), req.playerIds());
         audit(a.getId(), authorId, "CREATE", "status=" + status);
+        // PUBLISHED olarak olusturuldu + push istendi → commit sonrasi bildir.
+        maybeTriggerPush(a, status, req.sendPush(), req.pushTarget());
         return toDetail(a);
     }
 
@@ -251,12 +256,22 @@ public class NewsService {
         replaceLinks(a.getId(), req.teamIds(), req.leagueIds(),
                 req.countryIds(), req.playerIds());
         audit(a.getId(), actorId, "UPDATE", null);
+        // Guncelleme PUBLISHED'e gecirdi + push istendi → commit sonrasi bildir.
+        // (Idempotency: haber daha once push edilmisse NewsNotificationService atlar.)
+        maybeTriggerPush(a, a.getStatus(), req.sendPush(), req.pushTarget());
         return toDetail(a);
     }
 
-    /** Yayinla (EDITOR) — status=PUBLISHED, published_at set (yoksa now). */
+    /**
+     * Yayinla (EDITOR) — status=PUBLISHED, published_at set (yoksa now).
+     *
+     * <p>Publish endpoint'inin govdesi olmadigindan push niyeti opsiyonel query
+     * parametreleriyle (sendPush/pushTarget) tasinir. sendPush true ise
+     * yayinlama commit'inden SONRA push tetiklenir.
+     */
     @Transactional
-    public NewsDetail publish(Long id, Long actorId) {
+    public NewsDetail publish(Long id, Long actorId, Boolean sendPush,
+                              NewsPushTarget pushTarget) {
         NewsArticle a = articleRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> ApiException.notFound("Haber bulunamadi: " + id));
         a.setStatus(NewsStatus.PUBLISHED);
@@ -265,6 +280,7 @@ public class NewsService {
         }
         a = articleRepository.save(a);
         audit(a.getId(), actorId, "PUBLISH", null);
+        maybeTriggerPush(a, NewsStatus.PUBLISHED, sendPush, pushTarget);
         return toDetail(a);
     }
 
@@ -293,6 +309,21 @@ public class NewsService {
     // ============================================================
     // Yardimcilar
     // ============================================================
+
+    /**
+     * Haber PUBLISHED durumunda VE push istenmisse, commit sonrasi push tetikler.
+     * Kapsam disinda (taslak/zamanlanmis ya da sendPush!=true) hicbir sey yapmaz.
+     * Gercek gonderim {@link NewsPushPublisher} → {@link NewsNotificationService}
+     * uzerinden {@code afterCommit} + {@code @Async} ile olur; bir push hatasi
+     * bu (yayinlama) transaction'ini etkilemez.
+     */
+    private void maybeTriggerPush(NewsArticle a, NewsStatus status,
+                                  Boolean sendPush, NewsPushTarget pushTarget) {
+        if (status != NewsStatus.PUBLISHED) return;
+        if (!Boolean.TRUE.equals(sendPush)) return;
+        NewsPushTarget target = pushTarget != null ? pushTarget : NewsPushTarget.FAVORITES;
+        pushPublisher.publishAfterCommit(a.getId(), target);
+    }
 
     private void applyStatus(NewsArticle a, NewsStatus status, Instant publishedAt) {
         a.setStatus(status);

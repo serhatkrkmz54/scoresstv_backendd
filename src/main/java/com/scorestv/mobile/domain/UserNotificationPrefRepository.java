@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -85,4 +86,23 @@ public interface UserNotificationPrefRepository
             + "WHERE p.team.id = :teamId AND p.notifyRankingsClub = true "
             + "AND p.deviceToken.notificationsEnabled = true")
     List<UserNotificationPref> findRankingClubRecipients(@Param("teamId") Long teamId);
+
+    /**
+     * Haber (news) FAVORITES-hedefi alicilari: verilen takim id kumesinden
+     * herhangi birini takip eden, master bildirim + haber toggle acik ve
+     * haberin diliyle (locale on eki) eslesen cihazlarin tercih kayitlari.
+     *
+     * <p>Bir cihaz birden cok takimi takip ediyorsa birden cok satir donebilir;
+     * caller token'lari {@code Set} ile tekillestirir. Bos {@code teamIds} icin
+     * cagrilmamalidir (bos IN sorgusu).
+     */
+    @Query("SELECT p FROM UserNotificationPref p "
+            + "JOIN FETCH p.deviceToken d "
+            + "WHERE p.team.id IN :teamIds "
+            + "AND d.notificationsEnabled = true "
+            + "AND d.notifyNews = true "
+            + "AND LOWER(d.locale) LIKE LOWER(CONCAT(:lang, '%'))")
+    List<UserNotificationPref> findNewsFavoriteRecipients(
+            @Param("teamIds") Collection<Long> teamIds,
+            @Param("lang") String lang);
 }

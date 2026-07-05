@@ -29,4 +29,18 @@ public interface MobileDeviceTokenRepository
             """)
     List<MobileDeviceToken> findRankingsCountryRecipients(
             @Param("countryCode") String countryCode);
+
+    /**
+     * Haber (news) ALL-hedefi alicilari: haberin diliyle (locale) eslesen,
+     * master bildirim + haber toggle acik tum cihazlar. locale buyuk/kucuk
+     * harf duyarsiz eslenir (cihaz "TR"/"tr", "en-US" gibi degerler tutabilir;
+     * on ek kontrolu icin LIKE :lang%).
+     */
+    @Query("""
+            SELECT t FROM MobileDeviceToken t
+            WHERE LOWER(t.locale) LIKE LOWER(CONCAT(:lang, '%'))
+              AND t.notificationsEnabled = true
+              AND t.notifyNews = true
+            """)
+    List<MobileDeviceToken> findNewsRecipientsByLang(@Param("lang") String lang);
 }

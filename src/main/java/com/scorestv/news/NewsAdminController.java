@@ -90,12 +90,18 @@ public class NewsAdminController {
         return service.update(id, req, currentUser.id());
     }
 
-    /** Yayinla (EDITOR/ADMIN). */
+    /**
+     * Yayinla (EDITOR/ADMIN). Push niyeti opsiyonel query param'larla tasinir:
+     * {@code ?sendPush=true&pushTarget=FAVORITES}. sendPush verilmezse push
+     * gonderilmez; pushTarget verilmezse FAVORITES varsayilir.
+     */
     @PostMapping("/{id}/publish")
     @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
     public NewsDetail publish(@PathVariable Long id,
+                              @RequestParam(required = false) Boolean sendPush,
+                              @RequestParam(required = false) NewsPushTarget pushTarget,
                               @AuthenticationPrincipal CurrentUser currentUser) {
-        return service.publish(id, currentUser.id());
+        return service.publish(id, currentUser.id(), sendPush, pushTarget);
     }
 
     /** Yayindan kaldir (EDITOR/ADMIN). */

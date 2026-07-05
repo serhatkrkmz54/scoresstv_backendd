@@ -42,4 +42,13 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
 
     /** Milli takimlar (national=true) — FIFA siralamasi isim eslestirmesi icin. */
     List<Team> findByNationalTrue();
+
+    /**
+     * Bir ulke adina ({@code team.country} string alani) gore takimlar — hem
+     * kulupler hem milli takim. Haber (news) FAVORITES hedeflemesinde, habere
+     * bagli bir ULKE'nin takim takipcilerini bulmak icin kullanilir. Eslesme
+     * buyuk/kucuk harf duyarsiz.
+     */
+    @Query("SELECT t FROM Team t WHERE LOWER(t.country) = LOWER(:countryName)")
+    List<Team> findByCountryNameIgnoreCase(@Param("countryName") String countryName);
 }

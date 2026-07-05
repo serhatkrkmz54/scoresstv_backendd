@@ -1,6 +1,7 @@
 package com.scorestv.news.dto;
 
 import com.scorestv.news.NewsCategory;
+import com.scorestv.news.NewsPushTarget;
 import com.scorestv.news.NewsStatus;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -54,6 +55,18 @@ public record CreateNewsRequest(
         List<Long> teamIds,
         List<Long> leagueIds,
         List<Long> countryIds,
-        List<Long> playerIds
+        List<Long> playerIds,
+
+        /**
+         * Yayinlarken (status=PUBLISHED) push bildirimi gonderilsin mi? null =
+         * false (opsiyonel; YENI eklendi — mevcut cagiricilar bozulmaz).
+         */
+        Boolean sendPush,
+
+        /**
+         * Push hedefi: ALL veya FAVORITES. null ise FAVORITES varsayilir.
+         * (opsiyonel; YENI eklendi.)
+         */
+        NewsPushTarget pushTarget
 ) {
 }

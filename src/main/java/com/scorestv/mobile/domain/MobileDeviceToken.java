@@ -71,4 +71,13 @@ public class MobileDeviceToken extends BaseEntity {
      */
     @Column(name = "notify_rankings_country", nullable = false)
     private boolean notifyRankingsCountry = true;
+
+    /**
+     * Haber (news) push bildirimleri toggle. Default TRUE (acik). Editor bir
+     * haberi yayinlarken push gonderirse, bu kolon acik + master bildirim acik
+     * cihazlar (dil eslesirse) alir. Mobil "Haber bildirimleri" ayari sonraki
+     * fazda bu kolonu degistirir.
+     */
+    @Column(name = "notify_news", nullable = false)
+    private boolean notifyNews = true;
 }
