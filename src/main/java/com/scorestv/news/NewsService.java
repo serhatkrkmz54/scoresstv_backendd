@@ -220,7 +220,12 @@ public class NewsService {
         a.setSummary(trimOrNull(req.summary()));
         String sanitized = sanitizer.sanitizeBody(req.body());
         a.setBody(sanitized);
-        a.setCoverImageKey(trimOrNull(req.coverImageKey()));
+        // Kapak: istek coverImageKey=null gonderirse MEVCUT kapak KORUNUR.
+        // (Edit formu key'i geri gonderemez; sadece yeni yukleme yeni key uretir.)
+        // Bu sayede baska bir alan duzenlenince kapak yanlislikla silinmez.
+        if (req.coverImageKey() != null) {
+            a.setCoverImageKey(trimOrNull(req.coverImageKey()));
+        }
         a.setCategory(req.category());
         a.setSport(req.sport() != null && !req.sport().isBlank()
                 ? req.sport().trim() : a.getSport());
