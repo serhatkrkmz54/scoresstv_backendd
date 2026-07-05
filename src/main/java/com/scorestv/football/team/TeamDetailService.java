@@ -52,6 +52,7 @@ import com.scorestv.football.web.dto.TeamDetailResponse.TransferRow;
 import com.scorestv.football.web.dto.TeamDetailResponse.TrophyEntry;
 import com.scorestv.football.web.dto.TeamDetailResponse.VenueInfo;
 import com.scorestv.football.web.dto.TeamSeoResponse;
+import com.scorestv.rankings.web.FifaRankLookupService;
 import com.scorestv.storage.MinioStorageService;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.context.annotation.Lazy;
@@ -109,6 +110,7 @@ public class TeamDetailService {
     private final FootballMessages messages;
     private final MinioStorageService storage;
     private final PlayerPhotoResolver photoResolver;
+    private final FifaRankLookupService fifaRankLookupService;
 
     private final TeamDetailService self;
 
@@ -130,6 +132,7 @@ public class TeamDetailService {
                              FootballMessages messages,
                              MinioStorageService storage,
                              PlayerPhotoResolver photoResolver,
+                             FifaRankLookupService fifaRankLookupService,
                              @Lazy TeamDetailService self) {
         this.teamRepository = teamRepository;
         this.leagueRepository = leagueRepository;
@@ -149,6 +152,7 @@ public class TeamDetailService {
         this.messages = messages;
         this.storage = storage;
         this.photoResolver = photoResolver;
+        this.fifaRankLookupService = fifaRankLookupService;
         this.self = self;
     }
 
@@ -248,6 +252,9 @@ public class TeamDetailService {
         TeamSeoResponse seo = seoBuilder.build(
                 team, country, selectedSeason, displayName, turkish ? "tr" : "en");
 
+        // FIFA sırası — yalnız milli takımlarda dolu, kulüplerde null.
+        Integer fifaRank = fifaRankLookupService.index().rankFor(team);
+
         return new TeamDetailResponse(
                 team.getId(),
                 slug,
@@ -257,6 +264,7 @@ public class TeamDetailService {
                 team.getFounded(),
                 team.isNational(),
                 team.getCode(),
+                fifaRank,
                 toCountryInfo(country, team, turkish),
                 toVenueInfo(team.getVenue(), turkish),
                 selectedSeason,
@@ -396,10 +404,31 @@ public class TeamDetailService {
                 ? country.getNameTr()
                 : (country != null ? country.getName() : team.getCountry());
         String code = country != null ? country.getCode() : null;
-        String flag = (country != null && country.getFlagKey() != null)
-                ? storage.publicUrl(country.getFlagKey())
-                : null;
+        String flag = countryFlagUrl(country);
         return new CountryInfo(name, code, flag);
+    }
+
+    /**
+     * Ülke bayrağı fallback zinciri (anasayfa/maç detayıyla aynı):
+     * aynalanan bayrak → ham API bayrak URL'i → ISO2 kod → flagcdn. Böylece
+     * flagKey aynalanmamış ülkelerde de takım detayı ülke bayrağı boş kalmaz.
+     */
+    private String countryFlagUrl(Country country) {
+        if (country == null) {
+            return null;
+        }
+        if (country.getFlagKey() != null) {
+            return storage.publicUrl(country.getFlagKey());
+        }
+        if (country.getFlagUrl() != null && !country.getFlagUrl().isBlank()) {
+            return country.getFlagUrl();
+        }
+        String code = country.getCode();
+        if (code != null && code.length() == 2) {
+            return "https://flagcdn.com/w160/"
+                    + code.toLowerCase(java.util.Locale.ROOT) + ".png";
+        }
+        return null;
     }
 
     private VenueInfo toVenueInfo(Venue venue, boolean turkish) {

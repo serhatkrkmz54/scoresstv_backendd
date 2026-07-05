@@ -1,5 +1,8 @@
 package com.scorestv.football.web.dto;
 
+import com.scorestv.bilyoner.MatchOdds;
+import com.scorestv.broadcasts.BroadcastsService;
+
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.List;
@@ -78,7 +81,7 @@ public record MatchDetailResponse(
          * yayinlanir. Mac override > lig default > bos. Frontend {@code
          * ?country=} parametresi ile filtre eder.
          */
-        List<com.scorestv.broadcasts.BroadcastsService.BroadcastView> broadcasts,
+        List<BroadcastsService.BroadcastView> broadcasts,
         /**
          * Kupa eleme aşaması bracket'i — bu maç bir kupa ligindeyse ve
          * o sezonun knockout fixture'ları varsa dolu gelir; lig maçlarinda
@@ -87,8 +90,34 @@ public record MatchDetailResponse(
         BracketView bracket,
         MatchSeoResponse seo,
         /** Bilyoner iddaa oranları; eşleşme yoksa veya özellik kapalıysa null. */
-        com.scorestv.bilyoner.MatchOdds odds
+        MatchOdds odds,
+        /** Ev sahibi milli takımın FIFA sırası; kulüp/eşleşme yoksa null. */
+        Integer homeFifaRank,
+        /** Deplasman milli takımın FIFA sırası; kulüp/eşleşme yoksa null. */
+        Integer awayFifaRank,
+        /** Maçın oyuncusu — yalnız BİTEN maçta, oyuncu rating verisi varsa. */
+        PlayerOfMatch playerOfTheMatch,
+        /** ScoresTV Puanı (0-10) — ev sahibi; istatistik yoksa null. Canlı, FT'de sabit. */
+        Double homeScorestvRating,
+        /** ScoresTV Puanı (0-10) — deplasman; istatistik yoksa null. */
+        Double awayScorestvRating
 ) implements Serializable {
+
+    /**
+     * Maçın oyuncusu — biten maçta en yüksek maç-içi rating'e sahip oyuncu.
+     * rating String ("7.8"); gol/asist tiebreak. Rating verisi yoksa üretilmez.
+     */
+    public record PlayerOfMatch(
+            Long playerId,
+            String name,
+            String photo,
+            Long teamId,
+            String teamName,
+            String rating,
+            Integer goals,
+            Integer assists,
+            String position
+    ) implements Serializable {}
 
     /** Stadyum detayı — özet listesinden daha zengin (kapasite + zemin). */
     public record Venue(

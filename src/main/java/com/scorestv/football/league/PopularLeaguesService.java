@@ -70,8 +70,7 @@ public class PopularLeaguesService {
                     SlugUtil.leagueSlug(name, league.getId()),
                     league.getLogoKey() != null ? storage.publicUrl(league.getLogoKey()) : null,
                     countryName(league, country, turkish),
-                    (country != null && country.getFlagKey() != null)
-                            ? storage.publicUrl(country.getFlagKey()) : null));
+                    countryFlagUrl(country)));
         }
         return out;
     }
@@ -92,5 +91,23 @@ public class PopularLeaguesService {
             return country.getNameTr();
         }
         return league.getCountryName();
+    }
+
+    private String countryFlagUrl(Country country) {
+        if (country == null) {
+            return null;
+        }
+        if (country.getFlagKey() != null) {
+            return storage.publicUrl(country.getFlagKey());
+        }
+        if (country.getFlagUrl() != null && !country.getFlagUrl().isBlank()) {
+            return country.getFlagUrl();
+        }
+        String code = country.getCode();
+        if (code != null && code.length() == 2) {
+            return "https://flagcdn.com/w160/"
+                    + code.toLowerCase(java.util.Locale.ROOT) + ".png";
+        }
+        return null;
     }
 }

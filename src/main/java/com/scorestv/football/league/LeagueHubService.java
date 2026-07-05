@@ -106,9 +106,10 @@ public class LeagueHubService {
                     acc.leagues.get(0), turkish);
             String code = countryEntity != null ? countryEntity.getCode()
                     : acc.leagues.get(0).getCountryCode();
-            String flag = (countryEntity != null && countryEntity.getFlagKey() != null)
-                    ? storage.publicUrl(countryEntity.getFlagKey())
-                    : acc.leagues.get(0).getCountryFlagUrl();
+            String flag = countryFlagUrl(countryEntity);
+            if (flag == null) {
+                flag = acc.leagues.get(0).getCountryFlagUrl(); // eşleşmezse ligin ham bayrağı
+            }
             List<LeagueHubResponse.LeagueRef> refs = new ArrayList<>(acc.leagues.size());
             for (League l : acc.leagues) {
                 String name = displayName(l, turkish);
@@ -127,6 +128,24 @@ public class LeagueHubService {
                     displayCountry, code, flag, refs));
         }
         return new LeagueHubResponse(leagues.size(), groups);
+    }
+
+    private String countryFlagUrl(Country country) {
+        if (country == null) {
+            return null;
+        }
+        if (country.getFlagKey() != null) {
+            return storage.publicUrl(country.getFlagKey());
+        }
+        if (country.getFlagUrl() != null && !country.getFlagUrl().isBlank()) {
+            return country.getFlagUrl();
+        }
+        String code = country.getCode();
+        if (code != null && code.length() == 2) {
+            return "https://flagcdn.com/w160/"
+                    + code.toLowerCase(java.util.Locale.ROOT) + ".png";
+        }
+        return null;
     }
 
     private static String displayName(TranslatableName entity, boolean turkish) {

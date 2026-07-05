@@ -424,11 +424,28 @@ public class FixtureQueryService {
         return league.getLogoKey() != null ? storage.publicUrl(league.getLogoKey()) : null;
     }
 
-    /** Ülke bayrağı — daima kendi CDN'imizden; aynalanmadıysa null. */
+    /**
+     * Ülke bayrağı fallback zinciri (lig sayfasıyla aynı davranış):
+     * 1) aynalanan bayrak (kendi CDN'imiz), 2) ham API-Football bayrak URL'i,
+     * 3) ISO2 kod → flagcdn. Böylece flagKey aynalanmamış ülkelerde de
+     * (Türkiye/Almanya/USA...) anasayfa lig başlığında bayrak boş kalmaz.
+     */
     private String countryFlag(Country country) {
-        return (country != null && country.getFlagKey() != null)
-                ? storage.publicUrl(country.getFlagKey())
-                : null;
+        if (country == null) {
+            return null;
+        }
+        if (country.getFlagKey() != null) {
+            return storage.publicUrl(country.getFlagKey());
+        }
+        if (country.getFlagUrl() != null && !country.getFlagUrl().isBlank()) {
+            return country.getFlagUrl();
+        }
+        String code = country.getCode();
+        if (code != null && code.length() == 2) {
+            return "https://flagcdn.com/w160/"
+                    + code.toLowerCase(java.util.Locale.ROOT) + ".png";
+        }
+        return null;
     }
 
     /**

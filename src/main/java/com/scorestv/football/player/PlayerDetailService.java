@@ -4,6 +4,7 @@ import com.scorestv.common.ApiException;
 import com.scorestv.common.SlugUtil;
 import com.scorestv.football.FootballCacheNames;
 import com.scorestv.football.FootballMessages;
+import com.scorestv.football.domain.Country;
 import com.scorestv.football.domain.CountryRepository;
 import com.scorestv.football.domain.League;
 import com.scorestv.football.domain.LeagueRepository;
@@ -156,7 +157,7 @@ public class PlayerDetailService {
 
         Integer selectedSeason = season != null
                 ? season
-                : (seasons.isEmpty() ? null : seasons.get(0));
+                : (seasons.isEmpty() ? null : seasons.getFirst());
 
         // Mevcut takim: DB'de en son sezon stat'tan; yoksa careerTeams'ten
         TeamRef currentTeam = resolveCurrentTeam(playerId, careerTeams, turkish);
@@ -558,10 +559,26 @@ public class PlayerDetailService {
     private String resolveCountryFlag(String countryName) {
         if (countryName == null || countryName.isBlank()) return null;
         return countryRepository.findByName(countryName)
-                .map(c -> c.getFlagKey() != null && !c.getFlagKey().isBlank()
-                        ? storage.publicUrl(c.getFlagKey())
-                        : c.getFlagUrl())
+                .map(this::countryFlagUrl)
                 .orElse(null);
+    }
+
+    private String countryFlagUrl(Country country) {
+        if (country == null) {
+            return null;
+        }
+        if (country.getFlagKey() != null) {
+            return storage.publicUrl(country.getFlagKey());
+        }
+        if (country.getFlagUrl() != null && !country.getFlagUrl().isBlank()) {
+            return country.getFlagUrl();
+        }
+        String code = country.getCode();
+        if (code != null && code.length() == 2) {
+            return "https://flagcdn.com/w160/"
+                    + code.toLowerCase(java.util.Locale.ROOT) + ".png";
+        }
+        return null;
     }
 
     private static String displayName(TranslatableName entity, boolean turkish) {

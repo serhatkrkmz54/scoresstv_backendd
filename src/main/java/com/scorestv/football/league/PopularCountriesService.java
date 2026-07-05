@@ -56,10 +56,28 @@ public class PopularCountriesService {
                     country.getId(),
                     name,
                     slug,
-                    country.getFlagKey() != null ? storage.publicUrl(country.getFlagKey()) : null,
+                    countryFlagUrl(country),
                     country.getCode()));
         }
         return out;
+    }
+
+    private String countryFlagUrl(Country country) {
+        if (country == null) {
+            return null;
+        }
+        if (country.getFlagKey() != null) {
+            return storage.publicUrl(country.getFlagKey());
+        }
+        if (country.getFlagUrl() != null && !country.getFlagUrl().isBlank()) {
+            return country.getFlagUrl();
+        }
+        String code = country.getCode();
+        if (code != null && code.length() == 2) {
+            return "https://flagcdn.com/w160/"
+                    + code.toLowerCase(java.util.Locale.ROOT) + ".png";
+        }
+        return null;
     }
 
     private static String displayName(Country country, boolean turkish) {

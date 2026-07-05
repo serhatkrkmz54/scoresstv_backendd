@@ -45,6 +45,8 @@ import com.scorestv.football.web.dto.PredictionView;
 import com.scorestv.football.web.dto.StandingRow;
 import com.scorestv.football.web.dto.StandingsGroup;
 import com.scorestv.football.web.dto.StatisticView;
+import com.scorestv.rankings.web.FifaRankIndex;
+import com.scorestv.rankings.web.FifaRankLookupService;
 import com.scorestv.storage.MinioStorageService;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -117,6 +119,7 @@ public class MatchDetailService {
     private final MatchDetailLazySync lazySync;
     private final com.scorestv.football.league.BracketBuilder bracketBuilder;
     private final com.scorestv.bilyoner.BilyonerOddsService bilyonerOddsService;
+    private final FifaRankLookupService fifaRankLookupService;
     /**
      * Kendi proxy referansı — {@code loadCachedResponse}'a self-invocation
      * yerine proxy üstünden çağırmak için. Aksi halde Spring'in @Cacheable
@@ -143,6 +146,7 @@ public class MatchDetailService {
                               MatchDetailLazySync lazySync,
                               com.scorestv.football.league.BracketBuilder bracketBuilder,
                               com.scorestv.bilyoner.BilyonerOddsService bilyonerOddsService,
+                              FifaRankLookupService fifaRankLookupService,
                               @Lazy MatchDetailService self) {
         this.fixtureRepository = fixtureRepository;
         this.eventRepository = eventRepository;
@@ -162,6 +166,7 @@ public class MatchDetailService {
         this.lazySync = lazySync;
         this.bracketBuilder = bracketBuilder;
         this.bilyonerOddsService = bilyonerOddsService;
+        this.fifaRankLookupService = fifaRankLookupService;
         this.self = self;
     }
 
@@ -350,6 +355,19 @@ public class MatchDetailService {
         // Bilyoner iddaa oranları — eşleşme yoksa veya özellik kapalıysa null.
         var odds = bilyonerOddsService.forFixture(home, away, fixture.getKickoffAt());
 
+        // FIFA sırası — yalnız milli takımlarda dolu, kulüplerde null.
+        FifaRankIndex fifaIndex = fifaRankLookupService.index();
+        Integer homeFifaRank = fifaIndex.rankFor(fixture.getHomeTeam());
+        Integer awayFifaRank = fifaIndex.rankFor(fixture.getAwayTeam());
+
+        // Maçın oyuncusu (yalnız biten maç) + ScoresTV Puanı (canlı 0-10).
+        MatchDetailResponse.PlayerOfMatch playerOfTheMatch = selectPlayerOfMatch(
+                playerStats, home, away, turkish, fixture.getStatusShort());
+        Double homeScorestvRating = scorestvRating(
+                statistics, fixture.getHomeGoals(), fixture.getAwayGoals(), true);
+        Double awayScorestvRating = scorestvRating(
+                statistics, fixture.getAwayGoals(), fixture.getHomeGoals(), false);
+
         return new MatchDetailResponse(
                 fixture.getId(),
                 slug,
@@ -388,7 +406,151 @@ public class MatchDetailService {
                 broadcasts,
                 bracket,
                 seo,
-                odds);
+                odds,
+                homeFifaRank,
+                awayFifaRank,
+                playerOfTheMatch,
+                homeScorestvRating,
+                awayScorestvRating);
+    }
+
+    // ============================================================
+    // Maçın Oyuncusu + ScoresTV Puanı
+    // ============================================================
+
+    private static final java.util.Set<String> MOTM_FINISHED =
+            java.util.Set.of("FT", "AET", "PEN");
+
+    /**
+     * Maçın oyuncusu — biten maçta en yüksek maç-içi rating'e sahip oyuncu.
+     * Eşit rating'de gol+asist üstün olan seçilir. Rating verisi yoksa null.
+     */
+    private MatchDetailResponse.PlayerOfMatch selectPlayerOfMatch(
+            List<PlayerStatGroup> playerStats, Team home, Team away,
+            boolean turkish, String statusShort) {
+        if (statusShort == null || !MOTM_FINISHED.contains(statusShort)
+                || playerStats == null || playerStats.isEmpty()) {
+            return null;
+        }
+        PlayerStatView best = null;
+        Long bestTeamId = null;
+        double bestScore = -1;
+        for (PlayerStatGroup group : playerStats) {
+            if (group.players() == null) {
+                continue;
+            }
+            for (PlayerStatView p : group.players()) {
+                Double r = parseRating(p.rating());
+                if (r == null) {
+                    continue;
+                }
+                int g = (p.goals() != null && p.goals().total() != null)
+                        ? p.goals().total() : 0;
+                int a = (p.goals() != null && p.goals().assists() != null)
+                        ? p.goals().assists() : 0;
+                // rating birincil; gol/asist minik tiebreak.
+                double score = r + g * 0.001 + a * 0.0005;
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = p;
+                    bestTeamId = group.teamId();
+                }
+            }
+        }
+        if (best == null) {
+            return null; // rating verisi yok → maçın oyuncusu üretme
+        }
+        String teamName = null;
+        if (bestTeamId != null) {
+            if (home.getId().equals(bestTeamId)) {
+                teamName = displayName(home, turkish);
+            } else if (away.getId().equals(bestTeamId)) {
+                teamName = displayName(away, turkish);
+            }
+        }
+        int goals = (best.goals() != null && best.goals().total() != null)
+                ? best.goals().total() : 0;
+        int assists = (best.goals() != null && best.goals().assists() != null)
+                ? best.goals().assists() : 0;
+        return new MatchDetailResponse.PlayerOfMatch(
+                best.playerId(), best.playerName(), best.photo(),
+                bestTeamId, teamName, best.rating(), goals, assists, best.position());
+    }
+
+    /** "7.8" → 7.8; boş/"-"/parse edilemezse null. */
+    private static Double parseRating(String s) {
+        if (s == null || s.isBlank() || "-".equals(s.trim())) {
+            return null;
+        }
+        try {
+            double v = Double.parseDouble(s.trim());
+            return v > 0 ? v : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * ScoresTV Puanı — bir takımın 0-10 canlı performans puanı. İstatistik +
+     * skordan hesaplanır; istatistik yoksa null (UI gizler). Ağırlıklar
+     * markamıza özel — gol/isabetli şut/xG/topa sahip olma artı, kart eksi.
+     */
+    private Double scorestvRating(List<StatisticView> stats, Integer goalsFor,
+                                  Integer goalsAgainst, boolean home) {
+        if (stats == null || stats.isEmpty()) {
+            return null;
+        }
+        java.util.Map<String, String> byType = new java.util.HashMap<>();
+        boolean anyData = false;
+        for (StatisticView s : stats) {
+            if (s.type() == null) {
+                continue;
+            }
+            String val = home ? s.home() : s.away();
+            byType.put(s.type(), val);
+            if (parseStat(val) != null) {
+                anyData = true;
+            }
+        }
+        if (!anyData) {
+            return null; // anlamlı istatistik yok
+        }
+        double score = 6.0;
+        score += (goalsFor != null ? goalsFor : 0) * 1.0;
+        score -= (goalsAgainst != null ? goalsAgainst : 0) * 0.25;
+        double onTarget = statNum(byType, "Shots on Goal");
+        double totalShots = statNum(byType, "Total Shots");
+        score += onTarget * 0.18;
+        score += Math.max(0, totalShots - onTarget) * 0.04;
+        score += statNum(byType, "Corner Kicks") * 0.05;
+        double poss = statNum(byType, "Ball Possession"); // "55%" → 55
+        if (poss > 0) {
+            score += (poss - 50) * 0.02;
+        }
+        score += statNum(byType, "expected_goals") * 0.7; // xG (varsa)
+        score -= statNum(byType, "Yellow Cards") * 0.10;
+        score -= statNum(byType, "Red Cards") * 0.8;
+
+        score = Math.max(2.0, Math.min(10.0, score));
+        return Math.round(score * 10.0) / 10.0;
+    }
+
+    private static double statNum(java.util.Map<String, String> byType, String type) {
+        Double v = parseStat(byType.get(type));
+        return v != null ? v : 0.0;
+    }
+
+    /** İstatistik String'ini sayıya çevirir ("55%" → 55, "3" → 3); yoksa null. */
+    private static Double parseStat(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        String t = s.trim().replace("%", "");
+        try {
+            return Double.parseDouble(t);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** Sakatlık listesi — ev sahibi önce, deplasman sonra. Boş olabilir. */
@@ -814,9 +976,7 @@ public class MatchDetailService {
                 && country.getNameTr() != null && !country.getNameTr().isBlank())
                 ? country.getNameTr()
                 : league.getCountryName();
-        String countryFlag = (country != null && country.getFlagKey() != null)
-                ? storage.publicUrl(country.getFlagKey())
-                : null;
+        String countryFlag = countryFlagUrl(country);
         return new MatchDetailResponse.LeagueRef(
                 league.getId(),
                 displayName(league, turkish),
@@ -829,6 +989,30 @@ public class MatchDetailService {
 
     private String logoUrl(String key) {
         return key != null ? storage.publicUrl(key) : null;
+    }
+
+    /**
+     * Ülke bayrağı fallback zinciri (anasayfa/lig sayfasıyla aynı):
+     * aynalanan bayrak → ham API bayrak URL'i → ISO2 kod → flagcdn.
+     * Böylece flagKey aynalanmamış ülkelerde de (Türkiye/Brezilya/USA...)
+     * maç detayı lig başlığında bayrak boş kalmaz.
+     */
+    private String countryFlagUrl(Country country) {
+        if (country == null) {
+            return null;
+        }
+        if (country.getFlagKey() != null) {
+            return storage.publicUrl(country.getFlagKey());
+        }
+        if (country.getFlagUrl() != null && !country.getFlagUrl().isBlank()) {
+            return country.getFlagUrl();
+        }
+        String code = country.getCode();
+        if (code != null && code.length() == 2) {
+            return "https://flagcdn.com/w160/"
+                    + code.toLowerCase(java.util.Locale.ROOT) + ".png";
+        }
+        return null;
     }
 
     /** Bir periyot skoru — her iki taraf da null ise period gonderme. */

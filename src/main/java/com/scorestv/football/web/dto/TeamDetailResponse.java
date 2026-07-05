@@ -39,6 +39,8 @@ public record TeamDetailResponse(
         Integer founded,
         boolean national,
         String code,
+        /** Milli takımın FIFA sırası; kulüp/eşleşme yoksa null. */
+        Integer fifaRank,
         CountryInfo country,
         VenueInfo venue,
         /**

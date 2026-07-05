@@ -306,10 +306,29 @@ public class LeagueDetailService {
     private LeagueDetailResponse.Country toCountryDto(Country country, League league, boolean turkish) {
         String name = displayCountryName(country, league, turkish);
         String code = country != null ? country.getCode() : league.getCountryCode();
-        String flag = (country != null && country.getFlagKey() != null)
-                ? storage.publicUrl(country.getFlagKey())
-                : league.getCountryFlagUrl();
+        String flag = countryFlagUrl(country);
+        if (flag == null) {
+            flag = league.getCountryFlagUrl(); // ülke eşleşmezse ligin ham bayrağı
+        }
         return new LeagueDetailResponse.Country(name, code, flag);
+    }
+
+    private String countryFlagUrl(Country country) {
+        if (country == null) {
+            return null;
+        }
+        if (country.getFlagKey() != null) {
+            return storage.publicUrl(country.getFlagKey());
+        }
+        if (country.getFlagUrl() != null && !country.getFlagUrl().isBlank()) {
+            return country.getFlagUrl();
+        }
+        String code = country.getCode();
+        if (code != null && code.length() == 2) {
+            return "https://flagcdn.com/w160/"
+                    + code.toLowerCase(java.util.Locale.ROOT) + ".png";
+        }
+        return null;
     }
 
     private static String displayCountryName(Country country, League league, boolean turkish) {
