@@ -8,6 +8,8 @@ import com.scorestv.football.domain.LeagueRepository;
 import com.scorestv.football.domain.Player;
 import com.scorestv.football.domain.PlayerRepository;
 import com.scorestv.football.domain.Team;
+import com.scorestv.football.domain.Fixture;
+import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.football.domain.TeamRepository;
 import com.scorestv.news.dto.CreateNewsRequest;
 import com.scorestv.news.dto.NewsDetail;
@@ -17,6 +19,7 @@ import com.scorestv.news.dto.UpdateNewsRequest;
 import com.scorestv.storage.MinioStorageService;
 import com.scorestv.user.User;
 import com.scorestv.user.UserRepository;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -26,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -52,6 +56,7 @@ public class NewsService {
     private final ArticleLeagueLinkRepository leagueLinkRepository;
     private final ArticleCountryLinkRepository countryLinkRepository;
     private final ArticlePlayerLinkRepository playerLinkRepository;
+    private final ArticleFixtureLinkRepository fixtureLinkRepository;
     private final NewsAuditLogRepository auditLogRepository;
     private final NewsSanitizer sanitizer;
     private final MinioStorageService storage;
@@ -60,13 +65,19 @@ public class NewsService {
     private final LeagueRepository leagueRepository;
     private final CountryRepository countryRepository;
     private final PlayerRepository playerRepository;
+    private final FixtureRepository fixtureRepository;
     private final NewsPushPublisher pushPublisher;
+    /** ES kapaliyken (scorestv.elasticsearch.enabled=false) bean yoktur — opsiyonel. */
+    private final ObjectProvider<NewsSearchPublisher> searchPublisher;
+    /** ES kapaliyken bean yoktur — opsiyonel; DB fallback devreye girer. */
+    private final ObjectProvider<NewsRelatedSearcher> relatedSearcher;
 
     public NewsService(NewsArticleRepository articleRepository,
                        ArticleTeamLinkRepository teamLinkRepository,
                        ArticleLeagueLinkRepository leagueLinkRepository,
                        ArticleCountryLinkRepository countryLinkRepository,
                        ArticlePlayerLinkRepository playerLinkRepository,
+                       ArticleFixtureLinkRepository fixtureLinkRepository,
                        NewsAuditLogRepository auditLogRepository,
                        NewsSanitizer sanitizer,
                        MinioStorageService storage,
@@ -75,12 +86,16 @@ public class NewsService {
                        LeagueRepository leagueRepository,
                        CountryRepository countryRepository,
                        PlayerRepository playerRepository,
-                       NewsPushPublisher pushPublisher) {
+                       FixtureRepository fixtureRepository,
+                       NewsPushPublisher pushPublisher,
+                       ObjectProvider<NewsSearchPublisher> searchPublisher,
+                       ObjectProvider<NewsRelatedSearcher> relatedSearcher) {
         this.articleRepository = articleRepository;
         this.teamLinkRepository = teamLinkRepository;
         this.leagueLinkRepository = leagueLinkRepository;
         this.countryLinkRepository = countryLinkRepository;
         this.playerLinkRepository = playerLinkRepository;
+        this.fixtureLinkRepository = fixtureLinkRepository;
         this.auditLogRepository = auditLogRepository;
         this.sanitizer = sanitizer;
         this.storage = storage;
@@ -89,7 +104,10 @@ public class NewsService {
         this.leagueRepository = leagueRepository;
         this.countryRepository = countryRepository;
         this.playerRepository = playerRepository;
+        this.fixtureRepository = fixtureRepository;
         this.pushPublisher = pushPublisher;
+        this.searchPublisher = searchPublisher;
+        this.relatedSearcher = relatedSearcher;
     }
 
     // ============================================================
@@ -125,6 +143,15 @@ public class NewsService {
         return toPageResponse(result);
     }
 
+    /** Public liste — bir maca (fixture) bagli yayinda haberler. */
+    @Transactional(readOnly = true)
+    public NewsPageResponse listPublishedByFixture(Long fixtureId, String lang,
+                                                   int page, int size) {
+        Page<NewsArticle> result = articleRepository.findPublishedByFixture(
+                fixtureId, lang, Instant.now(), safePage(page, size));
+        return toPageResponse(result);
+    }
+
     /**
      * Public detay — yayinda (veya en azindan silinmemis) haber, slug ile.
      * Yayinda degilse 404 gibi davranir. Goruntuleme sayisini artirir.
@@ -142,6 +169,81 @@ public class NewsService {
         // gorunmesi icin bellekteki entity'yi de artiriyoruz.
         a.setViewCount(a.getViewCount() + 1);
         return toDetail(a);
+    }
+
+    /**
+     * "Ilgili haberler" — bir habere (slug) benzer, YAYINDA, ayni dil, kendisi
+     * haric haberler. ES varsa {@link NewsRelatedSearcher} (paylasilan varlik +
+     * more-like-this) kullanilir; ES kapali/bos ise DB fallback (paylasilan
+     * takim/lig, en yeni). Sonuc {@link NewsListItem} listesi.
+     */
+    @Transactional(readOnly = true)
+    public List<NewsListItem> listRelated(String slug, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 20));
+        NewsArticle source = articleRepository.findBySlugAndDeletedAtIsNull(slug)
+                .orElseThrow(() -> ApiException.notFound("Haber bulunamadi."));
+        if (source.getStatus() != NewsStatus.PUBLISHED
+                || (source.getPublishedAt() != null
+                    && source.getPublishedAt().isAfter(Instant.now()))) {
+            throw ApiException.notFound("Haber bulunamadi.");
+        }
+
+        List<Long> teamIds = teamLinkRepository.findByArticleId(source.getId()).stream()
+                .map(ArticleTeamLink::getTeamId).toList();
+        List<Long> leagueIds = leagueLinkRepository.findByArticleId(source.getId()).stream()
+                .map(ArticleLeagueLink::getLeagueId).toList();
+        List<Long> fixtureIds = fixtureLinkRepository.findByArticleId(source.getId()).stream()
+                .map(ArticleFixtureLink::getFixtureId).toList();
+
+        // 1) ES yolu (varsa).
+        NewsRelatedSearcher searcher = relatedSearcher.getIfAvailable();
+        if (searcher != null) {
+            com.scorestv.search.index.ArticleDoc doc =
+                    new com.scorestv.search.index.ArticleDoc();
+            doc.setId(source.getId());
+            doc.setLang(source.getLang());
+            doc.setTitle(source.getTitle());
+            doc.setSummary(source.getSummary());
+            doc.setTeams(teamIds);
+            doc.setLeagues(leagueIds);
+            doc.setFixtures(fixtureIds);
+            List<Long> ids = searcher.findRelatedIds(doc, safeLimit);
+            if (!ids.isEmpty()) {
+                return loadPublishedInOrder(ids, source.getId(), safeLimit);
+            }
+        }
+
+        // 2) DB fallback (ES kapali veya bos sonuc).
+        if (teamIds.isEmpty() && leagueIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> safeTeamIds = teamIds.isEmpty() ? List.of(-1L) : teamIds;
+        List<Long> safeLeagueIds = leagueIds.isEmpty() ? List.of(-1L) : leagueIds;
+        List<NewsArticle> rows = articleRepository.findRelatedFallback(
+                source.getId(), source.getLang(), safeTeamIds, safeLeagueIds,
+                Instant.now(), PageRequest.of(0, safeLimit));
+        return rows.stream().map(this::toListItem).toList();
+    }
+
+    /**
+     * ES'ten donen id sirasini koruyarak yayinda haberleri yukler + NewsListItem'a
+     * cevirir (kendisi + yayinda olmayanlar elenir).
+     */
+    private List<NewsListItem> loadPublishedInOrder(List<Long> ids, Long selfId, int limit) {
+        Instant now = Instant.now();
+        Map<Long, NewsArticle> byId = articleRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(NewsArticle::getId, Function.identity(), (a, b) -> a));
+        List<NewsListItem> out = new java.util.ArrayList<>();
+        for (Long id : ids) {
+            if (id == null || id.equals(selfId)) continue;
+            NewsArticle a = byId.get(id);
+            if (a == null) continue;
+            if (a.getStatus() != NewsStatus.PUBLISHED || a.getDeletedAt() != null) continue;
+            if (a.getPublishedAt() != null && a.getPublishedAt().isAfter(now)) continue;
+            out.add(toListItem(a));
+            if (out.size() >= limit) break;
+        }
+        return out;
     }
 
     // ============================================================
@@ -205,10 +307,11 @@ public class NewsService {
 
         a = articleRepository.save(a);
         replaceLinks(a.getId(), req.teamIds(), req.leagueIds(),
-                req.countryIds(), req.playerIds());
+                req.countryIds(), req.playerIds(), req.fixtureIds());
         audit(a.getId(), authorId, "CREATE", "status=" + status);
         // PUBLISHED olarak olusturuldu + push istendi → commit sonrasi bildir.
         maybeTriggerPush(a, status, req.sendPush(), req.pushTarget());
+        syncSearchIndex(a);
         return toDetail(a);
     }
 
@@ -254,11 +357,12 @@ public class NewsService {
 
         a = articleRepository.save(a);
         replaceLinks(a.getId(), req.teamIds(), req.leagueIds(),
-                req.countryIds(), req.playerIds());
+                req.countryIds(), req.playerIds(), req.fixtureIds());
         audit(a.getId(), actorId, "UPDATE", null);
         // Guncelleme PUBLISHED'e gecirdi + push istendi → commit sonrasi bildir.
         // (Idempotency: haber daha once push edilmisse NewsNotificationService atlar.)
         maybeTriggerPush(a, a.getStatus(), req.sendPush(), req.pushTarget());
+        syncSearchIndex(a);
         return toDetail(a);
     }
 
@@ -281,6 +385,7 @@ public class NewsService {
         a = articleRepository.save(a);
         audit(a.getId(), actorId, "PUBLISH", null);
         maybeTriggerPush(a, NewsStatus.PUBLISHED, sendPush, pushTarget);
+        syncSearchIndex(a);
         return toDetail(a);
     }
 
@@ -293,6 +398,7 @@ public class NewsService {
         a.setPublishedAt(null);
         a = articleRepository.save(a);
         audit(a.getId(), actorId, "UNPUBLISH", null);
+        syncSearchIndex(a);
         return toDetail(a);
     }
 
@@ -304,6 +410,7 @@ public class NewsService {
         a.setDeletedAt(Instant.now());
         articleRepository.save(a);
         audit(a.getId(), actorId, "DELETE", null);
+        removeFromSearchIndex(a.getId());
     }
 
     // ============================================================
@@ -325,6 +432,29 @@ public class NewsService {
         pushPublisher.publishAfterCommit(a.getId(), target);
     }
 
+    /**
+     * Haberin Elasticsearch index'ini durumuna gore senkronlar (commit sonrasi):
+     * PUBLISHED ise upsert, degilse index'ten cikarir. ES kapaliyken (bean yok)
+     * no-op — {@link ObjectProvider} null-safe. Bir ES hatasi mutasyonu dusurmez.
+     */
+    private void syncSearchIndex(NewsArticle a) {
+        NewsSearchPublisher p = searchPublisher.getIfAvailable();
+        if (p == null) return;
+        if (a.getStatus() == NewsStatus.PUBLISHED) {
+            p.upsertAfterCommit(a.getId());
+        } else {
+            p.removeAfterCommit(a.getId());
+        }
+    }
+
+    /** Haberi (commit sonrasi) ES index'inden cikarir (soft-delete). No-op if ES off. */
+    private void removeFromSearchIndex(Long articleId) {
+        NewsSearchPublisher p = searchPublisher.getIfAvailable();
+        if (p != null) {
+            p.removeAfterCommit(articleId);
+        }
+    }
+
     private void applyStatus(NewsArticle a, NewsStatus status, Instant publishedAt) {
         a.setStatus(status);
         switch (status) {
@@ -338,11 +468,13 @@ public class NewsService {
 
     /** Link tablolarini tamamen yeniden yazar (once sil, sonra ekle). */
     private void replaceLinks(Long articleId, List<Long> teamIds, List<Long> leagueIds,
-                              List<Long> countryIds, List<Long> playerIds) {
+                              List<Long> countryIds, List<Long> playerIds,
+                              List<Long> fixtureIds) {
         teamLinkRepository.deleteByArticleId(articleId);
         leagueLinkRepository.deleteByArticleId(articleId);
         countryLinkRepository.deleteByArticleId(articleId);
         playerLinkRepository.deleteByArticleId(articleId);
+        fixtureLinkRepository.deleteByArticleId(articleId);
 
         if (teamIds != null) {
             for (Long tid : distinct(teamIds)) {
@@ -362,6 +494,11 @@ public class NewsService {
         if (playerIds != null) {
             for (Long pid : distinct(playerIds)) {
                 playerLinkRepository.save(new ArticlePlayerLink(articleId, pid));
+            }
+        }
+        if (fixtureIds != null) {
+            for (Long fid : distinct(fixtureIds)) {
+                fixtureLinkRepository.save(new ArticleFixtureLink(articleId, fid));
             }
         }
     }
@@ -442,6 +579,8 @@ public class NewsService {
                 .map(ArticleCountryLink::getCountryId).toList();
         List<Long> playerIds = playerLinkRepository.findByArticleId(a.getId()).stream()
                 .map(ArticlePlayerLink::getPlayerId).toList();
+        List<Long> fixtureIds = fixtureLinkRepository.findByArticleId(a.getId()).stream()
+                .map(ArticleFixtureLink::getFixtureId).toList();
 
         List<String> availableLangs;
         if (a.getTranslationGroupId() != null) {
@@ -478,7 +617,8 @@ public class NewsService {
                 resolveTeams(teamIds),
                 resolveLeagues(leagueIds),
                 resolveCountries(countryIds),
-                resolvePlayers(playerIds));
+                resolvePlayers(playerIds),
+                resolveFixtures(fixtureIds));
     }
 
     // --- Bagli varlik ad/gorsel cozumleme (batch, N+1 onlenir) ---
@@ -505,7 +645,7 @@ public class NewsService {
                 .collect(Collectors.toMap(League::getId, Function.identity(), (a, b) -> a));
         return ids.stream()
                 .map(byId::get)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .map(l -> new NewsDetail.EntityRef(l.getId(), l.getName(),
                         logoOf(l.getLogoKey(), l.getLogoUrl())))
                 .toList();
@@ -519,7 +659,7 @@ public class NewsService {
                 .collect(Collectors.toMap(Country::getId, Function.identity(), (a, b) -> a));
         return ids.stream()
                 .map(byId::get)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .map(c -> new NewsDetail.EntityRef(c.getId(), c.getName(),
                         logoOf(c.getFlagKey(), c.getFlagUrl())))
                 .toList();
@@ -533,9 +673,37 @@ public class NewsService {
                 .collect(Collectors.toMap(Player::getId, Function.identity(), (a, b) -> a));
         return ids.stream()
                 .map(byId::get)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .map(p -> new NewsDetail.EntityRef(p.getId(), p.getName(),
                         logoOf(p.getPhotoKey(), p.getPhotoUrl())))
+                .toList();
+    }
+
+    /**
+     * Bagli maclari (fixture) hafif referanslara cozer — batch (N+1 onlenir).
+     * {@code findAllByIdWithDetails} lig + takimlar JOIN FETCH ile yuklendigi
+     * icin lazy proxy'ye dokunulur; ad "Ev - Deplasman", logo ev takimi
+     * logosu, kickoff mac baslangic zamani. Istenen id sirasi korunur.
+     */
+    private List<NewsDetail.FixtureRef> resolveFixtures(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Fixture> byId = fixtureRepository.findAllByIdWithDetails(ids).stream()
+                .collect(Collectors.toMap(Fixture::getId, Function.identity(), (a, b) -> a));
+        return ids.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .map(fx -> {
+                    Team home = fx.getHomeTeam();
+                    Team away = fx.getAwayTeam();
+                    String homeName = home != null ? home.getName() : "?";
+                    String awayName = away != null ? away.getName() : "?";
+                    String logo = home != null
+                            ? logoOf(home.getLogoKey(), home.getLogoUrl()) : null;
+                    return new NewsDetail.FixtureRef(
+                            fx.getId(), homeName + " - " + awayName, logo, fx.getKickoffAt());
+                })
                 .toList();
     }
 

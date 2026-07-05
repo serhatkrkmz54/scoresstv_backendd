@@ -19,7 +19,8 @@ public record SearchResponse(
         List<PlayerHit> players,
         List<FixtureHit> fixtures,
         List<CountryHit> countries,
-        List<CoachHit> coaches
+        List<CoachHit> coaches,
+        List<NewsHit> news
 ) {
     public record TeamHit(
             Long id, String name, String nameTr, String slug,
@@ -57,5 +58,14 @@ public record SearchResponse(
     public record CoachHit(
             Long id, String name, String nationality, Integer age,
             String photoUrl, Long currentTeamId, String currentTeamName
+    ) {}
+
+    /**
+     * Haber sonucu. slug ile haber detayina gidilir; coverImageUrl kart
+     * gorseli, publishedAt tarih rozeti, lang dil filtresi icindir.
+     */
+    public record NewsHit(
+            Long id, String slug, String lang, String title, String summary,
+            String coverImageUrl, Instant publishedAt
     ) {}
 }

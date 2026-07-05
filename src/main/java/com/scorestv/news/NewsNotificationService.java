@@ -9,6 +9,8 @@ import com.scorestv.football.domain.PlayerCareerTeamRepository;
 import com.scorestv.football.domain.Team;
 import com.scorestv.football.domain.TeamLeagueSeasonRepository;
 import com.scorestv.football.domain.TeamRepository;
+import com.scorestv.mobile.domain.DeviceMatchSubscription;
+import com.scorestv.mobile.domain.DeviceMatchSubscriptionRepository;
 import com.scorestv.mobile.domain.MobileDeviceToken;
 import com.scorestv.mobile.domain.MobileDeviceTokenRepository;
 import com.scorestv.mobile.domain.UserNotificationPref;
@@ -76,7 +78,9 @@ public class NewsNotificationService {
     private final ArticleLeagueLinkRepository leagueLinkRepository;
     private final ArticleCountryLinkRepository countryLinkRepository;
     private final ArticlePlayerLinkRepository playerLinkRepository;
+    private final ArticleFixtureLinkRepository fixtureLinkRepository;
     private final MobileDeviceTokenRepository deviceRepository;
+    private final DeviceMatchSubscriptionRepository matchSubscriptionRepository;
     private final UserNotificationPrefRepository prefRepository;
     private final TeamRepository teamRepository;
     private final LeagueRepository leagueRepository;
@@ -94,7 +98,9 @@ public class NewsNotificationService {
             ArticleLeagueLinkRepository leagueLinkRepository,
             ArticleCountryLinkRepository countryLinkRepository,
             ArticlePlayerLinkRepository playerLinkRepository,
+            ArticleFixtureLinkRepository fixtureLinkRepository,
             MobileDeviceTokenRepository deviceRepository,
+            DeviceMatchSubscriptionRepository matchSubscriptionRepository,
             UserNotificationPrefRepository prefRepository,
             TeamRepository teamRepository,
             LeagueRepository leagueRepository,
@@ -110,7 +116,9 @@ public class NewsNotificationService {
         this.leagueLinkRepository = leagueLinkRepository;
         this.countryLinkRepository = countryLinkRepository;
         this.playerLinkRepository = playerLinkRepository;
+        this.fixtureLinkRepository = fixtureLinkRepository;
         this.deviceRepository = deviceRepository;
+        this.matchSubscriptionRepository = matchSubscriptionRepository;
         this.prefRepository = prefRepository;
         this.teamRepository = teamRepository;
         this.leagueRepository = leagueRepository;
@@ -207,19 +215,49 @@ public class NewsNotificationService {
      * takimlari takip eden cihaz token'lari (dedup).
      */
     private Set<String> resolveFavoriteTokens(Long articleId, String lang) {
-        Set<Long> teamIds = resolveTargetTeamIds(articleId);
-        if (teamIds.isEmpty()) {
-            return Set.of();
-        }
         Set<String> tokens = new LinkedHashSet<>();
-        for (UserNotificationPref p :
-                prefRepository.findNewsFavoriteRecipients(teamIds, lang)) {
-            MobileDeviceToken t = p.getDeviceToken();
-            if (t != null && t.getFcmToken() != null) {
+
+        // 1) Takim/lig/oyuncu/ulke → TAKIM ID kumesi → o takimlari takip eden
+        //    cihazlar (UserNotificationPref uzerinden, dil eslesir).
+        Set<Long> teamIds = resolveTargetTeamIds(articleId);
+        if (!teamIds.isEmpty()) {
+            for (UserNotificationPref p :
+                    prefRepository.findNewsFavoriteRecipients(teamIds, lang)) {
+                MobileDeviceToken t = p.getDeviceToken();
+                if (t != null && t.getFcmToken() != null) {
+                    tokens.add(t.getFcmToken());
+                }
+            }
+        }
+
+        // 2) Habere bagli maclari (fixture) FAVORILEYEN cihazlar — mac-raporu
+        //    haberi o maci favorileyenlere de ulassin. device_match_subscriptions
+        //    uzerinden bulunur; ALL/lang alicilariyla ayni filtre (notifyNews +
+        //    locale on-eki) Java tarafinda uygulanir (findRecipientsForFixture
+        //    zaten notificationsEnabled=true suzer).
+        for (ArticleFixtureLink fl : fixtureLinkRepository.findByArticleId(articleId)) {
+            if (fl.getFixtureId() == null) continue;
+            for (DeviceMatchSubscription sub :
+                    matchSubscriptionRepository.findRecipientsForFixture(fl.getFixtureId())) {
+                MobileDeviceToken t = sub.getDeviceToken();
+                if (t == null || t.getFcmToken() == null) continue;
+                if (!t.isNotifyNews()) continue;
+                if (!localeMatches(t.getLocale(), lang)) continue;
                 tokens.add(t.getFcmToken());
             }
         }
+
         return tokens;
+    }
+
+    /**
+     * Cihaz locale'i haber diline (on-ek) eslesiyor mu? findNewsRecipientsByLang
+     * ile ayni semantik: cihaz "tr"/"TR"/"en-US" gibi degerler tutabilir.
+     */
+    private static boolean localeMatches(String locale, String lang) {
+        if (locale == null || lang == null) return false;
+        return locale.toLowerCase(Locale.ROOT)
+                .startsWith(lang.toLowerCase(Locale.ROOT));
     }
 
     /**

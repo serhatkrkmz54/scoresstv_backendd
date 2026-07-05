@@ -67,6 +67,12 @@ public record CreateNewsRequest(
          * Push hedefi: ALL veya FAVORITES. null ise FAVORITES varsayilir.
          * (opsiyonel; YENI eklendi.)
          */
-        NewsPushTarget pushTarget
+        NewsPushTarget pushTarget,
+
+        /**
+         * Bagli mac (fixture) id'leri — API-Football fixture id'leri. Habere
+         * mac raporu/onizlemesi baglamak icin (opsiyonel; YENI eklendi).
+         */
+        List<Long> fixtureIds
 ) {
 }

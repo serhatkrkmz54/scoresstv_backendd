@@ -6,6 +6,7 @@ import com.scorestv.news.dto.NewsDetail;
 import com.scorestv.news.dto.NewsPageResponse;
 import com.scorestv.news.dto.UpdateNewsRequest;
 import com.scorestv.security.CurrentUser;
+import org.springframework.beans.factory.ObjectProvider;
 import com.scorestv.storage.MinioStorageService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.Serializable;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -46,10 +48,14 @@ public class NewsAdminController {
 
     private final NewsService service;
     private final MinioStorageService storage;
+    /** ES kapaliyken (scorestv.elasticsearch.enabled=false) bean yoktur — opsiyonel. */
+    private final ObjectProvider<NewsIndexer> newsIndexer;
 
-    public NewsAdminController(NewsService service, MinioStorageService storage) {
+    public NewsAdminController(NewsService service, MinioStorageService storage,
+                               ObjectProvider<NewsIndexer> newsIndexer) {
         this.service = service;
         this.storage = storage;
+        this.newsIndexer = newsIndexer;
     }
 
     /** Admin liste — tum durumlar + filtre + metin aramasi. */
@@ -119,6 +125,23 @@ public class NewsAdminController {
     public void delete(@PathVariable Long id,
                        @AuthenticationPrincipal CurrentUser currentUser) {
         service.softDelete(id, currentUser.id());
+    }
+
+    /**
+     * Tum yayindaki haberleri Elasticsearch'e yeniden indexler (EDITOR/ADMIN).
+     * On-demand backfill — idempotent (upsert). ES kapaliyken (bean yok) 409
+     * benzeri bir uyari doner; index'i bozmaz.
+     */
+    @PostMapping("/reindex")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public Map<String, Object> reindex() {
+        NewsIndexer indexer = newsIndexer.getIfAvailable();
+        if (indexer == null) {
+            return Map.of("status", "disabled",
+                    "message", "Elasticsearch kapali (scorestv.elasticsearch.enabled=false).");
+        }
+        long n = indexer.reindexAll();
+        return Map.of("status", "ok", "indexed", n);
     }
 
     /**

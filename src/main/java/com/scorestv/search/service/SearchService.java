@@ -6,6 +6,7 @@ import co.elastic.clients.elasticsearch._types.query_dsl.MultiMatchQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
+import com.scorestv.search.index.ArticleDoc;
 import com.scorestv.search.index.CoachDoc;
 import com.scorestv.search.index.CountryDoc;
 import com.scorestv.search.index.FixtureDoc;
@@ -88,7 +89,8 @@ public class SearchService {
 
         if (q.length() < MIN_QUERY_LEN) {
             return new SearchResponse(q, 0L,
-                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                    List.of());
         }
 
         boolean all = types == null || types.isEmpty();
@@ -105,12 +107,15 @@ public class SearchService {
                 ? searchCountries(q) : List.of();
         List<SearchResponse.CoachHit> coaches = (all || types.contains("coach"))
                 ? searchCoaches(q) : List.of();
+        List<SearchResponse.NewsHit> news = (all || types.contains("news"))
+                ? searchNews(q, types) : List.of();
 
         // Lokal hiç sonuç yoksa → API-Football'dan derin arama tetikle (async,
         // fire-and-forget). Bulunan kayıtlar DB'ye + (event ile) ES'e yazılır;
         // kullanıcı kısa süre sonra (yeniden arama / frontend retry) görür.
         if (teams.isEmpty() && leagues.isEmpty() && players.isEmpty()
-                && fixtures.isEmpty() && countries.isEmpty() && coaches.isEmpty()) {
+                && fixtures.isEmpty() && countries.isEmpty() && coaches.isEmpty()
+                && news.isEmpty()) {
             deepSearch.triggerAsync(q);
         }
 
@@ -120,7 +125,7 @@ public class SearchService {
                 fixtures.size(), countries.size(), coaches.size());
 
         return new SearchResponse(q, took,
-                teams, leagues, players, fixtures, countries, coaches);
+                teams, leagues, players, fixtures, countries, coaches, news);
     }
 
     // ============================================================
@@ -288,5 +293,51 @@ public class SearchService {
                     d.getPhotoUrl(), d.getCurrentTeamId(), d.getCurrentTeamName()));
         });
         return out;
+    }
+
+    /**
+     * Haber araması — baslik + ozet autocomplete. Yalniz index'teki (yayinda)
+     * haberler doner (NewsIndexer sadece PUBLISHED yazar). {@code types} icinde
+     * "lang:tr"/"lang:en" gecerse o dile suzulur; yoksa tum diller. Populerlik
+     * (viewCount) function_score ile uste cikar.
+     */
+    private List<SearchResponse.NewsHit> searchNews(String q, Set<String> types) {
+        String lang = langFilterFrom(types);
+        Query mm = Query.of(b -> b.multiMatch(MultiMatchQuery.of(m -> m
+                .query(q)
+                .fields("title^3", "summary")
+                .type(TextQueryType.MostFields)
+                .operator(Operator.And))));
+        Query scored = withPopularity(mm);
+        Query finalQuery = (lang == null) ? scored
+                : Query.of(b -> b.bool(bq -> bq
+                        .must(scored)
+                        .filter(fq -> fq.term(t -> t.field("lang").value(lang)))));
+        var nq = NativeQuery.builder()
+                .withQuery(finalQuery)
+                .withMaxResults(MAX_PER_TYPE)
+                .build();
+        SearchHits<ArticleDoc> hits = ops.search(nq, ArticleDoc.class,
+                IndexCoordinates.of("scorestv_news"));
+        List<SearchResponse.NewsHit> out = new ArrayList<>();
+        hits.forEach(h -> {
+            var d = h.getContent();
+            out.add(new SearchResponse.NewsHit(
+                    d.getId(), d.getSlug(), d.getLang(), d.getTitle(), d.getSummary(),
+                    d.getCoverImageUrl(), d.getPublishedAt()));
+        });
+        return out;
+    }
+
+    /** types icindeki "lang:xx" tokeninden dil suzgeci (yoksa null = tum diller). */
+    private static String langFilterFrom(Set<String> types) {
+        if (types == null) return null;
+        for (String t : types) {
+            if (t != null && t.startsWith("lang:")) {
+                String v = t.substring("lang:".length()).trim();
+                if (!v.isEmpty()) return v;
+            }
+        }
+        return null;
     }
 }

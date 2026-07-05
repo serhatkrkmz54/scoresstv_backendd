@@ -88,6 +88,24 @@ public interface NewsArticleRepository extends JpaRepository<NewsArticle, Long> 
                                             Pageable pageable);
 
     /**
+     * Public liste — belirli bir maca (fixture) bagli yayinda haberler (link
+     * tablosu uzerinden). Dile gore, en yeni yayin once.
+     */
+    @Query("""
+            SELECT a FROM NewsArticle a
+            WHERE a.id IN (SELECT l.articleId FROM ArticleFixtureLink l WHERE l.fixtureId = :fixtureId)
+              AND a.status = com.scorestv.news.NewsStatus.PUBLISHED
+              AND a.deletedAt IS NULL
+              AND a.lang = :lang
+              AND (a.publishedAt IS NULL OR a.publishedAt <= :now)
+            ORDER BY a.publishedAt DESC, a.id DESC
+            """)
+    Page<NewsArticle> findPublishedByFixture(@Param("fixtureId") Long fixtureId,
+                                             @Param("lang") String lang,
+                                             @Param("now") Instant now,
+                                             Pageable pageable);
+
+    /**
      * Admin liste — tum durumlar (silinmemis), opsiyonel durum/dil/kategori
      * filtreli + baslik/ozet metin aramasi (bos ise atlanir). En yeni once.
      */
@@ -106,6 +124,30 @@ public interface NewsArticleRepository extends JpaRepository<NewsArticle, Long> 
                                    @Param("category") NewsCategory category,
                                    @Param("q") String q,
                                    Pageable pageable);
+
+    /**
+     * DB fallback "ilgili haberler" (ES kapaliyken) — ayni dil, kendisi haric,
+     * kaynak haberle en az bir takim VEYA lig linkini paylasan yayinda haberler.
+     * En yeni yayin once. Paylasilan takim/lig id kumeleri (bos olabilir; ikisi
+     * de bos ise sorgu hicbir sey dondurmez — cagiran son-care en yeniyi doner).
+     */
+    @Query("""
+            SELECT DISTINCT a FROM NewsArticle a
+            WHERE a.id <> :selfId
+              AND a.status = com.scorestv.news.NewsStatus.PUBLISHED
+              AND a.deletedAt IS NULL
+              AND a.lang = :lang
+              AND (a.publishedAt IS NULL OR a.publishedAt <= :now)
+              AND (a.id IN (SELECT tl.articleId FROM ArticleTeamLink tl WHERE tl.teamId IN :teamIds)
+                OR a.id IN (SELECT ll.articleId FROM ArticleLeagueLink ll WHERE ll.leagueId IN :leagueIds))
+            ORDER BY a.publishedAt DESC, a.id DESC
+            """)
+    List<NewsArticle> findRelatedFallback(@Param("selfId") Long selfId,
+                                          @Param("lang") String lang,
+                                          @Param("teamIds") List<Long> teamIds,
+                                          @Param("leagueIds") List<Long> leagueIds,
+                                          @Param("now") Instant now,
+                                          Pageable pageable);
 
     /** Bir ceviri grubuna ait tum (silinmemis) haberler — dil esleri. */
     @Query("""
