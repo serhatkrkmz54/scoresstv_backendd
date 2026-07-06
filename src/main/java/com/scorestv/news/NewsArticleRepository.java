@@ -115,6 +115,7 @@ public interface NewsArticleRepository extends JpaRepository<NewsArticle, Long> 
               AND (:status IS NULL OR a.status = :status)
               AND (:lang IS NULL OR a.lang = :lang)
               AND (:category IS NULL OR a.category = :category)
+              AND (:sport IS NULL OR a.sport = :sport)
               AND (:q IS NULL OR LOWER(a.title) LIKE LOWER(CONCAT('%', CAST(:q AS string), '%'))
                               OR LOWER(a.summary) LIKE LOWER(CONCAT('%', CAST(:q AS string), '%')))
             ORDER BY a.createdAt DESC, a.id DESC
@@ -122,6 +123,7 @@ public interface NewsArticleRepository extends JpaRepository<NewsArticle, Long> 
     Page<NewsArticle> findForAdmin(@Param("status") NewsStatus status,
                                    @Param("lang") String lang,
                                    @Param("category") NewsCategory category,
+                                   @Param("sport") String sport,
                                    @Param("q") String q,
                                    Pageable pageable);
 

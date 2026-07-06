@@ -71,6 +71,17 @@ management:
       probes:
         enabled: true
 
+# --- Haber cevirisi (DeepL) ---
+# Editor panelinde "Ingilizce ceviri olustur" butonu bu servisi kullanir.
+# api-key BOS ise ceviri devre disi (panel butonu gizlenir).
+news:
+  translate:
+    deepl:
+      # Ucretsiz Developer plani anahtari (DeepL hesabindan alinir).
+      api-key: ${DEEPL_API_KEY:}
+      # Ucretsiz plan: https://api-free.deepl.com | Pro plan: https://api.deepl.com
+      base-url: ${DEEPL_BASE_URL:https://api-free.deepl.com}
+
 # --- Uygulamaya ozel ayarlar ---
 scorestv:
   # ============================================================

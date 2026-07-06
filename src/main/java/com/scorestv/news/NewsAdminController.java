@@ -4,6 +4,8 @@ import com.scorestv.common.ApiException;
 import com.scorestv.news.dto.CreateNewsRequest;
 import com.scorestv.news.dto.NewsDetail;
 import com.scorestv.news.dto.NewsPageResponse;
+import com.scorestv.news.dto.TranslateNewsRequest;
+import com.scorestv.news.dto.TranslateNewsResult;
 import com.scorestv.news.dto.UpdateNewsRequest;
 import com.scorestv.security.CurrentUser;
 import org.springframework.beans.factory.ObjectProvider;
@@ -48,13 +50,16 @@ public class NewsAdminController {
 
     private final NewsService service;
     private final MinioStorageService storage;
+    private final NewsTranslationService translationService;
     /** ES kapaliyken (scorestv.elasticsearch.enabled=false) bean yoktur — opsiyonel. */
     private final ObjectProvider<NewsIndexer> newsIndexer;
 
     public NewsAdminController(NewsService service, MinioStorageService storage,
+                               NewsTranslationService translationService,
                                ObjectProvider<NewsIndexer> newsIndexer) {
         this.service = service;
         this.storage = storage;
+        this.translationService = translationService;
         this.newsIndexer = newsIndexer;
     }
 
@@ -65,10 +70,11 @@ public class NewsAdminController {
             @RequestParam(required = false) NewsStatus status,
             @RequestParam(required = false) String lang,
             @RequestParam(required = false) NewsCategory category,
+            @RequestParam(required = false) String sport,
             @RequestParam(required = false) String q,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return service.listForAdmin(status, lang, category, q, page, size);
+        return service.listForAdmin(status, lang, category, sport, q, page, size);
     }
 
     /** Admin detay — id ile (her durum). */
@@ -76,6 +82,24 @@ public class NewsAdminController {
     @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
     public NewsDetail get(@PathVariable Long id) {
         return service.getForAdmin(id);
+    }
+
+    /** Ceviri servisi durumu — panel "Ceviri olustur" butonunu gizlemek icin. */
+    @GetMapping("/translate/status")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public Map<String, Boolean> translateStatus() {
+        return Map.of("enabled", translationService.isEnabled());
+    }
+
+    /**
+     * Baslik/ozet/govdeyi kaynak dilden hedef dile cevir (EDITOR/ADMIN). Kayit
+     * OLUSTURMAZ — sadece cevrilmis metni doner; editor bu degerlerle bagli
+     * (translationGroupId) yeni bir dil taslagi acar. body HTML tag-korumali.
+     */
+    @PostMapping("/translate")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public TranslateNewsResult translate(@RequestBody TranslateNewsRequest req) {
+        return translationService.translate(req);
     }
 
     /** Yeni haber olustur (EDITOR/ADMIN). */

@@ -253,11 +253,12 @@ public class NewsService {
     /** Admin liste — tum durumlar (silinmemis) + filtre + metin aramasi. */
     @Transactional(readOnly = true)
     public NewsPageResponse listForAdmin(NewsStatus status, String lang,
-                                         NewsCategory category, String q,
-                                         int page, int size) {
+                                         NewsCategory category, String sport,
+                                         String q, int page, int size) {
         String query = (q == null || q.isBlank()) ? null : q.trim();
+        String sportFilter = (sport == null || sport.isBlank()) ? null : sport.trim();
         Page<NewsArticle> result = articleRepository.findForAdmin(
-                status, lang, category, query, safePage(page, size));
+                status, lang, category, sportFilter, query, safePage(page, size));
         return toPageResponse(result);
     }
 
