@@ -477,6 +477,15 @@ public class NewsService {
         playerLinkRepository.deleteByArticleId(articleId);
         fixtureLinkRepository.deleteByArticleId(articleId);
 
+        // ONEMLI: Silmeleri INSERT'lerden ONCE veritabanina gonder. Bu satir
+        // olmadan Hibernate action-ordering'i (INSERT'ler DELETE'lerden once)
+        // yuzunden ayni (article_id, entity_id) satiri hala DB'de iken tekrar
+        // eklenmeye calisilir ve uq_article_team / uq_article_league ... ihlali
+        // olur. flush() bu noktada YALNIZ bekleyen DELETE'leri yazar (henuz
+        // link INSERT'i kuyruga girmedi); boylece cakisma kalkar. Ayni takim/
+        // lig bagliyken haber guncellemesini de duzeltir.
+        teamLinkRepository.flush();
+
         if (teamIds != null) {
             for (Long tid : distinct(teamIds)) {
                 teamLinkRepository.save(new ArticleTeamLink(articleId, tid));
