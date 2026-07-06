@@ -66,6 +66,14 @@ public class NewsSanitizer {
                 .addAttributes("blockquote", "style")
                 .addAttributes("figure", "style")
                 .addAttributes("img", "style")
+                // Metin RENGI (color) + GLOW (text-shadow) icin span'e style.
+                // span relaxed tag listesinde var; sadece style oznitel.
+                // Icerik guvenilir EDITOR/ADMIN'den uretilir; jsoup script/
+                // onclick/js: URL'lerini zaten ayiklar.
+                .addTags("span")
+                .addAttributes("span", "style")
+                // Glow mark'i span[data-glow] uretir; oznitelik korunsun.
+                .addAttributes("span", "data-glow")
                 // Baglantilara guvenli rel eklemek icin target'a izin.
                 .addAttributes("a", "target", "rel")
                 // Video gomulu (YouTube/Twitter). Yalniz asagidaki protokol +
