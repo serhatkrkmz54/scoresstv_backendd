@@ -25,6 +25,8 @@ public record NewsDetail(
         String sport,
         boolean isBreaking,
         boolean isFeatured,
+        boolean inSlider,
+        int sliderOrder,
         String authorName,
         long viewCount,
         Integer readingMinutes,

@@ -20,6 +20,8 @@ public record NewsListItem(
         String sport,
         boolean isBreaking,
         boolean isFeatured,
+        boolean inSlider,
+        int sliderOrder,
         Instant publishedAt,
         Integer readingMinutes
 ) implements Serializable {

@@ -53,6 +53,17 @@ public class NewsController {
         return service.listPublished(lang, page, size, category, sport, featured);
     }
 
+    /**
+     * Web /haberler slider'i — dile gore, inSlider isaretli yayinda haberler
+     * (slider_order + en yeni). limit varsayilan 8.
+     */
+    @GetMapping("/slider")
+    public List<NewsListItem> slider(
+            @RequestParam(defaultValue = "tr") String lang,
+            @RequestParam(defaultValue = "8") int limit) {
+        return service.listSlider(lang, limit);
+    }
+
     /** Yayinda haber detayi (slug ile). Goruntuleme sayisini artirir. */
     @GetMapping("/{slug}")
     public NewsDetail detail(@PathVariable String slug) {

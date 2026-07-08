@@ -126,6 +126,17 @@ public class NewsService {
         return toPageResponse(result);
     }
 
+    /** Web slider'i — inSlider=true yayinda haberler; slider_order + en yeni. */
+    @Transactional(readOnly = true)
+    public List<NewsListItem> listSlider(String lang, int limit) {
+        int capped = Math.min(Math.max(limit, 1), 20);
+        return articleRepository
+                .findSlider(lang, Instant.now(), PageRequest.of(0, capped))
+                .stream()
+                .map(this::toListItem)
+                .toList();
+    }
+
     /** Public liste — bir takima bagli yayinda haberler. */
     @Transactional(readOnly = true)
     public NewsPageResponse listPublishedByTeam(Long teamId, String lang,
@@ -291,6 +302,8 @@ public class NewsService {
                 ? req.sport().trim() : "FOOTBALL");
         a.setBreaking(req.isBreaking());
         a.setFeatured(req.isFeatured());
+        a.setInSlider(req.inSlider());
+        a.setSliderOrder(req.sliderOrder());
         a.setSource(req.source() != null && !req.source().isBlank()
                 ? req.source().trim() : "MANUAL");
         a.setSourceUrl(trimOrNull(req.sourceUrl()));
@@ -341,6 +354,8 @@ public class NewsService {
                 ? req.sport().trim() : a.getSport());
         a.setBreaking(req.isBreaking());
         a.setFeatured(req.isFeatured());
+        a.setInSlider(req.inSlider());
+        a.setSliderOrder(req.sliderOrder());
         a.setSource(req.source() != null && !req.source().isBlank()
                 ? req.source().trim() : a.getSource());
         a.setSourceUrl(trimOrNull(req.sourceUrl()));
@@ -573,6 +588,8 @@ public class NewsService {
                 a.getSport(),
                 a.isBreaking(),
                 a.isFeatured(),
+                a.isInSlider(),
+                a.getSliderOrder(),
                 a.getPublishedAt(),
                 a.getReadingMinutes());
     }
@@ -673,6 +690,8 @@ public class NewsService {
                 a.getSport(),
                 a.isBreaking(),
                 a.isFeatured(),
+                a.isInSlider(),
+                a.getSliderOrder(),
                 authorName,
                 a.getViewCount(),
                 a.getReadingMinutes(),

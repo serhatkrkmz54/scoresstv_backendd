@@ -64,6 +64,14 @@ public class NewsArticle extends BaseEntity {
     @Column(name = "is_featured", nullable = false)
     private boolean featured = false;
 
+    /** Web /haberler slider'inda gosterilsin mi (panelden yonetilir). */
+    @Column(name = "in_slider", nullable = false)
+    private boolean inSlider = false;
+
+    /** Slider siralamasi — kucukten buyuge; esitse en yeni yayin once. */
+    @Column(name = "slider_order", nullable = false)
+    private int sliderOrder = 0;
+
     /** Spor kolu — "FOOTBALL" (varsayilan) / "BASKETBALL" / "VOLLEYBALL". */
     @Column(nullable = false, length = 16)
     private String sport = "FOOTBALL";

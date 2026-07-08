@@ -43,6 +43,10 @@ public record UpdateNewsRequest(
         boolean isBreaking,
         boolean isFeatured,
 
+        /** Web slider'da gosterilsin mi + siralamasi (opsiyonel; varsayilan false/0). */
+        boolean inSlider,
+        int sliderOrder,
+
         NewsStatus status,
 
         Instant publishedAt,

@@ -52,6 +52,23 @@ public interface NewsArticleRepository extends JpaRepository<NewsArticle, Long> 
                                     Pageable pageable);
 
     /**
+     * Web slider'i — inSlider=true, YAYINDA, silinmemis, yayin zamani gecmis,
+     * dile gore. slider_order artan; esitse en yeni yayin once.
+     */
+    @Query("""
+            SELECT a FROM NewsArticle a
+            WHERE a.status = com.scorestv.news.NewsStatus.PUBLISHED
+              AND a.deletedAt IS NULL
+              AND a.lang = :lang
+              AND a.inSlider = true
+              AND (a.publishedAt IS NULL OR a.publishedAt <= :now)
+            ORDER BY a.sliderOrder ASC, a.publishedAt DESC, a.id DESC
+            """)
+    List<NewsArticle> findSlider(@Param("lang") String lang,
+                                 @Param("now") Instant now,
+                                 Pageable pageable);
+
+    /**
      * Public liste — belirli bir takima bagli yayinda haberler (link tablosu
      * uzerinden). Dile gore, en yeni yayin once.
      */
