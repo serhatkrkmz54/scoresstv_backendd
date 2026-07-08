@@ -578,6 +578,23 @@ public class NewsService {
     }
 
     /**
+     * Bir haberin ceviri GRUBU — kendisi + dil esleri (silinmemis). Cift-dil
+     * yan yana duzenleme ekrani icin. Grup yoksa yalniz kendisini doner.
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public List<NewsDetail> group(Long id) {
+        NewsArticle self = articleRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> ApiException.notFound("Haber bulunamadi."));
+        List<NewsArticle> rows;
+        if (self.getTranslationGroupId() != null) {
+            rows = articleRepository.findByTranslationGroupId(self.getTranslationGroupId());
+        } else {
+            rows = List.of(self);
+        }
+        return rows.stream().map(this::toDetail).toList();
+    }
+
+    /**
      * Bir medya (gorsel) anahtarini kullanan silinmemis haberler — medya
      * kutuphanesinde silme oncesi "hangi habere bagli" gostermek icin.
      */

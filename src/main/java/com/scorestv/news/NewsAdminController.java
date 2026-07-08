@@ -171,6 +171,16 @@ public class NewsAdminController {
     }
 
     /**
+     * Bir haberin ceviri grubu (EDITOR/ADMIN) — kendisi + dil esleri.
+     * Cift-dil yan yana duzenleme ekrani bununla iki makaleyi birden yukler.
+     */
+    @GetMapping("/{id}/group")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public List<NewsDetail> group(@PathVariable Long id) {
+        return service.group(id);
+    }
+
+    /**
      * Haber gorseli yukle (EDITOR/ADMIN) — MinIO'ya "articles/{uuid}.{ext}"
      * anahtariyla yazar, {key, url} doner. Editor bu URL'yi govdeye veya kapak
      * anahtarina yerlestirir.
