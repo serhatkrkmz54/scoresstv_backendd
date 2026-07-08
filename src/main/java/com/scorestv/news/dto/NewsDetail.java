@@ -42,11 +42,16 @@ public record NewsDetail(
         List<FixtureRef> fixtures
 ) implements Serializable {
 
-    /** Bagli varlik hafif referansi. logo/photo/flag URL'si (varsa). */
+    /**
+     * Bagli varlik hafif referansi. logo/photo/flag URL'si (varsa) + turune
+     * ozel kisa alt-bilgi ({@code subtitle}): takim/lig→ulke, oyuncu→uyruk,
+     * ulke→kod. Web'de zengin kartta ismin altinda gosterilir (null olabilir).
+     */
     public record EntityRef(
             Long id,
             String name,
-            String logo
+            String logo,
+            String subtitle
     ) implements Serializable {
     }
 
@@ -59,7 +64,15 @@ public record NewsDetail(
             Long id,
             String name,
             String logo,
-            java.time.Instant kickoff
+            java.time.Instant kickoff,
+            String slug,
+            String homeName,
+            String homeLogo,
+            String awayName,
+            String awayLogo,
+            Integer homeGoals,
+            Integer awayGoals,
+            String statusShort
     ) implements Serializable {
     }
 }

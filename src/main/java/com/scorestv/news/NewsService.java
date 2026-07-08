@@ -1,6 +1,7 @@
 package com.scorestv.news;
 
 import com.scorestv.common.ApiException;
+import com.scorestv.common.SlugUtil;
 import com.scorestv.football.domain.Country;
 import com.scorestv.football.domain.CountryRepository;
 import com.scorestv.football.domain.League;
@@ -700,16 +701,16 @@ public class NewsService {
                 a.getPublishedAt(),
                 a.getTranslationGroupId(),
                 availableLangs,
-                resolveTeams(teamIds),
-                resolveLeagues(leagueIds),
-                resolveCountries(countryIds),
+                resolveTeams(teamIds, a.getLang()),
+                resolveLeagues(leagueIds, a.getLang()),
+                resolveCountries(countryIds, a.getLang()),
                 resolvePlayers(playerIds),
-                resolveFixtures(fixtureIds));
+                resolveFixtures(fixtureIds, a.getLang()));
     }
 
     // --- Bagli varlik ad/gorsel cozumleme (batch, N+1 onlenir) ---
 
-    private List<NewsDetail.EntityRef> resolveTeams(List<Long> ids) {
+    private List<NewsDetail.EntityRef> resolveTeams(List<Long> ids, String lang) {
         if (ids.isEmpty()) {
             return List.of();
         }
@@ -718,12 +719,13 @@ public class NewsService {
         return ids.stream()
                 .map(byId::get)
                 .filter(java.util.Objects::nonNull)
-                .map(t -> new NewsDetail.EntityRef(t.getId(), t.getName(),
-                        logoOf(t.getLogoKey(), t.getLogoUrl())))
+                .map(t -> new NewsDetail.EntityRef(t.getId(),
+                        localized(lang, t.getNameTr(), t.getName()),
+                        logoOf(t.getLogoKey(), t.getLogoUrl()), t.getCountry()))
                 .toList();
     }
 
-    private List<NewsDetail.EntityRef> resolveLeagues(List<Long> ids) {
+    private List<NewsDetail.EntityRef> resolveLeagues(List<Long> ids, String lang) {
         if (ids.isEmpty()) {
             return List.of();
         }
@@ -732,12 +734,13 @@ public class NewsService {
         return ids.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)
-                .map(l -> new NewsDetail.EntityRef(l.getId(), l.getName(),
-                        logoOf(l.getLogoKey(), l.getLogoUrl())))
+                .map(l -> new NewsDetail.EntityRef(l.getId(),
+                        localized(lang, l.getNameTr(), l.getName()),
+                        logoOf(l.getLogoKey(), l.getLogoUrl()), l.getCountryName()))
                 .toList();
     }
 
-    private List<NewsDetail.EntityRef> resolveCountries(List<Long> ids) {
+    private List<NewsDetail.EntityRef> resolveCountries(List<Long> ids, String lang) {
         if (ids.isEmpty()) {
             return List.of();
         }
@@ -746,8 +749,9 @@ public class NewsService {
         return ids.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)
-                .map(c -> new NewsDetail.EntityRef(c.getId(), c.getName(),
-                        logoOf(c.getFlagKey(), c.getFlagUrl())))
+                .map(c -> new NewsDetail.EntityRef(c.getId(),
+                        localized(lang, c.getNameTr(), c.getName()),
+                        logoOf(c.getFlagKey(), c.getFlagUrl()), c.getCode()))
                 .toList();
     }
 
@@ -761,7 +765,7 @@ public class NewsService {
                 .map(byId::get)
                 .filter(Objects::nonNull)
                 .map(p -> new NewsDetail.EntityRef(p.getId(), p.getName(),
-                        logoOf(p.getPhotoKey(), p.getPhotoUrl())))
+                        logoOf(p.getPhotoKey(), p.getPhotoUrl()), p.getNationality()))
                 .toList();
     }
 
@@ -771,7 +775,7 @@ public class NewsService {
      * icin lazy proxy'ye dokunulur; ad "Ev - Deplasman", logo ev takimi
      * logosu, kickoff mac baslangic zamani. Istenen id sirasi korunur.
      */
-    private List<NewsDetail.FixtureRef> resolveFixtures(List<Long> ids) {
+    private List<NewsDetail.FixtureRef> resolveFixtures(List<Long> ids, String lang) {
         if (ids.isEmpty()) {
             return List.of();
         }
@@ -783,14 +787,30 @@ public class NewsService {
                 .map(fx -> {
                     Team home = fx.getHomeTeam();
                     Team away = fx.getAwayTeam();
-                    String homeName = home != null ? home.getName() : "?";
-                    String awayName = away != null ? away.getName() : "?";
-                    String logo = home != null
+                    String homeName = home != null
+                            ? localized(lang, home.getNameTr(), home.getName()) : "?";
+                    String awayName = away != null
+                            ? localized(lang, away.getNameTr(), away.getName()) : "?";
+                    String homeLogo = home != null
                             ? logoOf(home.getLogoKey(), home.getLogoUrl()) : null;
+                    String awayLogo = away != null
+                            ? logoOf(away.getLogoKey(), away.getLogoUrl()) : null;
+                    String slug = SlugUtil.fixtureSlug(homeName, awayName, fx.getId());
                     return new NewsDetail.FixtureRef(
-                            fx.getId(), homeName + " - " + awayName, logo, fx.getKickoffAt());
+                            fx.getId(), homeName + " - " + awayName, homeLogo,
+                            fx.getKickoffAt(), slug,
+                            homeName, homeLogo, awayName, awayLogo,
+                            fx.getHomeGoals(), fx.getAwayGoals(), fx.getStatusShort());
                 })
                 .toList();
+    }
+
+    /** lang=tr ise Turkce ad (nameTr doluysa), aksi halde varsayilan (name). */
+    private static String localized(String lang, String nameTr, String name) {
+        if ("tr".equalsIgnoreCase(lang) && nameTr != null && !nameTr.isBlank()) {
+            return nameTr;
+        }
+        return name;
     }
 
     /** MinIO key (mirror) varsa CDN URL'si, yoksa orijinal harici URL. */
