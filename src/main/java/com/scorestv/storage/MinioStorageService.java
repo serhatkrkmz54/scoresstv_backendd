@@ -1,11 +1,14 @@
 package com.scorestv.storage;
 
 import io.minio.BucketExistsArgs;
+import io.minio.ListObjectsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
+import io.minio.Result;
 import io.minio.SetBucketPolicyArgs;
+import io.minio.messages.Item;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -14,6 +17,9 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * MinIO (S3 uyumlu) nesne depolama servisi.
@@ -128,6 +134,63 @@ public class MinioStorageService {
         } catch (Exception ex) {
             throw new StorageException("Nesne silinemedi: " + objectKey, ex);
         }
+    }
+
+    /**
+     * Verilen önek (prefix) altındaki nesneleri listeler — en yeni en üstte.
+     * Klasör girdileri atlanır. MinIO erişilemezse BOŞ liste döner (yumuşak
+     * bağımlılık — çağıran çökmez). {@code limit} ile üst sınır uygulanır.
+     */
+    public List<StoredObject> list(String prefix, int limit) {
+        List<StoredObject> out = new ArrayList<>();
+        try {
+            Iterable<Result<Item>> results = minioClient.listObjects(
+                    ListObjectsArgs.builder()
+                            .bucket(properties.bucket())
+                            .prefix(prefix)
+                            .recursive(true)
+                            .build());
+            for (Result<Item> r : results) {
+                Item item = r.get();
+                if (item.isDir()) {
+                    continue;
+                }
+                String key = item.objectName();
+                Instant lm = null;
+                try {
+                    if (item.lastModified() != null) {
+                        lm = item.lastModified().toInstant();
+                    }
+                } catch (Exception ignored) {
+                    // bazı sürümler lastModified vermez — önemli değil
+                }
+                out.add(new StoredObject(key, publicUrl(key), item.size(), lm));
+            }
+        } catch (Exception ex) {
+            log.warn("MinIO listeleme başarısız (prefix={}): {}", prefix, ex.getMessage());
+            return List.of();
+        }
+        // En yeni önce (lastModified boşsa sona)
+        out.sort((x, y) -> {
+            if (x.lastModified() == null && y.lastModified() == null) {
+                return 0;
+            }
+            if (x.lastModified() == null) {
+                return 1;
+            }
+            if (y.lastModified() == null) {
+                return -1;
+            }
+            return y.lastModified().compareTo(x.lastModified());
+        });
+        if (limit > 0 && out.size() > limit) {
+            return new ArrayList<>(out.subList(0, limit));
+        }
+        return out;
+    }
+
+    /** Depodaki bir nesnenin hafif özeti (medya kütüphanesi için). */
+    public record StoredObject(String key, String url, long size, Instant lastModified) {
     }
 
     /** Bir nesne anahtarının herkese açık URL'sini üretir. */

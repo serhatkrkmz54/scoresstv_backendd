@@ -43,4 +43,29 @@ public interface MobileDeviceTokenRepository
               AND t.notifyNews = true
             """)
     List<MobileDeviceToken> findNewsRecipientsByLang(@Param("lang") String lang);
+
+    /**
+     * Genel (broadcast) bildirim alicilari. Yalnizca master
+     * {@code notificationsEnabled} acik cihazlar. Opsiyonel filtreler:
+     *   platform null → tum platformlar; degilse "ios"/"android" ile eslesir.
+     *   lang null      → tum diller; degilse locale on eki (LIKE :lang%) ile eslesir.
+     */
+    @Query("""
+            SELECT t FROM MobileDeviceToken t
+            WHERE t.notificationsEnabled = true
+              AND (:platform IS NULL OR LOWER(t.platform) = :platform)
+              AND (:lang IS NULL OR LOWER(t.locale) LIKE LOWER(CONCAT(:lang, '%')))
+            """)
+    List<MobileDeviceToken> findBroadcastRecipients(@Param("platform") String platform,
+                                                    @Param("lang") String lang);
+
+    /** {@link #findBroadcastRecipients} ile ayni filtre — sadece SAYI (hizli, enqueue aninda). */
+    @Query("""
+            SELECT COUNT(t) FROM MobileDeviceToken t
+            WHERE t.notificationsEnabled = true
+              AND (:platform IS NULL OR LOWER(t.platform) = :platform)
+              AND (:lang IS NULL OR LOWER(t.locale) LIKE LOWER(CONCAT(:lang, '%')))
+            """)
+    long countBroadcastRecipients(@Param("platform") String platform,
+                                  @Param("lang") String lang);
 }

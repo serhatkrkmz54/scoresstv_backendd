@@ -611,6 +611,7 @@ public class NewsService {
                 a.getSummary(),
                 a.getBody(),
                 coverUrl(a.getCoverImageKey()),
+                a.getCoverImageKey(),
                 a.getStatus(),
                 a.getCategory(),
                 a.getSport(),

@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.Serializable;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -194,6 +195,30 @@ public class NewsAdminController {
         } catch (Exception e) {
             throw ApiException.badRequest("Gorsel yuklenemedi: " + e.getMessage());
         }
+    }
+
+    /**
+     * Medya kutuphanesi (EDITOR/ADMIN) — daha once yuklenmis haber gorsellerini
+     * ("articles/" onekli) en yeni ustte doner. Kapak secerken ayni gorseli
+     * tekrar yuklemeden mevcutlardan secmeye yarar.
+     */
+    @GetMapping("/media")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public List<MediaItem> listMedia(
+            @RequestParam(value = "limit", defaultValue = "120") int limit) {
+        int capped = Math.min(Math.max(limit, 1), 300);
+        return storage.list("articles/", capped).stream()
+                .map(o -> new MediaItem(
+                        o.key(),
+                        o.url(),
+                        o.size(),
+                        o.lastModified() != null ? o.lastModified().toString() : null))
+                .toList();
+    }
+
+    /** Medya kutuphanesi ogesi — MinIO anahtari + herkese acik URL + meta. */
+    public record MediaItem(String key, String url, long size, String lastModified)
+            implements Serializable {
     }
 
     /** Dosya adi/MIME'den guvenli uzanti (jpg/png/webp...). */

@@ -19,6 +19,7 @@ public record NewsDetail(
         String summary,
         String body,
         String coverImageUrl,
+        String coverImageKey,
         NewsStatus status,
         NewsCategory category,
         String sport,
