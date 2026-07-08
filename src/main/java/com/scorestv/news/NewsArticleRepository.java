@@ -159,6 +159,20 @@ public interface NewsArticleRepository extends JpaRepository<NewsArticle, Long> 
             """)
     List<NewsArticle> findByTranslationGroupId(@Param("groupId") Long groupId);
 
+    /**
+     * Bir medya (gorsel) anahtarini KULLANAN silinmemis haberler — medya
+     * kutuphanesinde silmeden once "hangi habere bagli" uyarisi icin.
+     * Kapak: {@code coverImageKey} tam esitlik. Govde: gorselin URL'si key'i
+     * ("articles/{uuid}.ext") icerdigi icin {@code body LIKE %key%}. En yeni once.
+     */
+    @Query("""
+            SELECT a FROM NewsArticle a
+            WHERE a.deletedAt IS NULL
+              AND (a.coverImageKey = :key OR a.body LIKE CONCAT('%', :key, '%'))
+            ORDER BY a.createdAt DESC, a.id DESC
+            """)
+    List<NewsArticle> findReferencingMedia(@Param("key") String key);
+
     /** Slug benzersizlik kontrolu (silinmis kayitlar dahil — slug global unique). */
     boolean existsBySlug(String slug);
 

@@ -2,6 +2,7 @@ package com.scorestv.news;
 
 import com.scorestv.common.ApiException;
 import com.scorestv.news.dto.CreateNewsRequest;
+import com.scorestv.news.dto.MediaUsage;
 import com.scorestv.news.dto.NewsDetail;
 import com.scorestv.news.dto.NewsPageResponse;
 import com.scorestv.news.dto.TranslateNewsRequest;
@@ -219,6 +220,27 @@ public class NewsAdminController {
     /** Medya kutuphanesi ogesi — MinIO anahtari + herkese acik URL + meta. */
     public record MediaItem(String key, String url, long size, String lastModified)
             implements Serializable {
+    }
+
+    /**
+     * Bir gorselin hangi haber(ler)de kullanildigi (EDITOR/ADMIN) — kapak ya da
+     * govde. Medya kutuphanesinde bir gorsele tiklaninca / silmeden once gosterilir.
+     */
+    @GetMapping("/media/usage")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public List<MediaUsage> mediaUsage(@RequestParam("key") String key) {
+        return service.mediaUsage(key);
+    }
+
+    /**
+     * Medya gorselini MinIO'dan siler (EDITOR/ADMIN). Panel, gorsel bir habere
+     * bagliysa kullaniciyi ONCEDEN uyarir; onaydan sonra bu uc cagrilir.
+     */
+    @DeleteMapping("/media")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteMedia(@RequestParam("key") String key) {
+        service.deleteMedia(key);
     }
 
     /** Dosya adi/MIME'den guvenli uzanti (jpg/png/webp...). */

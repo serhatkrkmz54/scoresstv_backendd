@@ -12,6 +12,7 @@ import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.football.domain.TeamRepository;
 import com.scorestv.news.dto.CreateNewsRequest;
+import com.scorestv.news.dto.MediaUsage;
 import com.scorestv.news.dto.NewsDetail;
 import com.scorestv.news.dto.NewsListItem;
 import com.scorestv.news.dto.NewsPageResponse;
@@ -574,6 +575,44 @@ public class NewsService {
                 a.isFeatured(),
                 a.getPublishedAt(),
                 a.getReadingMinutes());
+    }
+
+    /**
+     * Bir medya (gorsel) anahtarini kullanan silinmemis haberler — medya
+     * kutuphanesinde silme oncesi "hangi habere bagli" gostermek icin.
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public List<MediaUsage> mediaUsage(String key) {
+        if (key == null || key.isBlank()) {
+            return List.of();
+        }
+        String k = key.trim();
+        return articleRepository.findReferencingMedia(k).stream()
+                .map(a -> new MediaUsage(
+                        a.getId(),
+                        a.getTitle(),
+                        a.getSlug(),
+                        a.getLang(),
+                        a.getStatus() != null ? a.getStatus().name() : null,
+                        k.equals(a.getCoverImageKey()),
+                        a.getBody() != null && a.getBody().contains(k)))
+                .toList();
+    }
+
+    /**
+     * Medya (gorsel) nesnesini MinIO'dan siler. Cagiran (panel) bir habere
+     * bagliysa kullaniciyi ONCEDEN uyarir; burada nesne dogrudan silinir.
+     * Not: haber DB kaydi degismez (kapak URL'si kirilir) — bu kasitlidir.
+     */
+    public void deleteMedia(String key) {
+        if (key == null || key.isBlank()) {
+            throw ApiException.badRequest("Silinecek gorsel anahtari (key) gerekli.");
+        }
+        try {
+            storage.delete(key.trim());
+        } catch (Exception e) {
+            throw ApiException.badRequest("Gorsel silinemedi: " + e.getMessage());
+        }
     }
 
     private NewsDetail toDetail(NewsArticle a) {
