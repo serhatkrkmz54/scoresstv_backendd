@@ -65,7 +65,7 @@ public class AuthService {
                 .password(passwordEncoder.encode(req.password()))
                 .displayName(req.displayName().trim())
                 .birthDate(req.birthDate())
-                .country(req.country().trim())
+                .country(req.country() == null ? null : req.country().trim())
                 .role(Role.USER)
                 .enabled(true)
                 .build();
@@ -108,7 +108,8 @@ public class AuthService {
      * Google ID token ile giris/kayit.
      * - Daha once Google'a baglanmis kullanici varsa: dogrudan giris.
      * - Ayni e-postayla local hesap varsa: o hesaba Google baglanir (linking).
-     * - Hicbiri yoksa: yeni kayit; bu durumda dogum tarihi + ulke zorunludur.
+     * - Hicbiri yoksa: yeni kayit; dogum tarihi + ulke opsiyonel (App Store
+     *   5.1.1(v)) — verilirse kaydedilir, verilmezse null gecilir.
      */
     @Transactional
     public AuthResponse loginWithGoogle(GoogleLoginRequest req) {
@@ -123,18 +124,13 @@ public class AuthService {
                 user.setGoogleId(google.googleId());
                 userRepository.save(user);
             } else {
-                // Yeni Google kaydi - dogum tarihi ve ulke zorunlu.
-                if (req.birthDate() == null
-                        || req.country() == null || req.country().isBlank()) {
-                    throw ApiException.badRequest(
-                            "Google ile ilk kayıt için doğum tarihi ve ülke gereklidir.");
-                }
+                // Yeni Google kaydi — dogum tarihi ve ulke opsiyonel.
                 user = User.builder()
                         .email(email)
                         .displayName(resolveDisplayName(google, email))
                         .googleId(google.googleId())
                         .birthDate(req.birthDate())
-                        .country(req.country().trim())
+                        .country(req.country() == null ? null : req.country().trim())
                         .role(Role.USER)
                         .enabled(true)
                         .build();
@@ -158,7 +154,8 @@ public class AuthService {
      * Apple ile giriş/kayıt — {@link #loginWithGoogle} ile aynı desen.
      * - Daha önce Apple'a bağlanmış kullanıcı varsa: doğrudan giriş.
      * - Aynı e-postayla local/Google hesap varsa: o hesaba Apple bağlanır.
-     * - Hiçbiri yoksa: yeni kayıt; doğum tarihi + ülke zorunlu.
+     * - Hiçbiri yoksa: yeni kayıt; doğum tarihi + ülke opsiyonel (App Store
+     *   5.1.1(v)). E-posta ise hesap oluşturmak için gereklidir.
      *
      * <p>Apple özellikleri: {@code email} gizli relay olabilir; {@code name}
      * yalnız ilk girişte client'tan gelir (token'da yoktur).
@@ -178,12 +175,8 @@ public class AuthService {
                 user.setAppleId(apple.appleId());
                 userRepository.save(user);
             } else {
-                // Yeni Apple kaydı — doğum tarihi ve ülke zorunlu.
-                if (req.birthDate() == null
-                        || req.country() == null || req.country().isBlank()) {
-                    throw ApiException.badRequest(
-                            "Apple ile ilk kayıt için doğum tarihi ve ülke gereklidir.");
-                }
+                // Yeni Apple kaydı — doğum tarihi ve ülke opsiyonel; e-posta ise
+                // hesap oluşturmak için gereklidir.
                 if (email == null) {
                     throw ApiException.badRequest(
                             "Apple hesabından e-posta alınamadı; lütfen e-postayı paylaşmayı seçin.");
@@ -193,7 +186,7 @@ public class AuthService {
                         .displayName(resolveAppleDisplayName(req.name(), email))
                         .appleId(apple.appleId())
                         .birthDate(req.birthDate())
-                        .country(req.country().trim())
+                        .country(req.country() == null ? null : req.country().trim())
                         .role(Role.USER)
                         .enabled(true)
                         .build();
