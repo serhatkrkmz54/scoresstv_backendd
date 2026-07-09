@@ -197,4 +197,89 @@ public interface NewsArticleRepository extends JpaRepository<NewsArticle, Long> 
     @org.springframework.data.jpa.repository.Modifying
     @Query("UPDATE NewsArticle a SET a.viewCount = a.viewCount + 1 WHERE a.id = :id")
     void incrementViewCount(@Param("id") Long id);
+
+    // ---- Panel dashboard (admin ozet istatistikleri) ----
+
+    /** Durum bazinda (silinmemis) haber sayilari: satir = [NewsStatus, Long]. */
+    @Query("""
+            SELECT a.status, COUNT(a) FROM NewsArticle a
+            WHERE a.deletedAt IS NULL
+            GROUP BY a.status
+            """)
+    List<Object[]> countGroupByStatus();
+
+    /** Tum (silinmemis) haberlerin toplam goruntulenmesi. */
+    @Query("SELECT COALESCE(SUM(a.viewCount), 0) FROM NewsArticle a WHERE a.deletedAt IS NULL")
+    long sumViewCount();
+
+    /** Belirli andan sonra yayinlanan (PUBLISHED) haber sayisi. */
+    @Query("""
+            SELECT COUNT(a) FROM NewsArticle a
+            WHERE a.deletedAt IS NULL
+              AND a.status = com.scorestv.news.NewsStatus.PUBLISHED
+              AND a.publishedAt IS NOT NULL
+              AND a.publishedAt >= :since
+            """)
+    long countPublishedSince(@Param("since") Instant since);
+
+    /** En cok okunan yayinda haberler (viewCount azalan). Limit Pageable ile. */
+    @Query("""
+            SELECT a FROM NewsArticle a
+            WHERE a.deletedAt IS NULL
+              AND a.status = com.scorestv.news.NewsStatus.PUBLISHED
+            ORDER BY a.viewCount DESC, a.publishedAt DESC
+            """)
+    List<NewsArticle> findTopViewed(Pageable pageable);
+
+    /** Trend icin: belirli andan sonra yayinlanan haberlerin yayin zamanlari. */
+    @Query("""
+            SELECT a.publishedAt FROM NewsArticle a
+            WHERE a.deletedAt IS NULL
+              AND a.status = com.scorestv.news.NewsStatus.PUBLISHED
+              AND a.publishedAt IS NOT NULL
+              AND a.publishedAt >= :since
+            """)
+    List<Instant> publishedAtSince(@Param("since") Instant since);
+
+    /** Yazar bazinda toplam (silinmemis) haber sayilari: satir = [authorId, Long]. */
+    @Query("""
+            SELECT a.authorId, COUNT(a) FROM NewsArticle a
+            WHERE a.deletedAt IS NULL
+            GROUP BY a.authorId
+            """)
+    List<Object[]> countGroupByAuthor();
+
+    /** Yazar bazinda YAYINDA haber sayilari: satir = [authorId, Long]. */
+    @Query("""
+            SELECT a.authorId, COUNT(a) FROM NewsArticle a
+            WHERE a.deletedAt IS NULL
+              AND a.status = com.scorestv.news.NewsStatus.PUBLISHED
+            GROUP BY a.authorId
+            """)
+    List<Object[]> countPublishedGroupByAuthor();
+
+    /** Son dakika isaretli (silinmemis) haber sayisi. */
+    long countByBreakingTrueAndDeletedAtIsNull();
+
+    /** One cikan isaretli (silinmemis) haber sayisi. */
+    long countByFeaturedTrueAndDeletedAtIsNull();
+
+    // ---- Slider kuratorlugu (admin) ----
+
+    /**
+     * Admin slider listesi — dile gore, inSlider=true, silinmemis. (Public
+     * findSlider'dan farki: publishedAt<=now kosulu YOK; zamanlanmis gelecek
+     * tarihli slider ogeleri de kuratorlukte gorunur.) slider_order artan.
+     */
+    @Query("""
+            SELECT a FROM NewsArticle a
+            WHERE a.deletedAt IS NULL
+              AND a.lang = :lang
+              AND a.inSlider = true
+            ORDER BY a.sliderOrder ASC, a.publishedAt DESC, a.id DESC
+            """)
+    List<NewsArticle> findSliderForAdmin(@Param("lang") String lang);
+
+    /** Bir dildeki slider uyesi (silinmemis) haberler — kaydetmeden once temizlemek icin. */
+    List<NewsArticle> findByLangAndInSliderTrueAndDeletedAtIsNull(String lang);
 }

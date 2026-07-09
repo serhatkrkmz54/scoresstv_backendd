@@ -1,5 +1,6 @@
 package com.scorestv.comments;
 
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -9,6 +10,24 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 
 public interface FixtureCommentRepository extends JpaRepository<FixtureComment, Long> {
+
+    /**
+     * Panel moderasyon listesi — TUM spor kollarindaki yorumlar (silinmis dahil),
+     * opsiyonel spor/silinme-durumu/metin filtreli. En yeni once. Filtre param'lari
+     * null ise o kritere bakilmaz. (JOIN FETCH yok — user erisimi servisin
+     * read-only tx'inde lazy yapilir; sayfalama dogru calisir.)
+     */
+    @Query("""
+            SELECT c FROM FixtureComment c
+            WHERE (:sport IS NULL OR c.sport = :sport)
+              AND (:deleted IS NULL OR c.deleted = :deleted)
+              AND (:q IS NULL OR LOWER(c.content) LIKE LOWER(CONCAT('%', CAST(:q AS string), '%')))
+            ORDER BY c.createdAt DESC
+            """)
+    Page<FixtureComment> findForModeration(@Param("sport") String sport,
+                                           @Param("deleted") Boolean deleted,
+                                           @Param("q") String q,
+                                           Pageable pageable);
 
     /**
      * Bir macin top-level (parent_id IS NULL) yorumlari — en yeni once.

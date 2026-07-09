@@ -12,11 +12,17 @@ import com.scorestv.football.domain.Team;
 import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.football.domain.TeamRepository;
+import com.scorestv.news.dto.BulkResult;
 import com.scorestv.news.dto.CreateNewsRequest;
 import com.scorestv.news.dto.MediaUsage;
 import com.scorestv.news.dto.NewsDetail;
 import com.scorestv.news.dto.NewsListItem;
 import com.scorestv.news.dto.NewsPageResponse;
+import com.scorestv.news.dto.NewsStats;
+import com.scorestv.news.dto.NewsAuditPage;
+import com.scorestv.news.dto.NewsAuditView;
+import com.scorestv.news.dto.RescheduleRequest;
+import com.scorestv.news.dto.UpdateFlagsRequest;
 import com.scorestv.news.dto.UpdateNewsRequest;
 import com.scorestv.storage.MinioStorageService;
 import com.scorestv.user.User;
@@ -29,9 +35,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -284,6 +298,123 @@ public class NewsService {
     }
 
     // ============================================================
+    // Panel dashboard (ozet istatistikleri)
+    // ============================================================
+
+    /**
+     * Panel ana sayfasi ozet istatistikleri — TEK uctan tum kartlar + listeler
+     * (durum sayilari, toplam goruntulenme, donemsel yayin, 14 gunluk trend, en
+     * cok okunanlar, editor uretimi, son aktivite). Yerel gun/hafta/ay hesabi
+     * Europe/Istanbul zamanina gore yapilir.
+     */
+    @Transactional(readOnly = true)
+    public NewsStats stats() {
+        // --- Durum sayilari (silinmemis) ---
+        long draft = 0, scheduled = 0, published = 0, archived = 0;
+        for (Object[] row : articleRepository.countGroupByStatus()) {
+            NewsStatus st = (NewsStatus) row[0];
+            long c = ((Number) row[1]).longValue();
+            switch (st) {
+                case DRAFT -> draft = c;
+                case SCHEDULED -> scheduled = c;
+                case PUBLISHED -> published = c;
+                case ARCHIVED -> archived = c;
+            }
+        }
+        long total = draft + scheduled + published + archived;
+        long totalViews = articleRepository.sumViewCount();
+        long breaking = articleRepository.countByBreakingTrueAndDeletedAtIsNull();
+        long featured = articleRepository.countByFeaturedTrueAndDeletedAtIsNull();
+
+        // --- Donemsel yayin (yerel gun/hafta/ay) ---
+        ZoneId zone = ZoneId.of("Europe/Istanbul");
+        ZonedDateTime nowZ = ZonedDateTime.now(zone);
+        LocalDate today = nowZ.toLocalDate();
+        Instant startOfToday = today.atStartOfDay(zone).toInstant();
+        Instant startOfWeek = today.minusDays(6).atStartOfDay(zone).toInstant();
+        Instant startOfMonth = today.withDayOfMonth(1).atStartOfDay(zone).toInstant();
+        long publishedToday = articleRepository.countPublishedSince(startOfToday);
+        long publishedThisWeek = articleRepository.countPublishedSince(startOfWeek);
+        long publishedThisMonth = articleRepository.countPublishedSince(startOfMonth);
+
+        // --- Trend: son 14 gun, gun basina yayin sayisi ---
+        final int trendDays = 14;
+        LocalDate firstDay = today.minusDays(trendDays - 1);
+        Instant trendSince = firstDay.atStartOfDay(zone).toInstant();
+        Map<LocalDate, Long> byDay = articleRepository.publishedAtSince(trendSince).stream()
+                .collect(Collectors.groupingBy(
+                        i -> i.atZone(zone).toLocalDate(),
+                        Collectors.counting()));
+        List<NewsStats.TrendPoint> trend = new ArrayList<>(trendDays);
+        for (int d = 0; d < trendDays; d++) {
+            LocalDate day = firstDay.plusDays(d);
+            trend.add(new NewsStats.TrendPoint(day.toString(), byDay.getOrDefault(day, 0L)));
+        }
+
+        // --- En cok okunanlar (yayinda, ilk 8) ---
+        List<NewsStats.TopArticle> topViewed = articleRepository
+                .findTopViewed(PageRequest.of(0, 8)).stream()
+                .map(a -> new NewsStats.TopArticle(
+                        a.getId(), a.getTitle(), a.getSlug(), a.getLang(),
+                        a.getStatus().name(), a.getViewCount(),
+                        a.getPublishedAt() != null ? a.getPublishedAt().toString() : null))
+                .toList();
+
+        // --- Editor uretim tablosu ---
+        Map<Long, Long> totalByAuthor = toCountMap(articleRepository.countGroupByAuthor());
+        Map<Long, Long> pubByAuthor = toCountMap(articleRepository.countPublishedGroupByAuthor());
+        Map<Long, String> authorNames = new HashMap<>();
+        userRepository.findAllById(totalByAuthor.keySet())
+                .forEach(u -> authorNames.put(u.getId(), u.getDisplayName()));
+        List<NewsStats.EditorStat> editors = totalByAuthor.entrySet().stream()
+                .map(e -> new NewsStats.EditorStat(
+                        e.getKey(),
+                        authorNames.getOrDefault(e.getKey(), "#" + e.getKey()),
+                        e.getValue(),
+                        pubByAuthor.getOrDefault(e.getKey(), 0L)))
+                .sorted(Comparator.comparingLong(NewsStats.EditorStat::total).reversed())
+                .toList();
+
+        // --- Son aktivite (audit) ---
+        List<NewsAuditLog> logs = auditLogRepository.findTop12ByOrderByAtDesc();
+        Set<Long> actorIds = logs.stream().map(NewsAuditLog::getActorId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<Long> articleIds = logs.stream().map(NewsAuditLog::getArticleId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> actorNames = new HashMap<>();
+        userRepository.findAllById(actorIds)
+                .forEach(u -> actorNames.put(u.getId(), u.getDisplayName()));
+        Map<Long, String> articleTitles = new HashMap<>();
+        articleRepository.findAllById(articleIds)
+                .forEach(a -> articleTitles.put(a.getId(), a.getTitle()));
+        List<NewsStats.ActivityItem> recentActivity = logs.stream()
+                .map(l -> new NewsStats.ActivityItem(
+                        l.getAction(),
+                        l.getArticleId(),
+                        l.getArticleId() != null ? articleTitles.get(l.getArticleId()) : null,
+                        l.getActorId(),
+                        l.getActorId() != null ? actorNames.get(l.getActorId()) : null,
+                        l.getAt() != null ? l.getAt().toString() : null))
+                .toList();
+
+        return new NewsStats(total, published, draft, scheduled, archived,
+                totalViews, publishedToday, publishedThisWeek, publishedThisMonth,
+                breaking, featured, trend, topViewed, editors, recentActivity);
+    }
+
+    /** [id, count] satirlarini Map'e cevirir (null id atlanir). */
+    private static Map<Long, Long> toCountMap(List<Object[]> rows) {
+        Map<Long, Long> m = new HashMap<>();
+        for (Object[] row : rows) {
+            if (row[0] == null) {
+                continue;
+            }
+            m.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
+        }
+        return m;
+    }
+
+    // ============================================================
     // Mutasyonlar
     // ============================================================
 
@@ -429,6 +560,188 @@ public class NewsService {
         articleRepository.save(a);
         audit(a.getId(), actorId, "DELETE", null);
         removeFromSearchIndex(a.getId());
+    }
+
+    /**
+     * Toplu (bulk) islem (EDITOR/ADMIN — DELETE'i controller ADMIN'e gate eder).
+     * Tek transaction'da calisir; bulunamayan id'ler ATLANIR (istisna atmaz, tx'i
+     * bozmaz). Her degisiklik audit'lenir ve arama index'i senkronlanir. Push
+     * GONDERILMEZ (bulk yayinlama sessizdir — istenmeyen toplu bildirim onlenir).
+     */
+    @Transactional
+    public BulkResult bulk(List<Long> ids, BulkAction action,
+                           NewsCategory category, String sport, Long actorId) {
+        if (ids == null || ids.isEmpty()) {
+            return new BulkResult(0, 0);
+        }
+        int processed = 0;
+        int skipped = 0;
+        for (Long id : ids.stream().filter(Objects::nonNull).distinct().toList()) {
+            Optional<NewsArticle> opt = articleRepository.findByIdAndDeletedAtIsNull(id);
+            if (opt.isEmpty()) {
+                skipped++;
+                continue;
+            }
+            NewsArticle a = opt.get();
+            switch (action) {
+                case PUBLISH -> {
+                    a.setStatus(NewsStatus.PUBLISHED);
+                    if (a.getPublishedAt() == null) {
+                        a.setPublishedAt(Instant.now());
+                    }
+                    articleRepository.save(a);
+                    audit(id, actorId, "PUBLISH", "bulk");
+                    syncSearchIndex(a);
+                }
+                case UNPUBLISH -> {
+                    a.setStatus(NewsStatus.DRAFT);
+                    a.setPublishedAt(null);
+                    articleRepository.save(a);
+                    audit(id, actorId, "UNPUBLISH", "bulk");
+                    syncSearchIndex(a);
+                }
+                case ARCHIVE -> {
+                    a.setStatus(NewsStatus.ARCHIVED);
+                    a.setPublishedAt(null);
+                    articleRepository.save(a);
+                    audit(id, actorId, "ARCHIVE", "bulk");
+                    syncSearchIndex(a);
+                }
+                case SET_CATEGORY -> {
+                    a.setCategory(category);
+                    articleRepository.save(a);
+                    audit(id, actorId, "UPDATE", "bulk category=" + category);
+                    syncSearchIndex(a);
+                }
+                case SET_SPORT -> {
+                    if (sport != null && !sport.isBlank()) {
+                        a.setSport(sport.trim());
+                    }
+                    articleRepository.save(a);
+                    audit(id, actorId, "UPDATE", "bulk sport=" + sport);
+                    syncSearchIndex(a);
+                }
+                case DELETE -> {
+                    a.setDeletedAt(Instant.now());
+                    articleRepository.save(a);
+                    audit(id, actorId, "DELETE", "bulk");
+                    removeFromSearchIndex(id);
+                }
+            }
+            processed++;
+        }
+        return new BulkResult(processed, skipped);
+    }
+
+    // ============================================================
+    // Panel: denetim gunlugu / slider kuratorlugu / hizli bayrak / zamanlama
+    // ============================================================
+
+    /** Denetim gunlugu tam sayfa (EDITOR/ADMIN) — actor/article adlari cozulur. */
+    @Transactional(readOnly = true)
+    public NewsAuditPage auditLog(String action, int page, int size) {
+        String act = (action == null || action.isBlank()) ? null : action.trim().toUpperCase();
+        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+        int safePage = Math.max(page, 0);
+        Pageable pageable = PageRequest.of(safePage, safeSize);
+        Page<NewsAuditLog> result = (act == null)
+                ? auditLogRepository.findAllByOrderByAtDesc(pageable)
+                : auditLogRepository.findByActionOrderByAtDesc(act, pageable);
+        List<NewsAuditLog> logs = result.getContent();
+        Set<Long> actorIds = logs.stream().map(NewsAuditLog::getActorId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<Long> articleIds = logs.stream().map(NewsAuditLog::getArticleId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> actorNames = new HashMap<>();
+        userRepository.findAllById(actorIds)
+                .forEach(u -> actorNames.put(u.getId(), u.getDisplayName()));
+        Map<Long, String> articleTitles = new HashMap<>();
+        articleRepository.findAllById(articleIds)
+                .forEach(a -> articleTitles.put(a.getId(), a.getTitle()));
+        List<NewsAuditView> items = logs.stream()
+                .map(l -> new NewsAuditView(
+                        l.getId(), l.getAction(), l.getArticleId(),
+                        l.getArticleId() != null ? articleTitles.get(l.getArticleId()) : null,
+                        l.getActorId(),
+                        l.getActorId() != null ? actorNames.get(l.getActorId()) : null,
+                        l.getAt() != null ? l.getAt().toString() : null,
+                        l.getMeta()))
+                .toList();
+        return new NewsAuditPage(items, result.getTotalElements(), result.hasNext());
+    }
+
+    /** Admin slider listesi (dile gore, sirali). */
+    @Transactional(readOnly = true)
+    public List<NewsListItem> sliderForAdmin(String lang) {
+        return articleRepository.findSliderForAdmin(lang).stream()
+                .map(this::toListItem)
+                .toList();
+    }
+
+    /** Slider'i kaydet — verilen dildeki uyelik+sirayi TAM olarak degistir. */
+    @Transactional
+    public List<NewsListItem> saveSlider(String lang, List<Long> ids, Long actorId) {
+        List<NewsArticle> current =
+                articleRepository.findByLangAndInSliderTrueAndDeletedAtIsNull(lang);
+        for (NewsArticle a : current) {
+            a.setInSlider(false);
+            a.setSliderOrder(0);
+        }
+        articleRepository.saveAll(current);
+        articleRepository.flush();
+        List<Long> distinctIds = ids == null ? List.of()
+                : ids.stream().filter(Objects::nonNull).distinct().toList();
+        int order = 0;
+        List<NewsArticle> saved = new ArrayList<>();
+        for (Long id : distinctIds) {
+            NewsArticle a = articleRepository.findByIdAndDeletedAtIsNull(id).orElse(null);
+            if (a == null || a.getStatus() != NewsStatus.PUBLISHED
+                    || !lang.equals(a.getLang())) {
+                continue;
+            }
+            a.setInSlider(true);
+            a.setSliderOrder(order++);
+            articleRepository.save(a);
+            saved.add(a);
+        }
+        audit(null, actorId, "UPDATE", "slider lang=" + lang + " count=" + saved.size());
+        return saved.stream().map(this::toListItem).toList();
+    }
+
+    /** Haber bayraklarini hizli degistir (null=degismez). */
+    @Transactional
+    public NewsDetail updateFlags(Long id, UpdateFlagsRequest req, Long actorId) {
+        NewsArticle a = articleRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> ApiException.notFound("Haber bulunamadi: " + id));
+        if (req.isFeatured() != null) {
+            a.setFeatured(req.isFeatured());
+        }
+        if (req.isBreaking() != null) {
+            a.setBreaking(req.isBreaking());
+        }
+        if (req.inSlider() != null) {
+            a.setInSlider(req.inSlider());
+            if (!req.inSlider()) {
+                a.setSliderOrder(0);
+            }
+        }
+        a = articleRepository.save(a);
+        audit(id, actorId, "UPDATE", "flags");
+        syncSearchIndex(a);
+        return toDetail(a);
+    }
+
+    /** Yayin takviminden hizli yeniden zamanlama (publishedAt + opsiyonel durum). */
+    @Transactional
+    public NewsDetail reschedule(Long id, RescheduleRequest req, Long actorId) {
+        NewsArticle a = articleRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> ApiException.notFound("Haber bulunamadi: " + id));
+        NewsStatus status = req.status() != null ? req.status() : a.getStatus();
+        applyStatus(a, status, req.publishedAt());
+        a = articleRepository.save(a);
+        audit(id, actorId, "UPDATE", "reschedule");
+        syncSearchIndex(a);
+        return toDetail(a);
     }
 
     // ============================================================
@@ -599,7 +912,7 @@ public class NewsService {
      * Bir haberin ceviri GRUBU — kendisi + dil esleri (silinmemis). Cift-dil
      * yan yana duzenleme ekrani icin. Grup yoksa yalniz kendisini doner.
      */
-    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    @Transactional(readOnly = true)
     public List<NewsDetail> group(Long id) {
         NewsArticle self = articleRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> ApiException.notFound("Haber bulunamadi."));
@@ -616,7 +929,7 @@ public class NewsService {
      * Bir medya (gorsel) anahtarini kullanan silinmemis haberler — medya
      * kutuphanesinde silme oncesi "hangi habere bagli" gostermek icin.
      */
-    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    @Transactional(readOnly = true)
     public List<MediaUsage> mediaUsage(String key) {
         if (key == null || key.isBlank()) {
             return List.of();

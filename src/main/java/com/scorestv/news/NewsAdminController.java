@@ -1,14 +1,26 @@
 package com.scorestv.news;
 
 import com.scorestv.common.ApiException;
+import com.scorestv.news.dto.BulkNewsRequest;
+import com.scorestv.news.dto.BulkResult;
 import com.scorestv.news.dto.CreateNewsRequest;
 import com.scorestv.news.dto.MediaUsage;
 import com.scorestv.news.dto.NewsDetail;
 import com.scorestv.news.dto.NewsPageResponse;
+import com.scorestv.news.dto.NewsStats;
+import com.scorestv.news.dto.NewsAuditPage;
+import com.scorestv.news.dto.NewsListItem;
+import com.scorestv.news.dto.RescheduleRequest;
+import com.scorestv.news.dto.SaveSliderRequest;
+import com.scorestv.news.dto.UpdateFlagsRequest;
+import com.scorestv.indexnow.IndexNowService;
+import com.scorestv.football.seo.SeoProperties;
+import org.springframework.web.bind.annotation.PatchMapping;
 import com.scorestv.news.dto.TranslateNewsRequest;
 import com.scorestv.news.dto.TranslateNewsResult;
 import com.scorestv.news.dto.UpdateNewsRequest;
 import com.scorestv.security.CurrentUser;
+import com.scorestv.user.Role;
 import org.springframework.beans.factory.ObjectProvider;
 import com.scorestv.storage.MinioStorageService;
 import jakarta.validation.Valid;
@@ -55,14 +67,20 @@ public class NewsAdminController {
     private final NewsTranslationService translationService;
     /** ES kapaliyken (scorestv.elasticsearch.enabled=false) bean yoktur — opsiyonel. */
     private final ObjectProvider<NewsIndexer> newsIndexer;
+    private final IndexNowService indexNowService;
+    private final SeoProperties seoProperties;
 
     public NewsAdminController(NewsService service, MinioStorageService storage,
                                NewsTranslationService translationService,
-                               ObjectProvider<NewsIndexer> newsIndexer) {
+                               ObjectProvider<NewsIndexer> newsIndexer,
+                               IndexNowService indexNowService,
+                               SeoProperties seoProperties) {
         this.service = service;
         this.storage = storage;
         this.translationService = translationService;
         this.newsIndexer = newsIndexer;
+        this.indexNowService = indexNowService;
+        this.seoProperties = seoProperties;
     }
 
     /** Admin liste — tum durumlar + filtre + metin aramasi. */
@@ -84,6 +102,71 @@ public class NewsAdminController {
     @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
     public NewsDetail get(@PathVariable Long id) {
         return service.getForAdmin(id);
+    }
+
+    /** Panel dashboard ozeti — kartlar + trend + en cok okunan + editor + aktivite. */
+    @GetMapping("/stats")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public NewsStats stats() {
+        return service.stats();
+    }
+
+    /** Denetim gunlugu tam sayfa (EDITOR/ADMIN). */
+    @GetMapping("/audit")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public NewsAuditPage audit(@RequestParam(required = false) String action,
+                               @RequestParam(defaultValue = "0") int page,
+                               @RequestParam(defaultValue = "30") int size) {
+        return service.auditLog(action, page, size);
+    }
+
+    /** Ana sayfa slider — dile gore mevcut sirali liste. */
+    @GetMapping("/slider")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public List<NewsListItem> slider(@RequestParam(defaultValue = "tr") String lang) {
+        return service.sliderForAdmin(lang);
+    }
+
+    /** Slider'i kaydet — uyelik + sirayi TAM degistir. */
+    @PutMapping("/slider")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public List<NewsListItem> saveSlider(@RequestBody SaveSliderRequest req,
+                                         @AuthenticationPrincipal CurrentUser currentUser) {
+        String lang = (req.lang() == null || req.lang().isBlank()) ? "tr" : req.lang().trim();
+        return service.saveSlider(lang, req.ids(), currentUser.id());
+    }
+
+    /** Hizli bayrak degisimi (one cikan / son dakika / slider). */
+    @PatchMapping("/{id}/flags")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public NewsDetail flags(@PathVariable Long id,
+                            @RequestBody UpdateFlagsRequest req,
+                            @AuthenticationPrincipal CurrentUser currentUser) {
+        return service.updateFlags(id, req, currentUser.id());
+    }
+
+    /** Yayin takviminden hizli yeniden zamanlama. */
+    @PatchMapping("/{id}/schedule")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public NewsDetail reschedule(@PathVariable Long id,
+                                 @RequestBody RescheduleRequest req,
+                                 @AuthenticationPrincipal CurrentUser currentUser) {
+        return service.reschedule(id, req, currentUser.id());
+    }
+
+    /** Bu haberin canonical URL'sini IndexNow'a bildir (ADMIN). */
+    @PostMapping("/{id}/indexnow")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Map<String, Object> indexNow(@PathVariable Long id) {
+        NewsDetail detail = service.getForAdmin(id);
+        String base = seoProperties.siteUrl();
+        if (base != null && base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        String path = "en".equalsIgnoreCase(detail.lang()) ? "/news/" : "/haber/";
+        String url = base + path + detail.slug();
+        indexNowService.submit(List.of(url));
+        return Map.of("ok", true, "url", url);
     }
 
     /** Ceviri servisi durumu — panel "Ceviri olustur" butonunu gizlemek icin. */
@@ -151,6 +234,35 @@ public class NewsAdminController {
     public void delete(@PathVariable Long id,
                        @AuthenticationPrincipal CurrentUser currentUser) {
         service.softDelete(id, currentUser.id());
+    }
+
+    /**
+     * Toplu islem (EDITOR/ADMIN). Yayinla/geri cek/arsivle/kategori/spor.
+     * DELETE eylemi burada AYRICA ADMIN'e gate edilir (per-id delete gibi).
+     * SET_CATEGORY icin category, SET_SPORT icin sport zorunludur.
+     */
+    @PostMapping("/bulk")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public BulkResult bulk(@RequestBody BulkNewsRequest req,
+                           @AuthenticationPrincipal CurrentUser currentUser) {
+        if (req == null || req.action() == null) {
+            throw ApiException.badRequest("Eylem belirtilmedi.");
+        }
+        if (req.ids() == null || req.ids().isEmpty()) {
+            throw ApiException.badRequest("Secili haber yok.");
+        }
+        if (req.action() == BulkAction.DELETE && currentUser.role() != Role.ADMIN) {
+            throw ApiException.forbidden("Silme yetkisi yok.");
+        }
+        if (req.action() == BulkAction.SET_CATEGORY && req.category() == null) {
+            throw ApiException.badRequest("Kategori secilmedi.");
+        }
+        if (req.action() == BulkAction.SET_SPORT
+                && (req.sport() == null || req.sport().isBlank())) {
+            throw ApiException.badRequest("Spor secilmedi.");
+        }
+        return service.bulk(req.ids(), req.action(), req.category(),
+                req.sport(), currentUser.id());
     }
 
     /**
