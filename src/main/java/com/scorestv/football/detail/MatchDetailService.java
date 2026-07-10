@@ -23,6 +23,8 @@ import com.scorestv.football.domain.FixtureStatisticRepository;
 import com.scorestv.football.domain.Injury;
 import com.scorestv.football.domain.InjuryRepository;
 import com.scorestv.football.domain.League;
+import com.scorestv.football.domain.LeagueTopPlayer;
+import com.scorestv.football.domain.LeagueTopPlayerRepository;
 import com.scorestv.football.domain.Prediction;
 import com.scorestv.football.domain.PredictionRepository;
 import com.scorestv.football.domain.Standing;
@@ -55,6 +57,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -120,6 +123,7 @@ public class MatchDetailService {
     private final com.scorestv.football.league.BracketBuilder bracketBuilder;
     private final com.scorestv.bilyoner.BilyonerOddsService bilyonerOddsService;
     private final FifaRankLookupService fifaRankLookupService;
+    private final LeagueTopPlayerRepository topPlayerRepository;
     /**
      * Kendi proxy referansı — {@code loadCachedResponse}'a self-invocation
      * yerine proxy üstünden çağırmak için. Aksi halde Spring'in @Cacheable
@@ -147,6 +151,7 @@ public class MatchDetailService {
                               com.scorestv.football.league.BracketBuilder bracketBuilder,
                               com.scorestv.bilyoner.BilyonerOddsService bilyonerOddsService,
                               FifaRankLookupService fifaRankLookupService,
+                              LeagueTopPlayerRepository topPlayerRepository,
                               @Lazy MatchDetailService self) {
         this.fixtureRepository = fixtureRepository;
         this.eventRepository = eventRepository;
@@ -167,6 +172,7 @@ public class MatchDetailService {
         this.bracketBuilder = bracketBuilder;
         this.bilyonerOddsService = bilyonerOddsService;
         this.fifaRankLookupService = fifaRankLookupService;
+        this.topPlayerRepository = topPlayerRepository;
         this.self = self;
     }
 
@@ -368,6 +374,15 @@ public class MatchDetailService {
         Double awayScorestvRating = scorestvRating(
                 statistics, fixture.getAwayGoals(), fixture.getHomeGoals(), false);
 
+        // Takımların bu maçtan ÖNCEKİ son 5 oynanmış maçı (Maçkolik tarzı form).
+        List<MatchDetailResponse.TeamFormMatch> homeForm =
+                loadTeamForm(home.getId(), fixture.getKickoffAt(), turkish);
+        List<MatchDetailResponse.TeamFormMatch> awayForm =
+                loadTeamForm(away.getId(), fixture.getKickoffAt(), turkish);
+
+        // Takımların en golcü + en asist oyuncuları (lig+sezon top listesinden).
+        MatchDetailResponse.TopPlayers topPlayers = loadTopPlayers(fixture, matchSeason);
+
         return new MatchDetailResponse(
                 fixture.getId(),
                 slug,
@@ -411,7 +426,133 @@ public class MatchDetailService {
                 awayFifaRank,
                 playerOfTheMatch,
                 homeScorestvRating,
-                awayScorestvRating);
+                awayScorestvRating,
+                homeForm,
+                awayForm,
+                topPlayers);
+    }
+
+    // ============================================================
+    // Takım formu (son 5 oynanmış maç) — Maçkolik tarzı
+    // ============================================================
+
+    /**
+     * Bir takımın verilen andan ÖNCEKİ son 5 oynanmış (biten) maçı — form
+     * widget'i için. Her maç: lig + rakip + skor + kırmızı kart + sonuç.
+     * Kırmızı kartlar tek sorguda (maç+takım başına) toplanır.
+     */
+    private List<MatchDetailResponse.TeamFormMatch> loadTeamForm(
+            Long teamId, Instant beforeKickoff, boolean turkish) {
+        Instant ref = beforeKickoff != null ? beforeKickoff : Instant.now();
+        List<Fixture> recent = fixtureRepository.findRecentPlayedByTeamBefore(
+                teamId, ref, PageRequest.of(0, 5));
+        if (recent.isEmpty()) {
+            return List.of();
+        }
+        List<Long> ids = recent.stream().map(Fixture::getId).toList();
+        Map<Long, Map<Long, Integer>> redMap = new HashMap<>();
+        for (Object[] row : eventRepository.countRedCardsByFixtureIds(ids)) {
+            Long fid = ((Number) row[0]).longValue();
+            Long tid = ((Number) row[1]).longValue();
+            int cnt = ((Number) row[2]).intValue();
+            redMap.computeIfAbsent(fid, k -> new HashMap<>()).put(tid, cnt);
+        }
+        return recent.stream()
+                .map(f -> toFormMatch(f, teamId, turkish, redMap))
+                .toList();
+    }
+
+    private MatchDetailResponse.TeamFormMatch toFormMatch(
+            Fixture f, Long subjectId, boolean turkish,
+            Map<Long, Map<Long, Integer>> redMap) {
+        Team fHome = f.getHomeTeam();
+        Team fAway = f.getAwayTeam();
+        boolean subjectHome = fHome.getId().equals(subjectId);
+        Team opp = subjectHome ? fAway : fHome;
+        Integer gf = subjectHome ? f.getHomeGoals() : f.getAwayGoals();
+        Integer ga = subjectHome ? f.getAwayGoals() : f.getHomeGoals();
+        String result = null;
+        if (gf != null && ga != null) {
+            result = gf > ga ? "W" : (gf < ga ? "L" : "D");
+        }
+        Map<Long, Integer> reds = redMap.getOrDefault(f.getId(), Map.of());
+        int redFor = reds.getOrDefault(subjectId, 0);
+        int redAgainst = reds.getOrDefault(opp.getId(), 0);
+        League lg = f.getLeague();
+        String slug = SlugUtil.fixtureSlug(
+                displayName(fHome, turkish), displayName(fAway, turkish), f.getId());
+        return new MatchDetailResponse.TeamFormMatch(
+                f.getId(),
+                slug,
+                f.getKickoffAt(),
+                lg != null ? lg.getId() : null,
+                lg != null ? displayName(lg, turkish) : null,
+                lg != null ? logoUrl(lg.getLogoKey()) : null,
+                opp.getId(),
+                displayName(opp, turkish),
+                logoUrl(opp.getLogoKey()),
+                subjectHome,
+                gf,
+                ga,
+                redFor,
+                redAgainst,
+                result);
+    }
+
+    // ============================================================
+    // En golcü + en asist (lig+sezon top listesinden, takım filtreli)
+    // ============================================================
+
+    /**
+     * Maçtaki iki takımın bu lig+sezondaki en golcü + en asist oyuncuları.
+     * Lig top listesi rank sıralı gelir; her takımın ilk (en üst) oyuncusu
+     * seçilir. Takımın golcüsü lig top-N'inde yoksa o alan null kalır. Hiçbiri
+     * yoksa {@code null} döner (kart gösterilmez).
+     */
+    private MatchDetailResponse.TopPlayers loadTopPlayers(Fixture fixture, Integer season) {
+        League league = fixture.getLeague();
+        if (league == null || season == null) {
+            return null;
+        }
+        Long homeId = fixture.getHomeTeam().getId();
+        Long awayId = fixture.getAwayTeam().getId();
+        List<LeagueTopPlayer> scorers = topPlayerRepository.findByLeagueSeasonCategory(
+                league.getId(), season, LeagueTopPlayer.Category.SCORERS);
+        List<LeagueTopPlayer> assists = topPlayerRepository.findByLeagueSeasonCategory(
+                league.getId(), season, LeagueTopPlayer.Category.ASSISTS);
+        MatchDetailResponse.TopPlayer homeScorer = toTopPlayer(pickForTeam(scorers, homeId));
+        MatchDetailResponse.TopPlayer awayScorer = toTopPlayer(pickForTeam(scorers, awayId));
+        MatchDetailResponse.TopPlayer homeAssist = toTopPlayer(pickForTeam(assists, homeId));
+        MatchDetailResponse.TopPlayer awayAssist = toTopPlayer(pickForTeam(assists, awayId));
+        if (homeScorer == null && awayScorer == null
+                && homeAssist == null && awayAssist == null) {
+            return null;
+        }
+        return new MatchDetailResponse.TopPlayers(
+                homeScorer, awayScorer, homeAssist, awayAssist);
+    }
+
+    /** Rank sıralı listeden verilen takımın ilk (en üst) oyuncusu; yoksa null. */
+    private LeagueTopPlayer pickForTeam(List<LeagueTopPlayer> list, Long teamId) {
+        for (LeagueTopPlayer p : list) {
+            if (teamId.equals(p.getTeamId())) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    private MatchDetailResponse.TopPlayer toTopPlayer(LeagueTopPlayer p) {
+        if (p == null) {
+            return null;
+        }
+        return new MatchDetailResponse.TopPlayer(
+                p.getPlayerId(),
+                p.getPlayerName(),
+                p.getPlayerPhoto(),
+                p.getTeamId(),
+                p.getValuePrimary() != null ? p.getValuePrimary() : 0,
+                p.getAppearances());
     }
 
     // ============================================================

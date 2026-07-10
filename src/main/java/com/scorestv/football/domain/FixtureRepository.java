@@ -412,6 +412,25 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
                                            org.springframework.data.domain.Pageable pageable);
 
     /**
+     * Form widget'i icin: bir takimin verilen andan ÖNCE OYNANMIS (biten) son
+     * maclari, yeni → eski. {@link #findRecentByTeam}'in status filtresi +
+     * {@link #findPreviousByTeamBefore}'un zaman filtresi birlikte; boylece
+     * bakilan mevcut mac listeye GIRMEZ. Pageable ile limit verilir; JOIN FETCH
+     * ile lig/takimlar tek sorguda yuklenir.
+     */
+    @Query("SELECT f FROM Fixture f "
+            + "JOIN FETCH f.league "
+            + "JOIN FETCH f.homeTeam "
+            + "JOIN FETCH f.awayTeam "
+            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "  AND f.statusShort IN ('FT','AET','PEN','ABD','AWD','WO') "
+            + "  AND f.kickoffAt < :ref "
+            + "ORDER BY f.kickoffAt DESC")
+    List<Fixture> findRecentPlayedByTeamBefore(@Param("teamId") Long teamId,
+                                               @Param("ref") Instant ref,
+                                               org.springframework.data.domain.Pageable pageable);
+
+    /**
      * Son {@code since} anından beri güncellenen, HENÜZ oynanmamış (gelecek)
      * maçlar — {@link com.scorestv.indexnow.IndexNowSubmitJob} "yeni oluşan maç"
      * kolu için. Fixture entity'sinde {@code createdAt} yok (kendi @Id'si

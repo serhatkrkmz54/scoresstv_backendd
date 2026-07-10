@@ -100,7 +100,13 @@ public record MatchDetailResponse(
         /** ScoresTV Puanı (0-10) — ev sahibi; istatistik yoksa null. Canlı, FT'de sabit. */
         Double homeScorestvRating,
         /** ScoresTV Puanı (0-10) — deplasman; istatistik yoksa null. */
-        Double awayScorestvRating
+        Double awayScorestvRating,
+        /** Ev sahibinin bu maçtan ÖNCEKİ son 5 oynanmış maçı (yeni → eski). */
+        List<TeamFormMatch> homeForm,
+        /** Deplasmanın bu maçtan ÖNCEKİ son 5 oynanmış maçı (yeni → eski). */
+        List<TeamFormMatch> awayForm,
+        /** Takımların bu lig+sezondaki en golcü/en asist oyuncuları; yoksa null. */
+        TopPlayers topPlayers
 ) implements Serializable {
 
     /**
@@ -142,6 +148,57 @@ public record MatchDetailResponse(
             String countryFlag,
             /** Sezon yılı (örn. 2025). */
             Integer season
+    ) implements Serializable {
+    }
+
+    /**
+     * Form widget'i için tek maç: özne takımın bu maçtan ÖNCE oynadığı bir biten
+     * maç — lig + rakip + skor + kırmızı kart + sonuç. {@code result} yalnız
+     * renklendirme içindir ("W"/"D"/"L"); istemci harf göstermeyebilir.
+     */
+    public record TeamFormMatch(
+            Long fixtureId,
+            String slug,
+            Instant kickoff,
+            Long leagueId,
+            String leagueName,
+            String leagueLogo,
+            Long opponentId,
+            String opponentName,
+            String opponentLogo,
+            /** Özne takım bu maçta ev sahibi miydi. */
+            boolean home,
+            /** Özne takımın attığı gol. */
+            Integer goalsFor,
+            /** Rakibin attığı gol. */
+            Integer goalsAgainst,
+            /** Özne takımın o maçta gördüğü kırmızı kart sayısı. */
+            int redFor,
+            /** Rakibin gördüğü kırmızı kart sayısı. */
+            int redAgainst,
+            /** "W" | "D" | "L" — renklendirme için; null olabilir. */
+            String result
+    ) implements Serializable {
+    }
+
+    /** Bir takımın öne çıkan oyuncusu (en golcü ya da en asist). */
+    public record TopPlayer(
+            Long playerId,
+            String name,
+            String photo,
+            Long teamId,
+            /** Gol ya da asist sayısı. */
+            int value,
+            Integer appearances
+    ) implements Serializable {
+    }
+
+    /** Maçtaki iki takımın en golcü + en asist oyuncuları. */
+    public record TopPlayers(
+            TopPlayer homeScorer,
+            TopPlayer awayScorer,
+            TopPlayer homeAssist,
+            TopPlayer awayAssist
     ) implements Serializable {
     }
 }
