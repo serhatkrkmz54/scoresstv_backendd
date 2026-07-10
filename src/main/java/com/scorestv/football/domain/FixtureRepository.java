@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 /** Maç (fikstür) verisine erişim. */
 public interface FixtureRepository extends JpaRepository<Fixture, Long> {
@@ -46,6 +47,36 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "ORDER BY f.kickoffAt ASC")
     List<Fixture> findUpcomingWithTeamsBetween(
             @Param("start") Instant start, @Param("end") Instant end);
+
+    /**
+     * Bir lig+sezonun bitmiş maçları — reyting motoru için kronolojik satırlar.
+     * Kolonlar: home_team_id, away_team_id, home_goals, away_goals, home_xg,
+     * away_xg (xG {@code fixture_statistics}'ten join; yoksa null → gole düşer).
+     * Object[] döner (native); RatingService savunmacı biçimde map'ler.
+     */
+    @Query(value = "SELECT f.home_team_id, f.away_team_id, f.home_goals, f.away_goals, "
+            + "hx.stat_value, ax.stat_value "
+            + "FROM fixtures f "
+            + "LEFT JOIN fixture_statistics hx ON hx.fixture_id = f.id "
+            + "  AND hx.team_id = f.home_team_id AND hx.stat_type = 'expected_goals' "
+            + "LEFT JOIN fixture_statistics ax ON ax.fixture_id = f.id "
+            + "  AND ax.team_id = f.away_team_id AND ax.stat_type = 'expected_goals' "
+            + "WHERE f.league_id = :leagueId AND f.season = :season "
+            + "  AND f.status_short IN ('FT','AET','PEN') "
+            + "  AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL "
+            + "ORDER BY f.kickoff_at ASC", nativeQuery = true)
+    List<Object[]> findRatingRows(
+            @Param("leagueId") Long leagueId, @Param("season") Integer season);
+
+    /**
+     * Tek maç — ev/deplasman takımı + lig JOIN FETCH ile (eager). AI Analiz
+     * gibi OSIV dışı (transaction'sız) akışlarda takım adına erişmek için;
+     * lazy proxy açılmaya çalışıp LazyInitializationException fırlatmasın.
+     */
+    @Query("SELECT f FROM Fixture f "
+            + "JOIN FETCH f.homeTeam JOIN FETCH f.awayTeam JOIN FETCH f.league "
+            + "WHERE f.id = :id")
+    Optional<Fixture> findByIdWithTeams(@Param("id") Long id);
 
     /**
      * Verilen durum kodlarındaki maçlar. Canlı maçları bulmak için

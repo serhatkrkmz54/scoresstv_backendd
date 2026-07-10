@@ -159,6 +159,13 @@ scorestv:
     snapshot-initial-ms: ${ODDS_SNAPSHOT_INITIAL_MS:120000}
 
   # ============================================================
+  # AI Analiz (MatchInsight) — lig+sezon reytingleri bu TTL boyunca
+  # bellekte cache'lenir (lig basina ~yarim saatte bir yeniden hesap).
+  # ============================================================
+  insight:
+    rating-ttl-minutes: ${INSIGHT_RATING_TTL_MINUTES:30}
+
+  # ============================================================
   # SocialData.tools — sag raydaki X/Twitter tweet akisi.
   # API anahtari GIZLI: sadece .env'de SOCIALDATA_API_KEY. enabled=false iken
   # hic istek atilmaz (bolum bos doner). Maliyet job tarafinda, ziyaretci basina degil.
