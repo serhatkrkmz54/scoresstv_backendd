@@ -66,6 +66,8 @@ public class NewsService {
     private static final int WORDS_PER_MINUTE = 200;
     private static final int MAX_PAGE_SIZE = 60;
     private static final int SLUG_MAX_ATTEMPTS = 50;
+    /** Slider'da en fazla bu kadar haber tutulur (uc sinir). */
+    private static final int MAX_SLIDER_ITEMS = 12;
 
     private final NewsArticleRepository articleRepository;
     private final ArticleTeamLinkRepository teamLinkRepository;
@@ -690,7 +692,8 @@ public class NewsService {
         articleRepository.saveAll(current);
         articleRepository.flush();
         List<Long> distinctIds = ids == null ? List.of()
-                : ids.stream().filter(Objects::nonNull).distinct().toList();
+                : ids.stream().filter(Objects::nonNull).distinct()
+                        .limit(MAX_SLIDER_ITEMS).toList();
         int order = 0;
         List<NewsArticle> saved = new ArrayList<>();
         for (Long id : distinctIds) {
@@ -744,6 +747,29 @@ public class NewsService {
         return toDetail(a);
     }
 
+    /**
+     * Zamani gelmis SCHEDULED haberleri PUBLISHED yapar (otomatik yayin).
+     * {@link NewsScheduleWorker} periyodik cagirir. {@code publishedAt} korunur
+     * (zaten gecmis); ES index'i commit sonrasi upsert edilir. Push TETIKLENMEZ
+     * (zamanlanmis yayinda otomatik bildirim istenmiyor). Islenen sayiyi doner.
+     */
+    @Transactional
+    public int publishDueScheduled() {
+        List<NewsArticle> due = articleRepository
+                .findByStatusAndDeletedAtIsNullAndPublishedAtLessThanEqual(
+                        NewsStatus.SCHEDULED, Instant.now());
+        int n = 0;
+        for (NewsArticle a : due) {
+            a.setStatus(NewsStatus.PUBLISHED);
+            // publishedAt zaten dolu ve gecmis — aynen korunur.
+            articleRepository.save(a);
+            audit(a.getId(), null, "AUTO_PUBLISH", "scheduled");
+            syncSearchIndex(a);
+            n++;
+        }
+        return n;
+    }
+
     // ============================================================
     // Yardimcilar
     // ============================================================
@@ -792,7 +818,10 @@ public class NewsService {
             case PUBLISHED -> a.setPublishedAt(
                     publishedAt != null ? publishedAt
                             : (a.getPublishedAt() != null ? a.getPublishedAt() : Instant.now()));
-            case SCHEDULED -> a.setPublishedAt(publishedAt);
+            // publishedAt verilmemisse mevcut zamani KORU — reschedule'da (status
+            // atlanip publishedAt bos gelirse) zamanlanmis zaman silinmesin.
+            case SCHEDULED -> a.setPublishedAt(
+                    publishedAt != null ? publishedAt : a.getPublishedAt());
             case DRAFT, ARCHIVED -> a.setPublishedAt(null);
         }
     }

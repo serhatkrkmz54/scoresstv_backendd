@@ -282,4 +282,12 @@ public interface NewsArticleRepository extends JpaRepository<NewsArticle, Long> 
 
     /** Bir dildeki slider uyesi (silinmemis) haberler — kaydetmeden once temizlemek icin. */
     List<NewsArticle> findByLangAndInSliderTrueAndDeletedAtIsNull(String lang);
+
+    /**
+     * Zamani gelmis SCHEDULED haberler — otomatik yayinlama worker'i icin.
+     * publishedAt NULL olanlar {@code <= now} ile eslesmez (zamansiz zamanlama
+     * kendiliginden yayinlanmaz) — bu istenen davranistir.
+     */
+    List<NewsArticle> findByStatusAndDeletedAtIsNullAndPublishedAtLessThanEqual(
+            NewsStatus status, Instant publishedAt);
 }
