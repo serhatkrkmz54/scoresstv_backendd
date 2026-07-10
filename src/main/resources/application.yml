@@ -149,6 +149,16 @@ scorestv:
     refresh-ms: ${BILYONER_REFRESH_MS:60000}
 
   # ============================================================
+  # Oran arsivi (OddsSnapshotJob) — mac oncesi Bilyoner oranlarini kalici
+  # tabloya yazar (value/backtest icin). SADECE ICERIDE; hicbir public uctan
+  # servis edilmez. Kota harcamaz (yalniz bellekteki Bilyoner snapshot'i).
+  # ============================================================
+  odds:
+    snapshot-enabled: ${ODDS_SNAPSHOT_ENABLED:true}
+    snapshot-interval-ms: ${ODDS_SNAPSHOT_INTERVAL_MS:600000}
+    snapshot-initial-ms: ${ODDS_SNAPSHOT_INITIAL_MS:120000}
+
+  # ============================================================
   # SocialData.tools — sag raydaki X/Twitter tweet akisi.
   # API anahtari GIZLI: sadece .env'de SOCIALDATA_API_KEY. enabled=false iken
   # hic istek atilmaz (bolum bos doner). Maliyet job tarafinda, ziyaretci basina degil.

@@ -35,6 +35,19 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
     List<Fixture> findByKickoffAtBetweenOrderByKickoffAtAsc(Instant start, Instant end);
 
     /**
+     * Verilen aralıkta başlayacak, henüz oynanmamış (NS/TBD) maçlar — ev/deplasman
+     * takımları JOIN FETCH ile eager gelir (oran snapshot job'u takım adlarına
+     * transaction dışında erişebilsin diye).
+     */
+    @Query("SELECT f FROM Fixture f "
+            + "JOIN FETCH f.homeTeam JOIN FETCH f.awayTeam "
+            + "WHERE f.kickoffAt >= :start AND f.kickoffAt < :end "
+            + "AND f.statusShort IN ('NS','TBD') "
+            + "ORDER BY f.kickoffAt ASC")
+    List<Fixture> findUpcomingWithTeamsBetween(
+            @Param("start") Instant start, @Param("end") Instant end);
+
+    /**
      * Verilen durum kodlarındaki maçlar. Canlı maçları bulmak için
      * (örn. "1H", "HT", "2H", "ET", "P") veya senkron tetiklemesi için kullanılır.
      */
