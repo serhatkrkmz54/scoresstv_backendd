@@ -2,8 +2,6 @@ package com.scorestv.football.insight;
 
 import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.Team;
-import java.util.ArrayList;
-import java.util.List;
 import org.springframework.stereotype.Service;
 
 /**
@@ -68,12 +66,9 @@ public class MatchInsightService {
         int over = (int) Math.round(p.over25() * 100);
         int bttsYes = (int) Math.round(p.bttsYes() * 100);
 
-        // En olası ilk 3 kesin skor (tek skor yanıltıcı olduğu için).
-        List<MatchInsightResponse.ScoreLine> topScores = new ArrayList<>();
-        for (RatingEngine.Score s : p.topScores()) {
-            topScores.add(new MatchInsightResponse.ScoreLine(
-                    s.home() + "-" + s.away(), (int) Math.round(s.prob() * 100)));
-        }
+        // Yaklaşık beklenen skor = gol beklentisinin (λ) yuvarlanmışı; gol
+        // beklentisi ve favoriyle tutarlı ("hep 1-1" ve "3.5 üst ama 1-1" biter).
+        String expectedScore = Math.round(p.lambdaHome()) + "-" + Math.round(p.lambdaAway());
 
         String homeName = displayName(fixture.getHomeTeam(), turkish);
         String awayName = displayName(fixture.getAwayTeam(), turkish);
@@ -86,7 +81,7 @@ public class MatchInsightService {
                 over, 100 - over,
                 bttsYes, 100 - bttsYes,
                 round1(p.lambdaHome()), round1(p.lambdaAway()),
-                topScores, favorite, confidence(max, turkish),
+                expectedScore, favorite, confidence(max, turkish),
                 summary, note);
     }
 

@@ -1,15 +1,14 @@
 package com.scorestv.football.insight;
 
-import java.util.List;
-
 /**
  * "AI Analiz" yanıtı — modelin bir maç için kalibre olasılıkları.
  *
  * <p>Yüzdeler 0..100 tamsayı. {@code available=false} ise yeterli veri yok
  * (yeni sezon / az maç) → istemci "yeterli veri yok" gösterir.
  *
- * <p>{@code topScores}: en olası ilk 3 kesin skor (her biri yüzdesiyle) — tek
- * skor yerine, çünkü futbolda tek en-olası skor genelde 1-1 çıkar ve yanıltıcıdır.
+ * <p>{@code expectedScore}: beklenen gol (λ) yuvarlanarak elde edilen YAKLAŞIK
+ * skor — tanım gereği gol beklentisi ve favoriyle tutarlı (tek "en olası kesin
+ * skor" hep 1-1 çıktığı ve toplam-gol ile çeliştiği için o kaldırıldı).
  *
  * <p><b>Bu bir istatistik analizdir, bahis tavsiyesi değildir.</b>
  */
@@ -24,14 +23,11 @@ public record MatchInsightResponse(
         Integer bttsNoPct,
         Double expectedGoalsHome,
         Double expectedGoalsAway,
-        List<ScoreLine> topScores,
-        String favorite,      // "HOME" | "DRAW" | "AWAY" | null
-        String confidence,    // yerelleştirilmiş: Yüksek/Orta/Düşük
-        String summary,       // sayıları kelimeye döken analiz okuması (tüyo DEĞİL)
+        String expectedScore,   // yaklaşık beklenen skor, örn. "2-1"
+        String favorite,        // "HOME" | "DRAW" | "AWAY" | null (başa baş)
+        String confidence,      // yerelleştirilmiş: Yüksek/Orta/Düşük
+        String summary,         // sayıları kelimeye döken analiz okuması (tüyo DEĞİL)
         String note) {
-
-    /** Tek bir olası skor ve yüzdesi (örn. "2-1", 11). */
-    public record ScoreLine(String score, int pct) {}
 
     /** Yeterli veri yokken dönülen boş yanıt. */
     public static MatchInsightResponse unavailable(String note) {

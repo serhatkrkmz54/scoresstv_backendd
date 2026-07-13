@@ -1,6 +1,5 @@
 package com.scorestv.football.insight;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,16 +42,11 @@ public final class RatingEngine {
     public record Ratings(Map<Long, Rating> map, Map<Long, Integer> appearances,
                           double leagueHomeAvg, double leagueAwayAvg, int matches) {}
 
-    /** En olası bir skor (ev-deplasman) ve olasılığı (0..1). */
-    public record Score(int home, int away, double prob) {}
-
-    /** Bir maç için olasılık çıktısı (yüzde 0..1). {@code topScores} = en olası
-     *  ilk 3 kesin skor (olasılığa göre azalan). */
+    /** Bir maç için olasılık çıktısı (yüzde 0..1). */
     public record Probabilities(double homeWin, double draw, double awayWin,
                                 double over25, double under25,
                                 double bttsYes, double bttsNo,
-                                double lambdaHome, double lambdaAway,
-                                List<Score> topScores) {}
+                                double lambdaHome, double lambdaAway) {}
 
     private static double clamp(double x) {
         return x < -CLAMP ? -CLAMP : (x > CLAMP ? CLAMP : x);
@@ -122,19 +116,15 @@ public final class RatingEngine {
             }
         }
         double ph = 0, px = 0, pa = 0, over = 0, btts = 0;
-        List<Score> scores = new ArrayList<>(MAXG * MAXG);
         for (int i = 0; i < MAXG; i++) {
             for (int j = 0; j < MAXG; j++) {
                 double p = m[i][j] / tot;
                 if (i > j) ph += p; else if (i == j) px += p; else pa += p;
                 if (i + j > 2) over += p;
                 if (i >= 1 && j >= 1) btts += p;
-                scores.add(new Score(i, j, p));
             }
         }
-        scores.sort((a, b) -> Double.compare(b.prob(), a.prob()));
-        List<Score> top = new ArrayList<>(scores.subList(0, Math.min(3, scores.size())));
-        return new Probabilities(ph, px, pa, over, 1 - over, btts, 1 - btts, lh, la, top);
+        return new Probabilities(ph, px, pa, over, 1 - over, btts, 1 - btts, lh, la);
     }
 
     private static double tau(int x, int y, double lh, double la) {
