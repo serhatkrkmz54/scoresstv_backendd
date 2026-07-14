@@ -2,6 +2,7 @@ package com.scorestv.football.insight;
 
 import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.Team;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -20,6 +21,10 @@ public class MatchInsightService {
     private static final int MIN_LEAGUE_MATCHES = 20;
 
     private final RatingService ratingService;
+
+    /** 1X2'ye güncel lig-formu düzeltmesi uygula (kapatılabilir). */
+    @Value("${scorestv.insight.form-adjust:true}")
+    private boolean formAdjust;
 
     public MatchInsightService(RatingService ratingService) {
         this.ratingService = ratingService;
@@ -55,14 +60,25 @@ public class MatchInsightService {
         RatingEngine.Probabilities p = RatingEngine.predict(
                 home, away, ratings.leagueHomeAvg(), ratings.leagueAwayAvg());
 
-        double max = Math.max(p.homeWin(), Math.max(p.draw(), p.awayWin()));
+        // Form düzeltmesi: 1X2 olasılıklarını takımların güncel lig formuna göre
+        // hafifçe ayarla (backtest'te doğrulanmış). Alt/Üst, KG ve λ DEĞİŞMEZ.
+        double pHome = p.homeWin(), pDraw = p.draw(), pAway = p.awayWin();
+        if (formAdjust) {
+            double[] adj = FormAdjuster.adjust(pHome, pDraw, pAway,
+                    ratings.forms().get(homeId), ratings.forms().get(awayId));
+            pHome = adj[0];
+            pDraw = adj[1];
+            pAway = adj[2];
+        }
+
+        double max = Math.max(pHome, Math.max(pDraw, pAway));
         // Net favori yalnız en yüksek olasılık ikinciyi belirgin geçiyorsa;
         // aksi halde null (başa baş) — "hep ev favori" yanılgısını önler.
-        String favorite = favorite(p.homeWin(), p.draw(), p.awayWin());
+        String favorite = favorite(pHome, pDraw, pAway);
 
         // Yüzdeler tam 100'e toplansın: 1X2 için en-büyük-kalan (Hamilton)
         // yöntemi; Alt/Üst ve KG için ikinci değer 100'den çıkarılır.
-        int[] wdl = round100(p.homeWin(), p.draw(), p.awayWin());
+        int[] wdl = round100(pHome, pDraw, pAway);
         int over = (int) Math.round(p.over25() * 100);
         int bttsYes = (int) Math.round(p.bttsYes() * 100);
 
