@@ -1,5 +1,6 @@
 package com.scorestv.volleyball.notify;
 
+import com.scorestv.mobile.domain.MobileDeviceToken;
 import com.scorestv.mobile.domain.VolleyballNotificationPref;
 import com.scorestv.mobile.domain.VolleyballNotificationPrefRepository;
 import com.scorestv.mobile.fcm.FcmMessagingService;
@@ -24,11 +25,9 @@ import java.util.Set;
  * Voleybol maclari icin FCM push gonderir: mac basladi, set bitti (skorlu),
  * mac bitti. Basketbol {@code BasketballNotificationService}'in voleybol esi.
  *
- * <p>Iki recipient kanali dedup ile birlestirilir:
- * <ol>
- *   <li>{@link DeviceVolleyballSubscriptionRepository} — favori mac aboneleri</li>
- *   <li>{@link VolleyballNotificationPrefRepository} — takim takipcileri</li>
- * </ol>
+ * <p><b>TR + EN:</b> her bildirim iki dilde uretilir; token-multicast yolunda
+ * alicilar cihaz locale'ine gore ({@code MobileDeviceToken.locale}) ayrilip
+ * dogru dil gonderilir. (Topic yolu locale ayirmaz → TR gider.)
  *
  * <p>Tum dispatch'ler {@code @Async}. Set bazli escalation: {@code dispatchSetEnd}
  * her tamamlanan set icin tek seferlik bildirim gonderir (last_notified_period).
@@ -60,8 +59,9 @@ public class VolleyballNotificationService {
     @Transactional(readOnly = true)
     public void dispatchStart(Long gameId, Long homeTeamId, Long awayTeamId,
                               String home, String away) {
-        send(gameId, "🏐 Maç başladı!",
-                "%s - %s başladı".formatted(home, away),
+        send(gameId,
+                "🏐 Maç başladı!", "%s - %s başladı".formatted(home, away),
+                "🏐 Game started!", "%s vs %s has started".formatted(home, away),
                 "vb_start", null, homeTeamId, awayTeamId, EventKind.START);
     }
 
@@ -71,10 +71,11 @@ public class VolleyballNotificationService {
     public void dispatchSetEnd(Long gameId, Long homeTeamId, Long awayTeamId,
                                String home, String away,
                                int set, Integer homeSets, Integer awaySets) {
-        String title = "🏐 %d. set bitti".formatted(set);
         String body = "%s %d-%d %s".formatted(home, n(homeSets), n(awaySets), away);
-        send(gameId, title, body, "vb_set", set,
-                homeTeamId, awayTeamId, EventKind.PERIOD);
+        send(gameId,
+                "🏐 %d. set bitti".formatted(set), body,
+                "🏐 End of set %d".formatted(set), body,
+                "vb_set", set, homeTeamId, awayTeamId, EventKind.PERIOD);
     }
 
     /** →FT/AW: mac bitti (final set skoru). */
@@ -83,16 +84,25 @@ public class VolleyballNotificationService {
     public void dispatchFinal(Long gameId, Long homeTeamId, Long awayTeamId,
                               String home, String away,
                               Integer homeSets, Integer awaySets) {
-        send(gameId, "🏐 Maç bitti",
-                "%s %d-%d %s".formatted(home, n(homeSets), n(awaySets), away),
+        String body = "%s %d-%d %s".formatted(home, n(homeSets), n(awaySets), away);
+        send(gameId,
+                "🏐 Maç bitti", body,
+                "🏐 Final", body,
                 "vb_final", null, homeTeamId, awayTeamId, EventKind.FINAL);
     }
 
-    private void send(Long gameId, String title, String body,
+    private void send(Long gameId, String titleTr, String bodyTr,
+                      String titleEn, String bodyEn,
                       String type, Integer set,
                       Long homeTeamId, Long awayTeamId,
                       EventKind kind) {
         if (!fcm.isEnabled() || gameId == null) return;
+
+        final Map<String, String> data = new HashMap<>();
+        data.put("type", type);
+        data.put("gameId", String.valueOf(gameId));
+        data.put("sport", "volleyball");
+        if (set != null) data.put("set", String.valueOf(set));
 
         if (useFcmTopics) {
             final String suffix = switch (kind) {
@@ -104,13 +114,8 @@ public class VolleyballNotificationService {
             if (homeTeamId != null) topics.add(FcmTopics.volleyballTeamEvent(homeTeamId, suffix));
             if (awayTeamId != null) topics.add(FcmTopics.volleyballTeamEvent(awayTeamId, suffix));
             topics.add(FcmTopics.volleyballGame(gameId));
-            Map<String, String> data = new HashMap<>();
-            data.put("type", type);
-            data.put("gameId", String.valueOf(gameId));
-            data.put("sport", "volleyball");
-            if (set != null) data.put("set", String.valueOf(set));
             try {
-                fcm.sendToConditionOrThrow(FcmTopics.orCondition(topics), title, body, data);
+                fcm.sendToConditionOrThrow(FcmTopics.orCondition(topics), titleTr, bodyTr, data);
                 log.info("FCM voleybol {} topic dispatch: gameId={} topics={}",
                         type, gameId, topics);
             } catch (RuntimeException ex) {
@@ -119,30 +124,28 @@ public class VolleyballNotificationService {
             return;
         }
 
-        Set<String> tokens = new LinkedHashSet<>();
+        final Set<String> tr = new LinkedHashSet<>();
+        final Set<String> en = new LinkedHashSet<>();
         for (DeviceVolleyballSubscription s : subRepo.findRecipientsForGame(gameId)) {
-            tokens.add(s.getDeviceToken().getFcmToken());
+            addByLocale(s.getDeviceToken(), tr, en);
         }
-        addTeamRecipients(tokens, homeTeamId, kind);
-        addTeamRecipients(tokens, awayTeamId, kind);
+        addTeamRecipients(tr, en, homeTeamId, kind);
+        addTeamRecipients(tr, en, awayTeamId, kind);
+        en.removeAll(tr);
 
-        if (tokens.isEmpty()) {
+        if (tr.isEmpty() && en.isEmpty()) {
             log.debug("Voleybol dispatch {}: alici yok gameId={}", type, gameId);
             return;
         }
 
-        Map<String, String> data = new HashMap<>();
-        data.put("type", type);
-        data.put("gameId", String.valueOf(gameId));
-        data.put("sport", "volleyball");
-        if (set != null) data.put("set", String.valueOf(set));
-
-        int sent = fcm.sendMulticast(List.copyOf(tokens), title, body, data);
-        log.info("FCM voleybol {} dispatch: gameId={} alici={} gonderildi={}",
-                type, gameId, tokens.size(), sent);
+        int sent = 0;
+        if (!tr.isEmpty()) sent += fcm.sendMulticast(List.copyOf(tr), titleTr, bodyTr, data);
+        if (!en.isEmpty()) sent += fcm.sendMulticast(List.copyOf(en), titleEn, bodyEn, data);
+        log.info("FCM voleybol {} dispatch: gameId={} tr={} en={} gonderildi={}",
+                type, gameId, tr.size(), en.size(), sent);
     }
 
-    private void addTeamRecipients(Set<String> tokens, Long teamId, EventKind kind) {
+    private void addTeamRecipients(Set<String> tr, Set<String> en, Long teamId, EventKind kind) {
         if (teamId == null) return;
         List<VolleyballNotificationPref> prefs = switch (kind) {
             case START -> prefRepo.findRecipientsForStart(teamId);
@@ -150,7 +153,19 @@ public class VolleyballNotificationService {
             case FINAL -> prefRepo.findRecipientsForFinal(teamId);
         };
         for (VolleyballNotificationPref p : prefs) {
-            tokens.add(p.getDeviceToken().getFcmToken());
+            addByLocale(p.getDeviceToken(), tr, en);
+        }
+    }
+
+    private static void addByLocale(MobileDeviceToken t, Set<String> tr, Set<String> en) {
+        if (t == null) return;
+        final String fcmToken = t.getFcmToken();
+        if (fcmToken == null || fcmToken.isBlank()) return;
+        final String loc = t.getLocale();
+        if (loc != null && loc.toLowerCase().startsWith("tr")) {
+            tr.add(fcmToken);
+        } else {
+            en.add(fcmToken);
         }
     }
 

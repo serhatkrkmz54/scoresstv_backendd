@@ -22,6 +22,10 @@ public interface NotificationOutboxRepository
     /** Aynı bildirim zaten kuyruğa girmiş mi? (idempotent enqueue). */
     boolean existsByDedupKey(String dedupKey);
 
+    /** Bu collapse slotu için daha önce satır (PENDING/SENT/FAILED) yazıldı mı?
+     * true → yeni gelen aynı slotlu bildirim bir GÜNCELLEME'dir (sessiz gider). */
+    boolean existsByCollapseKey(String collapseKey);
+
     /**
      * Retention temizliği: verilen statüdeki, {@code before}'dan eski satırları
      * siler (tablo sınırsız büyümesin). {@link NotificationOutboxCleanupJob}

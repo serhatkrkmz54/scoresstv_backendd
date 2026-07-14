@@ -34,7 +34,7 @@ public class EmailService {
     private final String resetCodeTemplate;
 
     public EmailService(JavaMailSender mailSender,
-                        @Value("${spring.mail.username:}") String from) {
+                        @Value("${MAIL_FROM:}") String from) {
         this.mailSender = mailSender;
         this.from = from;
         this.resetTemplate = loadTemplate(RESET_TEMPLATE_PATH);
@@ -48,7 +48,7 @@ public class EmailService {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             if (!from.isBlank()) {
-                helper.setFrom(from, "scorestv");
+                helper.setFrom(from, "Scores TV");
             }
             helper.setTo(to);
             helper.setSubject("scorestv - Şifre Sıfırlama");
@@ -81,7 +81,7 @@ public class EmailService {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             if (!from.isBlank()) {
-                helper.setFrom(from, "scorestv");
+                helper.setFrom(from, "Scores TV");
             }
             helper.setTo(to);
             helper.setSubject("scorestv - Şifre Sıfırlama Kodu");

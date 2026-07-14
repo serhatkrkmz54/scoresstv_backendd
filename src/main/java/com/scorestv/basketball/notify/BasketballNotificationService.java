@@ -4,6 +4,7 @@ import com.scorestv.basketball.domain.DeviceBasketballSubscription;
 import com.scorestv.basketball.domain.DeviceBasketballSubscriptionRepository;
 import com.scorestv.mobile.domain.BasketballNotificationPref;
 import com.scorestv.mobile.domain.BasketballNotificationPrefRepository;
+import com.scorestv.mobile.domain.MobileDeviceToken;
 import com.scorestv.mobile.fcm.FcmMessagingService;
 import com.scorestv.mobile.fcm.FcmTopics;
 import org.slf4j.Logger;
@@ -25,18 +26,11 @@ import java.util.Set;
  * (skorlu), maç bitti. Football'un {@code NotificationDispatcherService}'inden
  * tamamen ayrı (ayrı abonelik tablosu, ayrı topic/type).
  *
- * <p>A-Faz5: Iki recipient kanalı dedup ile birleştirilir:
- * <ol>
- *   <li>{@link DeviceBasketballSubscriptionRepository} — favori maç aboneleri</li>
- *   <li>{@link BasketballNotificationPrefRepository} — takım takipçileri
- *       (basketbol notif prefs, olay tipine göre)</li>
- * </ol>
- * Aynı cihaz iki kanalda da varsa tek bildirim alır (LinkedHashSet token bazlı
- * dedup).
+ * <p><b>TR + EN:</b> her bildirim iki dilde üretilir; token-multicast yolunda
+ * alıcılar cihaz locale'ine göre ({@code MobileDeviceToken.locale}) ayrılıp
+ * doğru dil gönderilir. (Topic yolu locale ayırmaz → TR gider.)
  *
- * <p>Tüm dispatch'ler {@code @Async} — sync tick'ini bekletmez. Mesaj metni
- * çağıran tarafından çıkarılan primitive verilerden kurulur (entity geçirilmez
- * → async thread'de lazy-init sorunu olmaz).
+ * <p>Tüm dispatch'ler {@code @Async} — sync tick'ini bekletmez.
  */
 @Service
 public class BasketballNotificationService {
@@ -66,8 +60,9 @@ public class BasketballNotificationService {
     @Transactional(readOnly = true)
     public void dispatchStart(Long gameId, Long homeTeamId, Long awayTeamId,
                               String home, String away) {
-        send(gameId, "🏀 Maç başladı!",
-                "%s - %s başladı".formatted(home, away),
+        send(gameId,
+                "🏀 Maç başladı!", "%s - %s başladı".formatted(home, away),
+                "🏀 Game started!", "%s vs %s has started".formatted(home, away),
                 "bk_start", null, homeTeamId, awayTeamId, EventKind.START);
     }
 
@@ -78,10 +73,11 @@ public class BasketballNotificationService {
                                   String home, String away,
                                   int quarter, Integer homeTotal,
                                   Integer awayTotal) {
-        String title = "🏀 %d. çeyrek bitti".formatted(quarter);
         String body = "%s %d-%d %s".formatted(home, n(homeTotal), n(awayTotal), away);
-        send(gameId, title, body, "bk_period", quarter,
-                homeTeamId, awayTeamId, EventKind.PERIOD);
+        send(gameId,
+                "🏀 %d. çeyrek bitti".formatted(quarter), body,
+                "🏀 End of Q%d".formatted(quarter), body,
+                "bk_period", quarter, homeTeamId, awayTeamId, EventKind.PERIOD);
     }
 
     /** →FT/AOT: maç bitti (final skor). */
@@ -90,19 +86,27 @@ public class BasketballNotificationService {
     public void dispatchFinal(Long gameId, Long homeTeamId, Long awayTeamId,
                               String home, String away,
                               Integer homeTotal, Integer awayTotal) {
-        send(gameId, "🏀 Maç bitti",
-                "%s %d-%d %s".formatted(home, n(homeTotal), n(awayTotal), away),
+        String body = "%s %d-%d %s".formatted(home, n(homeTotal), n(awayTotal), away);
+        send(gameId,
+                "🏀 Maç bitti", body,
+                "🏀 Final", body,
                 "bk_final", null, homeTeamId, awayTeamId, EventKind.FINAL);
     }
 
-    private void send(Long gameId, String title, String body,
+    private void send(Long gameId, String titleTr, String bodyTr,
+                      String titleEn, String bodyEn,
                       String type, Integer quarter,
                       Long homeTeamId, Long awayTeamId,
                       EventKind kind) {
         if (!fcm.isEnabled() || gameId == null) return;
 
-        // ---- FCM Topics yolu (flag ACIK) ----
-        // Alici DB sorgusu + multicast YOK: ilgili topic'lere TEK condition mesaji.
+        final Map<String, String> data = new HashMap<>();
+        data.put("type", type);
+        data.put("gameId", String.valueOf(gameId));
+        data.put("sport", "basketball");
+        if (quarter != null) data.put("quarter", String.valueOf(quarter));
+
+        // ---- FCM Topics yolu (flag ACIK) — locale ayirimi yok, TR gonderilir.
         if (useFcmTopics) {
             final String suffix = switch (kind) {
                 case START -> "basladi";
@@ -113,51 +117,40 @@ public class BasketballNotificationService {
             if (homeTeamId != null) topics.add(FcmTopics.basketballTeamEvent(homeTeamId, suffix));
             if (awayTeamId != null) topics.add(FcmTopics.basketballTeamEvent(awayTeamId, suffix));
             topics.add(FcmTopics.basketballGame(gameId));
-            Map<String, String> data = new HashMap<>();
-            data.put("type", type);
-            data.put("gameId", String.valueOf(gameId));
-            data.put("sport", "basketball");
-            if (quarter != null) data.put("quarter", String.valueOf(quarter));
             try {
-                fcm.sendToConditionOrThrow(FcmTopics.orCondition(topics), title, body, data);
+                fcm.sendToConditionOrThrow(FcmTopics.orCondition(topics), titleTr, bodyTr, data);
                 log.info("FCM basketbol {} topic dispatch: gameId={} topics={}",
                         type, gameId, topics);
             } catch (RuntimeException ex) {
-                // Basketbol outbox'ta DEGIL (fire-and-forget) — hatayi yut + logla.
                 log.warn("Basketbol topic dispatch hata gameId={}: {}", gameId, ex.getMessage());
             }
             return;
         }
 
-        // ---- Token-multicast yolu (flag KAPALI — mevcut, varsayilan) ----
-        // 1) Favori MAÇ aboneleri.
-        Set<String> tokens = new LinkedHashSet<>();
+        // ---- Token-multicast yolu (varsayilan) — locale'e gore TR/EN ayrimi.
+        final Set<String> tr = new LinkedHashSet<>();
+        final Set<String> en = new LinkedHashSet<>();
         for (DeviceBasketballSubscription s : subRepo.findRecipientsForGame(gameId)) {
-            tokens.add(s.getDeviceToken().getFcmToken());
+            addByLocale(s.getDeviceToken(), tr, en);
         }
+        addTeamRecipients(tr, en, homeTeamId, kind);
+        addTeamRecipients(tr, en, awayTeamId, kind);
+        en.removeAll(tr);
 
-        // 2) Takım takipçileri — home + away için olay tipine göre.
-        addTeamRecipients(tokens, homeTeamId, kind);
-        addTeamRecipients(tokens, awayTeamId, kind);
-
-        if (tokens.isEmpty()) {
+        if (tr.isEmpty() && en.isEmpty()) {
             log.debug("Basketbol dispatch {}: alıcı yok gameId={}", type, gameId);
             return;
         }
 
-        Map<String, String> data = new HashMap<>();
-        data.put("type", type);
-        data.put("gameId", String.valueOf(gameId));
-        data.put("sport", "basketball");
-        if (quarter != null) data.put("quarter", String.valueOf(quarter));
-
-        int sent = fcm.sendMulticast(List.copyOf(tokens), title, body, data);
-        log.info("FCM basketbol {} dispatch: gameId={} alıcı={} gönderildi={}",
-                type, gameId, tokens.size(), sent);
+        int sent = 0;
+        if (!tr.isEmpty()) sent += fcm.sendMulticast(List.copyOf(tr), titleTr, bodyTr, data);
+        if (!en.isEmpty()) sent += fcm.sendMulticast(List.copyOf(en), titleEn, bodyEn, data);
+        log.info("FCM basketbol {} dispatch: gameId={} tr={} en={} gönderildi={}",
+                type, gameId, tr.size(), en.size(), sent);
     }
 
     /** Takım id null değilse, olay tipine göre uygun pref query'sini çalıştır. */
-    private void addTeamRecipients(Set<String> tokens, Long teamId, EventKind kind) {
+    private void addTeamRecipients(Set<String> tr, Set<String> en, Long teamId, EventKind kind) {
         if (teamId == null) return;
         List<BasketballNotificationPref> prefs = switch (kind) {
             case START -> prefRepo.findRecipientsForStart(teamId);
@@ -165,7 +158,20 @@ public class BasketballNotificationService {
             case FINAL -> prefRepo.findRecipientsForFinal(teamId);
         };
         for (BasketballNotificationPref p : prefs) {
-            tokens.add(p.getDeviceToken().getFcmToken());
+            addByLocale(p.getDeviceToken(), tr, en);
+        }
+    }
+
+    /** Cihazı locale'ine göre TR ya da EN token listesine ekle (tr* → TR, diğer → EN). */
+    private static void addByLocale(MobileDeviceToken t, Set<String> tr, Set<String> en) {
+        if (t == null) return;
+        final String fcmToken = t.getFcmToken();
+        if (fcmToken == null || fcmToken.isBlank()) return;
+        final String loc = t.getLocale();
+        if (loc != null && loc.toLowerCase().startsWith("tr")) {
+            tr.add(fcmToken);
+        } else {
+            en.add(fcmToken);
         }
     }
 

@@ -65,12 +65,30 @@ public class NotificationOutbox {
     @Column(nullable = false, length = 500)
     private String body;
 
+    /** EN başlık (yerelleştirme). null → gönderimde TR'ye düşülür. */
+    @Column(name = "title_en", length = 255)
+    private String titleEn;
+
+    /** EN gövde (yerelleştirme). null → gönderimde TR'ye düşülür. */
+    @Column(name = "body_en", length = 500)
+    private String bodyEn;
+
     /** FCM data payload (JSON string). */
     @Column(name = "data_json", columnDefinition = "TEXT")
     private String dataJson;
 
     @Column(name = "dedup_key", nullable = false, length = 120)
     private String dedupKey;
+
+    /** OS bildirim slotu — aynı collapse_key yeni bildirimi YERİNDE günceller
+     * (Android notification tag / APNs apns-collapse-id). null → normal bildirim. */
+    @Column(name = "collapse_key", length = 120)
+    private String collapseKey;
+
+    /** true → sessiz güncelleme (ses/titreşim yok). İki fazlı bildirimde
+     * isimsiz→isimli güncellemeyi kullanıcıyı tekrar titretmeden yapar. */
+    @Column(nullable = false)
+    private boolean silent = false;
 
     @Column(nullable = false, length = 16)
     private String status = STATUS_PENDING;

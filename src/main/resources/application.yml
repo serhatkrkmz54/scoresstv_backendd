@@ -45,9 +45,14 @@ spring:
         max-page-size: 100       # Asiri buyuk sayfa istegi engellenir
 
   mail:
-    host: smtp.gmail.com
-    port: 587
-    username: ${MAIL_USERNAME:}
+    # E-posta gonderimi Twilio SendGrid SMTP relay uzerinden.
+    # SendGrid kurali: host=smtp.sendgrid.net, username = SABIT "apikey" (hesap
+    # adi DEGIL), password = SendGrid API key (SG. ile baslar). Gonderen adres
+    # ayrica MAIL_FROM ile verilir (SendGrid'de dogrulanmis sender olmali).
+    # Saglayici degisirse yalniz bu env'ler degisir; EmailService aynen calisir.
+    host: ${MAIL_HOST:smtp.sendgrid.net}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:apikey}
     password: ${MAIL_PASSWORD:}
     properties:
       mail:
@@ -130,6 +135,19 @@ scorestv:
   # Tanimli degilse FCM gonderim devre disi (backend calismaya devam eder).
   firebase:
     service-account-path: ${FIREBASE_SERVICE_ACCOUNT_PATH:}
+
+  # ============================================================
+  # Bildirim (FCM) ayarlari.
+  # enrich-updates: iki fazli canli bildirimin FAZ-2'si (gol/kart isimli SESSIZ
+  #   guncelleme) acik mi? MAGAZA SURUMU (yeni app) yayina cikana dek FALSE
+  #   birak — o zaman eski app kullanicilari fazla titresim yasamaz, davranis
+  #   bugunkuyle bire bir ayni kalir. Yeni surum store'da yayinlaninca
+  #   NOTIFY_ENRICH_UPDATES=true yapip backend'i yeniden baslat.
+  # use-fcm-topics: alici DB'si yerine FCM topic/condition ile fan-out (kapali).
+  # ============================================================
+  notify:
+    enrich-updates: ${NOTIFY_ENRICH_UPDATES:true}
+    use-fcm-topics: ${NOTIFY_USE_FCM_TOPICS:true}
 
   # ============================================================
   # Bilyoner iddaa oranlari. enabled=false ise oran akisi tamamen kapali

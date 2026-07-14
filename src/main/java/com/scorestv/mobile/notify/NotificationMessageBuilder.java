@@ -6,225 +6,213 @@ import com.scorestv.football.domain.Team;
 import org.springframework.stereotype.Component;
 
 /**
- * Mobile push notification icin TR mesaj govdesi uretici.
+ * Mobile push notification icin TR + EN mesaj uretici.
  *
- * <p>Suanlik sadece TR — gelecekte device locale'a gore EN versiyon eklenebilir
- * (MobileDeviceToken.locale alanini kullanir).
- *
- * <p>Mesaj formati: kisa, dikkat cekici, oyuncu adi/skor ile.
- * - "⚽ GOL! Galatasaray 1-0 öne geçti"
- * - "Icardi, 78. dakikada"
+ * <p>Her mesaj {@link Localized} olarak hem Turkce hem Ingilizce uretilir;
+ * gonderim aninda cihaz locale'ine gore ({@code MobileDeviceToken.locale})
+ * dogru dil secilir. Takim adi TR'de {@code nameTr}, EN'de {@code name}
+ * tercih edilir.
  */
 @Component
 public class NotificationMessageBuilder {
 
+    /** Iki dilli bildirim metni. */
+    public record Localized(String titleTr, String bodyTr, String titleEn, String bodyEn) {}
+
+    /** Geriye donuk basit tek-dil kayit (kullanan kalmadi ama API korunur). */
     public record NotificationMessage(String title, String body) {}
 
-    public NotificationMessage buildEventMessage(
-            Fixture fixture, FixtureEvent event, String mobileType) {
+    public Localized event(Fixture fixture, FixtureEvent event, String mobileType) {
         return switch (mobileType) {
-            case "gol" -> _buildGoal(fixture, event);
-            case "kirmizi" -> _buildRedCard(fixture, event);
-            case "penalti" -> _buildPenaltyOrVar(fixture, event);
-            default -> new NotificationMessage("ScoresTV", "Yeni olay");
+            case "kirmizi" -> _redCard(fixture, event);
+            case "penalti" -> _penaltyOrVar(fixture, event);
+            default -> new Localized("ScoresTV", "Yeni olay", "ScoresTV", "New event");
         };
     }
 
-    public NotificationMessage buildKickoffMessage(Fixture fixture) {
-        return new NotificationMessage(
+    public Localized kickoff(Fixture f) {
+        final String h = _tr(f.getHomeTeam()), a = _tr(f.getAwayTeam());
+        final String he = _en(f.getHomeTeam()), ae = _en(f.getAwayTeam());
+        return new Localized(
                 "⏱️ Maç başladı!",
-                "%s - %s maçında ilk düdük çaldı".formatted(
-                        _name(fixture.getHomeTeam()),
-                        _name(fixture.getAwayTeam())));
+                "%s - %s maçında ilk düdük çaldı".formatted(h, a),
+                "⏱️ Kick-off!",
+                "%s vs %s has kicked off".formatted(he, ae));
     }
 
-    public NotificationMessage buildHalftimeMessage(Fixture fixture) {
-        final Integer h = fixture.getHomeGoals();
-        final Integer a = fixture.getAwayGoals();
-        final String score = (h != null && a != null) ? "%d - %d".formatted(h, a) : "";
-        return new NotificationMessage(
+    public Localized halftime(Fixture f) {
+        final String score = _score(f);
+        return new Localized(
                 "⏱️ İlk yarı bitti",
-                "%s %s %s".formatted(
-                        _name(fixture.getHomeTeam()), score, _name(fixture.getAwayTeam()))
-                        .trim());
+                "%s %s %s".formatted(_tr(f.getHomeTeam()), score, _tr(f.getAwayTeam())).trim(),
+                "⏱️ Half-time",
+                "%s %s %s".formatted(_en(f.getHomeTeam()), score, _en(f.getAwayTeam())).trim());
     }
 
-    public NotificationMessage buildSecondHalfMessage(Fixture fixture) {
-        return new NotificationMessage(
+    public Localized secondHalf(Fixture f) {
+        return new Localized(
                 "▶ İkinci yarı başladı",
                 "%s - %s maçında ikinci yarı başladı".formatted(
-                        _name(fixture.getHomeTeam()),
-                        _name(fixture.getAwayTeam())));
+                        _tr(f.getHomeTeam()), _tr(f.getAwayTeam())),
+                "▶ Second half",
+                "%s vs %s — second half underway".formatted(
+                        _en(f.getHomeTeam()), _en(f.getAwayTeam())));
     }
 
-    public NotificationMessage buildLineupMessage(Fixture fixture) {
-        return new NotificationMessage(
+    public Localized lineup(Fixture f) {
+        return new Localized(
                 "📋 İlk 11 açıklandı",
                 "%s - %s maçının ilk 11'i belli oldu".formatted(
-                        _name(fixture.getHomeTeam()),
-                        _name(fixture.getAwayTeam())));
+                        _tr(f.getHomeTeam()), _tr(f.getAwayTeam())),
+                "📋 Line-ups are out",
+                "%s vs %s starting XI confirmed".formatted(
+                        _en(f.getHomeTeam()), _en(f.getAwayTeam())));
     }
 
-    public NotificationMessage buildFinalMessage(Fixture fixture) {
-        final Integer h = fixture.getHomeGoals();
-        final Integer a = fixture.getAwayGoals();
-        final String score = (h != null && a != null) ? "%d - %d".formatted(h, a) : "";
-        return new NotificationMessage(
+    public Localized finalScore(Fixture f) {
+        final String score = _score(f);
+        return new Localized(
                 "🏁 Maç bitti",
-                "%s %s %s".formatted(
-                        _name(fixture.getHomeTeam()), score, _name(fixture.getAwayTeam()))
-                        .trim());
+                "%s %s %s".formatted(_tr(f.getHomeTeam()), score, _tr(f.getAwayTeam())).trim(),
+                "🏁 Full-time",
+                "%s %s %s".formatted(_en(f.getHomeTeam()), score, _en(f.getAwayTeam())).trim());
     }
 
-    /// Skor degisiminden ANINDA gol bildirimi. Golcu biliniyorsa eklenir;
-    /// bilinmiyorsa skor-only (rekabet icin beklemeden hizli gonderim).
-    ///
-    /// A-Faz5 rotuş: dakika her durumda gosterilir — golcu null olsa bile
-    /// "12'" formatinda body'de yer alir (kart/penaltiyla tutarli).
-    public NotificationMessage buildScoreGoal(
-            Fixture fixture, String scorerName, Integer minute) {
-        final String home = _name(fixture.getHomeTeam());
-        final String away = _name(fixture.getAwayTeam());
-        final Integer h = fixture.getHomeGoals();
-        final Integer a = fixture.getAwayGoals();
-        final String title = (h != null && a != null)
-                ? "⚽ GOL! %s %d-%d %s".formatted(home, h, a, away)
-                : "⚽ GOL! %s - %s".formatted(home, away);
-        final String body;
+    /// Skor degisiminden gol bildirimi. Golcu biliniyorsa eklenir; degilse
+    /// dakika (varsa) gosterilir. Golcu+dakika govdesi dil-notr (orn. "Icardi 78'").
+    public Localized scoreGoal(Fixture f, String scorerName, Integer minute) {
+        final String hTr = _tr(f.getHomeTeam()), aTr = _tr(f.getAwayTeam());
+        final String hEn = _en(f.getHomeTeam()), aEn = _en(f.getAwayTeam());
+        final Integer h = f.getHomeGoals(), a = f.getAwayGoals();
+        final String titleTr = (h != null && a != null)
+                ? "⚽ GOL! %s %d-%d %s".formatted(hTr, h, a, aTr)
+                : "⚽ GOL! %s - %s".formatted(hTr, aTr);
+        final String titleEn = (h != null && a != null)
+                ? "⚽ GOAL! %s %d-%d %s".formatted(hEn, h, a, aEn)
+                : "⚽ GOAL! %s - %s".formatted(hEn, aEn);
+        final String bodyTr, bodyEn;
         if (scorerName != null && !scorerName.isBlank()) {
-            // Golcu + dakika (varsa): "Icardi 78'"
-            body = minute != null
-                    ? "%s %d'".formatted(scorerName, minute)
-                    : scorerName;
+            final String line = minute != null
+                    ? "%s %d'".formatted(scorerName, minute) : scorerName;
+            bodyTr = line;
+            bodyEn = line; // golcu+dakika dil-notr
         } else if (minute != null) {
-            // Golcu yok ama dakika var: "12. dakika · Galatasaray - Fenerbahçe"
-            body = "%d'  •  %s - %s".formatted(minute, home, away);
+            bodyTr = "%d'  •  %s - %s".formatted(minute, hTr, aTr);
+            bodyEn = "%d'  •  %s - %s".formatted(minute, hEn, aEn);
         } else {
-            body = "%s - %s".formatted(home, away);
+            bodyTr = "%s - %s".formatted(hTr, aTr);
+            bodyEn = "%s - %s".formatted(hEn, aEn);
         }
-        return new NotificationMessage(title, body);
+        return new Localized(titleTr, bodyTr, titleEn, bodyEn);
     }
 
-    private NotificationMessage _buildGoal(Fixture fixture, FixtureEvent event) {
-        final Long scoringTeamId =
-                event.getTeam() != null ? event.getTeam().getId() : null;
-        final String scoringTeam = _name(event.getTeam());
-        final String homeName = _name(fixture.getHomeTeam());
-        final String awayName = _name(fixture.getAwayTeam());
-        final Integer h = fixture.getHomeGoals();
-        final Integer a = fixture.getAwayGoals();
+    private Localized _redCard(Fixture f, FixtureEvent e) {
+        return new Localized(
+                "🟥 Kırmızı kart! %s".formatted(_tr(e.getTeam())),
+                _playerLineTr(e),
+                "🟥 Red card! %s".formatted(_en(e.getTeam())),
+                _playerLineEn(e));
+    }
 
-        final String title;
-        if (h != null && a != null) {
-            title = "⚽ GOL! %s %d-%d %s".formatted(homeName, h, a, awayName);
+    private Localized _penaltyOrVar(Fixture f, FixtureEvent e) {
+        final String type = e.getType() == null ? "" : e.getType().toLowerCase();
+        return "var".equals(type) ? _var(f, e) : _penalty(f, e);
+    }
+
+    private Localized _penalty(Fixture f, FixtureEvent e) {
+        final String d = e.getDetail() == null ? "" : e.getDetail().toLowerCase();
+        final String teamTr = _tr(e.getTeam()), teamEn = _en(e.getTeam());
+        final String titleTr, titleEn;
+        if (d.contains("missed")) {
+            titleTr = "🚫 Penaltı kaçtı! %s".formatted(teamTr);
+            titleEn = "🚫 Penalty missed! %s".formatted(teamEn);
+        } else if (d.contains("cancel")) {
+            titleTr = "⚡ Penaltı iptal edildi — %s".formatted(teamTr);
+            titleEn = "⚡ Penalty cancelled — %s".formatted(teamEn);
         } else {
-            title = "⚽ GOL! %s attı".formatted(scoringTeam);
+            titleTr = "⚡ Penaltı! %s".formatted(teamTr);
+            titleEn = "⚡ Penalty! %s".formatted(teamEn);
         }
-        final String body = _playerLine(event);
-        return new NotificationMessage(title, body);
+        return new Localized(titleTr, _playerLineTr(e), titleEn, _playerLineEn(e));
     }
 
-    private NotificationMessage _buildRedCard(Fixture fixture, FixtureEvent event) {
-        final String team = _name(event.getTeam());
-        final String title = "🟥 Kırmızı kart! %s".formatted(team);
-        final String body = _playerLine(event);
-        return new NotificationMessage(title, body);
-    }
-
-    /**
-     * "penalti" tipi hem gerçek penaltı olaylarını (type=Goal) hem de penaltı/gol
-     * ile ilgili VAR kararlarını (type=Var) kapsar. Burada olayın asıl tipine
-     * göre uygun açıklayıcı metne yönlendiririz.
-     */
-    private NotificationMessage _buildPenaltyOrVar(Fixture fixture, FixtureEvent event) {
-        final String type = event.getType() == null ? "" : event.getType().toLowerCase();
-        if ("var".equals(type)) {
-            return _buildVar(fixture, event);
-        }
-        return _buildPenalty(fixture, event);
-    }
-
-    /**
-     * Penaltı olayı (type=Goal). Penaltıdan GOL artık "gol" tipine düştüğü için
-     * (skor bildirimi gönderir) burada genelde KAÇAN penaltı işlenir; iptal/diğer
-     * için yedek başlıklar tutulur.
-     */
-    private NotificationMessage _buildPenalty(Fixture fixture, FixtureEvent event) {
-        final String detail = event.getDetail() == null
-                ? "" : event.getDetail().toLowerCase();
-        final String team = _name(event.getTeam());
-        final String title;
-        if (detail.contains("missed")) {
-            title = "🚫 Penaltı kaçtı! %s".formatted(team);
-        } else if (detail.contains("cancel")) {
-            title = "⚡ Penaltı iptal edildi — %s".formatted(team);
+    private Localized _var(Fixture f, FixtureEvent e) {
+        final String d = e.getDetail() == null ? "" : e.getDetail().toLowerCase();
+        final String titleTr, titleEn;
+        if (d.contains("penalty")) {
+            titleTr = d.contains("cancel") ? "📺 VAR: Penaltı iptal edildi" : "📺 VAR: Penaltı verildi";
+            titleEn = d.contains("cancel") ? "📺 VAR: Penalty cancelled" : "📺 VAR: Penalty awarded";
+        } else if (d.contains("goal")) {
+            final boolean off = d.contains("cancel") || d.contains("disallow");
+            titleTr = off ? "📺 VAR: Gol iptal edildi" : "📺 VAR: Gol onaylandı";
+            titleEn = off ? "📺 VAR: Goal disallowed" : "📺 VAR: Goal confirmed";
         } else {
-            title = "⚡ Penaltı! %s".formatted(team);
+            titleTr = "📺 VAR kararı";
+            titleEn = "📺 VAR decision";
         }
-        final String body = _playerLine(event);
-        return new NotificationMessage(title, body);
+        return new Localized(titleTr, _varBodyTr(f, e), titleEn, _varBodyEn(f, e));
     }
 
-    /**
-     * VAR kararı (type=Var) — penaltı veya gol ile ilgili kararları açıkça
-     * "VAR" etiketiyle bildirir. Diğer VAR olayları (kart upgrade vb.)
-     * dispatcher tarafından zaten elenir.
-     */
-    private NotificationMessage _buildVar(Fixture fixture, FixtureEvent event) {
-        final String detail = event.getDetail() == null
-                ? "" : event.getDetail().toLowerCase();
-        final String title;
-        if (detail.contains("penalty")) {
-            title = detail.contains("cancel")
-                    ? "📺 VAR: Penaltı iptal edildi"
-                    : "📺 VAR: Penaltı verildi";
-        } else if (detail.contains("goal")) {
-            title = (detail.contains("cancel") || detail.contains("disallow"))
-                    ? "📺 VAR: Gol iptal edildi"
-                    : "📺 VAR: Gol onaylandı";
-        } else {
-            title = "📺 VAR kararı";
-        }
-        return new NotificationMessage(title, _varBody(fixture, event));
+    private String _varBodyTr(Fixture f, FixtureEvent e) {
+        final String min = _minuteStr(e);
+        final String who = (e.getPlayerName() != null && !e.getPlayerName().isBlank())
+                ? e.getPlayerName()
+                : (e.getTeam() != null ? _tr(e.getTeam())
+                        : "%s - %s".formatted(_tr(f.getHomeTeam()), _tr(f.getAwayTeam())));
+        return min.isEmpty() ? who : "%s  •  %s".formatted(who, min);
     }
 
-    /** VAR gövdesi: oyuncu (varsa) ya da takım + dakika. */
-    private String _varBody(Fixture fixture, FixtureEvent event) {
-        final String minStr = _minuteStr(event);
-        final String who;
-        if (event.getPlayerName() != null && !event.getPlayerName().isBlank()) {
-            who = event.getPlayerName();
-        } else if (event.getTeam() != null) {
-            who = _name(event.getTeam());
-        } else {
-            who = "%s - %s".formatted(
-                    _name(fixture.getHomeTeam()), _name(fixture.getAwayTeam()));
-        }
-        return minStr.isEmpty() ? who : "%s  •  %s".formatted(who, minStr);
+    private String _varBodyEn(Fixture f, FixtureEvent e) {
+        final String min = _minuteStr(e);
+        final String who = (e.getPlayerName() != null && !e.getPlayerName().isBlank())
+                ? e.getPlayerName()
+                : (e.getTeam() != null ? _en(e.getTeam())
+                        : "%s - %s".formatted(_en(f.getHomeTeam()), _en(f.getAwayTeam())));
+        return min.isEmpty() ? who : "%s  •  %s".formatted(who, min);
     }
 
-    private String _playerLine(FixtureEvent e) {
+    private String _playerLineTr(FixtureEvent e) {
         final String player = e.getPlayerName();
-        final String minStr = _minuteStr(e);
+        final String min = _minuteStr(e);
         if (player != null && !player.isBlank()) {
-            return minStr.isEmpty() ? player : "%s %s".formatted(player, minStr);
+            return min.isEmpty() ? player : "%s %s".formatted(player, min);
         }
-        return minStr.isEmpty() ? "Maçtan yeni gelişme" : minStr;
+        return min.isEmpty() ? "Maçtan yeni gelişme" : min;
     }
 
-    /** Dakika metni: "78'" veya uzatma varsa "45+2'". Yoksa boş. */
+    private String _playerLineEn(FixtureEvent e) {
+        final String player = e.getPlayerName();
+        final String min = _minuteStr(e);
+        if (player != null && !player.isBlank()) {
+            return min.isEmpty() ? player : "%s %s".formatted(player, min);
+        }
+        return min.isEmpty() ? "New update" : min;
+    }
+
+    /** Dakika metni: "78'" veya uzatma varsa "45+2'". Yoksa boş. Dil-notr. */
     private String _minuteStr(FixtureEvent e) {
         final Integer min = e.getTimeElapsed();
         final Integer extra = e.getTimeExtra();
         if (min == null) return "";
-        return (extra != null && extra > 0)
-                ? "%d+%d'".formatted(min, extra)
-                : "%d'".formatted(min);
+        return (extra != null && extra > 0) ? "%d+%d'".formatted(min, extra) : "%d'".formatted(min);
     }
 
-    private String _name(Team t) {
+    private String _score(Fixture f) {
+        final Integer h = f.getHomeGoals(), a = f.getAwayGoals();
+        return (h != null && a != null) ? "%d - %d".formatted(h, a) : "";
+    }
+
+    /** TR takim adi — nameTr tercih, yoksa name. */
+    private String _tr(Team t) {
         if (t == null) return "?";
         if (t.getNameTr() != null && !t.getNameTr().isBlank()) return t.getNameTr();
-        return t.getName();
+        return t.getName() != null ? t.getName() : "?";
+    }
+
+    /** EN takim adi — name tercih, yoksa nameTr. */
+    private String _en(Team t) {
+        if (t == null) return "?";
+        if (t.getName() != null && !t.getName().isBlank()) return t.getName();
+        return t.getNameTr() != null ? t.getNameTr() : "?";
     }
 }

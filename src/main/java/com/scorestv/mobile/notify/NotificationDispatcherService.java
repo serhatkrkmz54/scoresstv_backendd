@@ -6,6 +6,7 @@ import com.scorestv.football.domain.FixtureEventRepository;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.mobile.domain.DeviceMatchSubscription;
 import com.scorestv.mobile.domain.DeviceMatchSubscriptionRepository;
+import com.scorestv.mobile.domain.MobileDeviceToken;
 import com.scorestv.mobile.domain.UserNotificationPref;
 import com.scorestv.mobile.domain.UserNotificationPrefRepository;
 import com.scorestv.mobile.fcm.FcmMessagingService;
@@ -25,28 +26,17 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Canli mac olaylarini (gol, kart, penalti, kickoff, final) ilgili kullanicilara
- * FCM push notification olarak gonderir.
+ * Canli mac olaylarini (gol, kart, penalti) ilgili kullanicilara FCM push
+ * notification olarak gonderir. (Kickoff/final/HT/2H {@link
+ * com.scorestv.football.live.FixtureNotifyGate} → outbox uzerinden gider.)
  *
- * <p><b>Akis (event):</b>
- * <ol>
- *   <li>FixtureEventsLiveProcessor yeni event tespit eder → bizi cagirir</li>
- *   <li>Event type+detail'i mobile event tipine (gol/kirmizi/penalti) cevir</li>
- *   <li>Event'in oldugu takimi (event.team) al — bu takimi takip eden cihazlari bul</li>
- *   <li>Her recipient icin FCM mesaji formatla (TR/EN), batch gonder</li>
- * </ol>
+ * <p><b>İki fazlı canlı bildirim (Maçkolik deseni):</b> gol/kırmızı kart önce
+ * ISIMSIZ (anında), sonra oyuncu adıyla AYNI bildirim collapse_key ile SESSİZCE
+ * güncellenir.
  *
- * <p><b>Akis (status change — kickoff/final):</b>
- * <ol>
- *   <li>LiveTickerService Snapshot karsilastirmasinda status NS→1H veya
- *       canli→FT/AET/PEN gecisini gorur → bizi cagirir</li>
- *   <li>Fixture'in iki takimini al — her ikisini takip eden cihazlari bul</li>
- *   <li>FCM mesaji "Galatasaray vs Fenerbahce başladı" formatinda</li>
- * </ol>
- *
- * <p><b>Async:</b> tum dispatch'ler @Async — live ticker tick'ini bekletmez.
- * <b>Idempotency:</b> ayni event icin tekrar cagri yapilsa bile recipient
- * unique olur (DB-level UNIQUE on device_token_id + team_id zaten korur).
+ * <p><b>TR + EN:</b> mesaj enqueue anında iki dilde render edilir; gönderimde
+ * ({@link #sendOutboxRow}) alıcılar cihaz locale'ine göre ayrılıp doğru dil
+ * gönderilir.
  */
 @Service
 public class NotificationDispatcherService {
@@ -61,47 +51,13 @@ public class NotificationDispatcherService {
     private final FixtureRepository fixtureRepository;
     private final FixtureEventRepository fixtureEventRepository;
     private final NotificationOutboxEnqueuer enqueuer;
-    /** FCM Topics yolu acik mi? (scorestv.notify.use-fcm-topics) — acikken alici
-     * DB sorgusu + multicast yerine topic/condition'a TEK gonderim. */
+    private final NotificationOutboxRepository outboxRepository;
+    /** FCM Topics yolu acik mi? (scorestv.notify.use-fcm-topics) */
     private final boolean useFcmTopics;
-
-    /**
-     * Cift bildirim onleme memo'su. Key formati:
-     *   "{fixtureId}:{type}:{teamId}:{score-or-minute}"
-     * Value: gonderim epoch_ms. Ayni anahtar son {@link #DEDUP_TTL_MS} icinde
-     * varsa skip — LiveTickerService bir skor degisimini iki tick'te gorse
-     * veya FixtureEventsLiveProcessor ayni event'i yeniden islese tekrar push
-     * gitmez.
-     *
-     * <p>Map process-ici (clustered ortamda her node ayri memo) — bizim
-     * single-app deployment'imizda yeterli. Cluster gerekirse Redis bazli
-     * dedup.
-     */
-    private final java.util.concurrent.ConcurrentHashMap<String, Long> _dedupMemo =
-            new java.util.concurrent.ConcurrentHashMap<>();
-    private static final long DEDUP_TTL_MS = 120_000L; // 2 dakika
-
-    /** Son N ms icinde ayni key icin push gonderildi mi? */
-    private boolean _isRecentlySent(String key) {
-        Long lastAt = _dedupMemo.get(key);
-        if (lastAt == null) return false;
-        long age = System.currentTimeMillis() - lastAt;
-        if (age < DEDUP_TTL_MS) return true;
-        // TTL gectir — temizle ve tekrar gonderebiliriz
-        _dedupMemo.remove(key);
-        return false;
-    }
-
-    /** Push gonderildi olarak isaretle + memo'yu basit sekilde budamayi dene. */
-    private void _markSent(String key) {
-        _dedupMemo.put(key, System.currentTimeMillis());
-        // Lightweight cleanup: memo 500 entry'i gectiyse expired olanlari sil
-        if (_dedupMemo.size() > 500) {
-            long now = System.currentTimeMillis();
-            _dedupMemo.entrySet().removeIf(
-                    e -> now - e.getValue() > DEDUP_TTL_MS);
-        }
-    }
+    /** Iki fazli bildirimin FAZ-2'si (isimli SESSIZ guncelleme) acik mi?
+     * (scorestv.notify.enrich-updates) — magaza surumu cikana dek FALSE; boylece
+     * eski app kullanicilari fazla titresim yasamaz (davranis bugunkuyle ayni). */
+    private final boolean enrichUpdates;
 
     public NotificationDispatcherService(
             UserNotificationPrefRepository prefRepository,
@@ -111,8 +67,11 @@ public class NotificationDispatcherService {
             FixtureRepository fixtureRepository,
             FixtureEventRepository fixtureEventRepository,
             NotificationOutboxEnqueuer enqueuer,
-            @Value("${scorestv.notify.use-fcm-topics:false}") boolean useFcmTopics) {
+            NotificationOutboxRepository outboxRepository,
+            @Value("${scorestv.notify.use-fcm-topics:false}") boolean useFcmTopics,
+            @Value("${scorestv.notify.enrich-updates:false}") boolean enrichUpdates) {
         this.useFcmTopics = useFcmTopics;
+        this.enrichUpdates = enrichUpdates;
         this.prefRepository = prefRepository;
         this.matchSubRepository = matchSubRepository;
         this.fcmMessaging = fcmMessaging;
@@ -120,10 +79,50 @@ public class NotificationDispatcherService {
         this.fixtureRepository = fixtureRepository;
         this.fixtureEventRepository = fixtureEventRepository;
         this.enqueuer = enqueuer;
+        this.outboxRepository = outboxRepository;
     }
 
     // ============================================================
-    // EVENT (gol/kart/penalti) — FixtureEventsLiveProcessor'dan cagrilir
+    // Collapse anahtarları (OS bildirim slotu — faz-1 ve faz-2 AYNI olmalı)
+    // ============================================================
+
+    private static String _goalCollapse(Long fixtureId, Long teamId, int teamGoalNo) {
+        return "g-" + fixtureId + "-" + (teamId == null ? 0 : teamId) + "-" + teamGoalNo;
+    }
+
+    private static String _eventCollapse(Long fixtureId, String mobileType, Long teamId,
+                                         int elapsed, int extra) {
+        return "e-" + fixtureId + "-" + mobileType + "-" + teamId + "-" + elapsed + "-" + extra;
+    }
+
+    private static String _hash(String s) {
+        return s == null ? "0" : Integer.toHexString(s.hashCode());
+    }
+
+    /** Bu golün, atan takımın kaçıncı golü olduğu (1-tabanlı). Kaçan penaltı hariç. */
+    private int _goalOrdinal(Long fixtureId, Long teamId, FixtureEvent current) {
+        List<FixtureEvent> all =
+                fixtureEventRepository.findByFixtureIdOrderByTimeElapsedAsc(fixtureId);
+        int n = 0;
+        for (FixtureEvent e : all) {
+            if (e.getType() == null || !"goal".equalsIgnoreCase(e.getType())) continue;
+            String d = e.getDetail() == null ? "" : e.getDetail().toLowerCase();
+            if (d.contains("missed")) continue;
+            if (e.getTeam() == null || !teamId.equals(e.getTeam().getId())) continue;
+            n++;
+            if (current.getId() != null && current.getId().equals(e.getId())) return n;
+        }
+        return n == 0 ? 1 : n;
+    }
+
+    /** collapse/silent'i data'ya koy (foreground local-notif yerinde güncelleme icin). */
+    private static void _putCollapse(Map<String, String> data, String collapseKey, boolean silent) {
+        if (collapseKey != null) data.put("collapseKey", collapseKey);
+        data.put("silent", silent ? "true" : "false");
+    }
+
+    // ============================================================
+    // EVENT (gol faz-2 / kart / penalti) — FixtureEventsLiveProcessor'dan
     // ============================================================
 
     @Async
@@ -132,9 +131,6 @@ public class NotificationDispatcherService {
         if (!fcmMessaging.isEnabled()) return;
         if (fixtureArg == null || eventArg == null) return;
 
-        // Async thread'de YENI session açılır; çağırandan gelen detached lazy
-        // proxy'ler (takım vb.) burada init edilemez (LazyInitializationException).
-        // Id ile MANAGED kopyaları çek — takım isimleri bu session içinde yüklenir.
         final Fixture fixture =
                 fixtureRepository.findById(fixtureArg.getId()).orElse(null);
         if (fixture == null) return;
@@ -143,33 +139,58 @@ public class NotificationDispatcherService {
                 : eventArg;
 
         final String mobileType = _mapEventType(event);
-        if (mobileType == null) return; // ilgilenmedigimiz event (orn. subst)
-
-        // GOL bildirimi artik SKOR degisiminden ANINDA gonderiliyor (dispatchGoal,
-        // LiveTickerService tetikler) — burada tekrar gondermeyiz, cift olmasin.
-        // Kirmizi kart / penalti event-tetikli kalir (skoru degistirmezler).
-        if ("gol".equals(mobileType)) return;
+        if (mobileType == null) return;
 
         final Long teamId = event.getTeam() != null ? event.getTeam().getId() : null;
         if (teamId == null) return;
 
-        // OUTBOX dedup anahtarı — STABİL: event.getId()/playerId DAHIL DEĞİL.
-        // API kırmızı kartı önce ISIMSIZ, sonra olayı silip YENİ id ile İSİMLİ
-        // gönderiyor (events her sync'te replace — bkz. FixtureEvent javadoc).
-        // Aynı dakika+uzatma+tip+takım aynı anahtara düşer → TEK bildirim; ilk
-        // gelen (genelde isimsiz) kuyruğa girer, isimli sürüm dedup'a takılır.
-        final int evExtra = event.getTimeExtra() == null ? 0 : event.getTimeExtra();
-        // event tipi (goal/card/var) anahtara dahil: ayni dakikada VAR penalti
-        // karari (type=var) ile kacan penalti (type=goal) farkli anahtara dussun,
-        // biri digerini dedup'a takip dusurmesin. Tip STABIL (isimsiz->isimli
-        // replace'te degismez) → kirmizi-kart cift-push korumasi bozulmaz.
-        final String evType = event.getType() == null ? "" : event.getType().toLowerCase();
-        final String dedupKey = String.format("EVENT:%d:%s:%s:%d:%d:%d",
-                fixture.getId(), mobileType, evType, teamId,
-                event.getTimeElapsed() == null ? 0 : event.getTimeElapsed(), evExtra);
+        final String playerName = event.getPlayerName();
+        final boolean hasName = playerName != null && !playerName.isBlank();
 
-        // Mesajı ŞİMDİ render et (oyuncu/dakika snapshot'ı), kuyruğa yaz.
-        final var msg = messageBuilder.buildEventMessage(fixture, event, mobileType);
+        // ---- GOL: faz-1 (isimsiz/anında) dispatchGoal'da. Burada YALNIZ golcü
+        //      ADI gelince faz-2 SESSİZ güncelleme (aynı collapse slotu).
+        if ("gol".equals(mobileType)) {
+            if (!hasName) return;
+            // Magaza surumu cikana dek isimli SESSIZ guncelleme kapali (eski app
+            // uyumu: gol skor-only kalir, tam bugunku davranis).
+            if (!enrichUpdates) return;
+            final int teamGoalNo = _goalOrdinal(fixture.getId(), teamId, event);
+            final String collapseKey = _goalCollapse(fixture.getId(), teamId, teamGoalNo);
+            final Integer minute = event.getTimeElapsed();
+            final var gmsg = messageBuilder.scoreGoal(fixture, playerName, minute);
+            final Map<String, String> gdata = new HashMap<>();
+            gdata.put("type", "gol");
+            gdata.put("fixtureId", String.valueOf(fixture.getId()));
+            gdata.put("teamId", String.valueOf(teamId));
+            if (minute != null) gdata.put("eventMinute", String.valueOf(minute));
+            _putCollapse(gdata, collapseKey, true);
+            final String gdedup = String.format("GOALNAME:%d:%d:%d:%s",
+                    fixture.getId(), teamId, teamGoalNo,
+                    event.getPlayerId() == null
+                            ? _hash(playerName) : String.valueOf(event.getPlayerId()));
+            enqueuer.enqueue(NotificationOutbox.KIND_GOAL, "gol", fixture.getId(),
+                    teamId, gmsg, gdata, gdedup, collapseKey, true);
+            return;
+        }
+
+        // ---- KIRMIZI / PENALTI: event-tetikli, iki fazlı (isimsiz→isimli).
+        final int evExtra = event.getTimeExtra() == null ? 0 : event.getTimeExtra();
+        final int evElapsed = event.getTimeElapsed() == null ? 0 : event.getTimeElapsed();
+        final String collapseKey =
+                _eventCollapse(fixture.getId(), mobileType, teamId, evElapsed, evExtra);
+        final boolean silent = outboxRepository.existsByCollapseKey(collapseKey);
+        // SESSIZ guncelleme (isimli faz-2) magaza surumu cikana dek kapali.
+        // Isimsiz faz-1 (silent=false) her zaman gider → eski app uyumu korunur.
+        if (silent && !enrichUpdates) return;
+        final String phase = hasName
+                ? "NAME:" + (event.getPlayerId() == null
+                        ? _hash(playerName) : String.valueOf(event.getPlayerId()))
+                : "BASE";
+        final String evType = event.getType() == null ? "" : event.getType().toLowerCase();
+        final String dedupKey = String.format("EVENT:%d:%s:%s:%d:%d:%d:%s",
+                fixture.getId(), mobileType, evType, teamId, evElapsed, evExtra, phase);
+
+        final var msg = messageBuilder.event(fixture, event, mobileType);
         final Map<String, String> data = new HashMap<>();
         data.put("type", mobileType);
         data.put("fixtureId", String.valueOf(fixture.getId()));
@@ -177,13 +198,13 @@ public class NotificationDispatcherService {
         if (event.getTimeElapsed() != null) {
             data.put("eventMinute", String.valueOf(event.getTimeElapsed()));
         }
+        _putCollapse(data, collapseKey, silent);
         enqueuer.enqueue(NotificationOutbox.KIND_EVENT, mobileType, fixture.getId(),
-                teamId, msg.title(), msg.body(), data, dedupKey);
+                teamId, msg, data, dedupKey, collapseKey, silent);
     }
 
     // ============================================================
-    // GOL — LiveTickerService SKOR degisimini gorunce ANINDA cagrilir.
-    // Olay (golcu) beklenmez; o an DB'de varsa eklenir, yoksa skor-only.
+    // GOL faz-1 — LiveTickerService SKOR degisimini gorunce ANINDA cagrilir.
     // ============================================================
 
     @Async
@@ -194,73 +215,33 @@ public class NotificationDispatcherService {
                 fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
 
-        // OUTBOX dedup anahtarı: skor snapshot'ı (home-away) golü benzersizleştirir.
-        // Aynı skor değişimini iki tick'te görsek de tek bildirim girer.
-        final String dedupKey = String.format("GOAL:%d:%d:%d-%d",
-                fixtureId,
-                scoringTeamId == null ? 0L : scoringTeamId,
-                fixture.getHomeGoals() == null ? 0 : fixture.getHomeGoals(),
-                fixture.getAwayGoals() == null ? 0 : fixture.getAwayGoals());
+        final int h = fixture.getHomeGoals() == null ? 0 : fixture.getHomeGoals();
+        final int a = fixture.getAwayGoals() == null ? 0 : fixture.getAwayGoals();
 
-        // Mesajı ŞİMDİ render et (skor + dakika snapshot'ı dondurulur) ve kuyruğa
-        // yaz — geç gönderimde skor değişse bile mesaj o anki golü gösterir.
+        final int teamGoalNo;
+        if (scoringTeamId != null && fixture.getHomeTeam() != null
+                && scoringTeamId.equals(fixture.getHomeTeam().getId())) {
+            teamGoalNo = h;
+        } else if (scoringTeamId != null && fixture.getAwayTeam() != null
+                && scoringTeamId.equals(fixture.getAwayTeam().getId())) {
+            teamGoalNo = a;
+        } else {
+            teamGoalNo = h + a;
+        }
+        final String collapseKey = _goalCollapse(fixtureId, scoringTeamId, teamGoalNo);
+
+        final String dedupKey = String.format("GOAL:%d:%d:%d-%d",
+                fixtureId, scoringTeamId == null ? 0L : scoringTeamId, h, a);
+
         final Integer minute = fixture.getElapsed();
-        final var msg = messageBuilder.buildScoreGoal(fixture, null, minute);
+        final var msg = messageBuilder.scoreGoal(fixture, null, minute);
         final Map<String, String> data = new HashMap<>();
         data.put("type", "gol");
         data.put("fixtureId", String.valueOf(fixtureId));
         if (minute != null) data.put("eventMinute", String.valueOf(minute));
-        // teamId = gol atan takım → "gol" tercihi açık o takım takipçileri alır.
+        _putCollapse(data, collapseKey, false);
         enqueuer.enqueue(NotificationOutbox.KIND_GOAL, "gol", fixtureId,
-                scoringTeamId, msg.title(), msg.body(), data, dedupKey);
-    }
-
-    // ============================================================
-    // KICKOFF — LiveTickerService status NS→1H tespit edince cagrilir
-    // ============================================================
-
-    @Async
-    @Transactional(readOnly = true)
-    public void dispatchKickoff(Fixture fixtureArg) {
-        if (!fcmMessaging.isEnabled() || fixtureArg == null) return;
-        final Fixture fixture =
-                fixtureRepository.findById(fixtureArg.getId()).orElse(null);
-        if (fixture == null) return;
-
-        // Cift bildirim guardu — LiveTickerService NS→1H gecisini bazen iki
-        // tick'te goruyor.
-        final String koKey = "kickoff:" + fixture.getId();
-        if (_isRecentlySent(koKey)) {
-            log.info("Kickoff push SKIP (dedup) fixtureId={}", fixture.getId());
-            return;
-        }
-        _markSent(koKey);
-        _dispatchMatchStatus(fixture, "basladi");
-    }
-
-    // ============================================================
-    // FINAL — LiveTickerService 1H/2H/ET→FT/AET/PEN tespit edince cagrilir
-    // ============================================================
-
-    @Async
-    @Transactional(readOnly = true)
-    public void dispatchFinal(Fixture fixtureArg) {
-        // dispatchFinal body asagida — dedup en uste eklenir.
-        // (Mevcut implementasyon korunur — sadece guard.)
-        if (fixtureArg != null) {
-            final String fnKey = "final:" + fixtureArg.getId();
-            if (_isRecentlySent(fnKey)) {
-                log.info("Final push SKIP (dedup) fixtureId={}",
-                        fixtureArg.getId());
-                return;
-            }
-            _markSent(fnKey);
-        }
-        if (!fcmMessaging.isEnabled() || fixtureArg == null) return;
-        final Fixture fixture =
-                fixtureRepository.findById(fixtureArg.getId()).orElse(null);
-        if (fixture == null) return;
-        _dispatchMatchStatus(fixture, "bitti");
+                scoringTeamId, msg, data, dedupKey, collapseKey, false);
     }
 
     // ============================================================
@@ -274,47 +255,46 @@ public class NotificationDispatcherService {
         final Fixture fixture =
                 fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
-        // Kadro maç başına BİR kez açıklanır → "LINEUP:fixture" dedup_key tek
-        // bildirim sağlar. Mesajı şimdi render et, kuyruğa yaz (garantili teslim).
-        final var msg = messageBuilder.buildLineupMessage(fixture);
+        final var msg = messageBuilder.lineup(fixture);
         final Map<String, String> data = new HashMap<>();
         data.put("type", "kadro");
         data.put("fixtureId", String.valueOf(fixtureId));
         enqueuer.enqueue(NotificationOutbox.KIND_LINEUP, "kadro", fixtureId, null,
-                msg.title(), msg.body(), data, "LINEUP:" + fixtureId);
+                msg, data, "LINEUP:" + fixtureId);
     }
 
     /**
      * SENKRON outbox gönderimi — {@link NotificationOutboxWorker} çağırır.
-     * Mesaj zaten render edilmiş (title/body/data) olarak gelir; bu metot
-     * yalnız ALICILARI tazece çözer (token'lar değişmiş olabilir) ve FCM'e
-     * gönderir. <b>Sert FCM hatasında EXCEPTION fırlatır</b> ki worker backoff'la
-     * tekrar denesin. Alıcı yoksa 0 döner (başarı — gönderilecek yok).
-     *
-     * @param fixtureId maç id
-     * @param teamId    GOAL/EVENT: ilgili takım takipçileri; null ise (KICKOFF/
-     *                  FINAL) maçın HER İKİ takımının takipçileri alır
-     * @param notifType basladi|bitti|gol|kirmizi|penalti (tercih sorgusu)
+     * Alıcılar tazece çözülür ve cihaz locale'ine göre TR/EN olarak ayrılıp
+     * gönderilir (collapse/silent ile). Sert FCM hatasında EXCEPTION fırlatır
+     * (worker retry). Alıcı yoksa 0 döner.
      */
     @Transactional(readOnly = true)
     public int sendOutboxRow(Long fixtureId, Long teamId, String notifType,
-                             String title, String body, Map<String, String> data) {
+                             String titleTr, String bodyTr, String titleEn, String bodyEn,
+                             Map<String, String> data, String collapseKey, boolean silent) {
         if (!fcmMessaging.isEnabled()) {
-            // FCM kapali — worker'in beklemesi (retry) icin gecici hata say.
             throw new IllegalStateException("FCM devre disi");
         }
+        final String enTitle = (titleEn != null && !titleEn.isBlank()) ? titleEn : titleTr;
+        final String enBody = (bodyEn != null && !bodyEn.isBlank()) ? bodyEn : bodyTr;
 
-        // ---- FCM Topics yolu (flag ACIK) ----
-        // Alici DB sorgusu + multicast YOK: ilgili topic'lere TEK condition mesaji;
-        // fan-out'u Google yapar (milyon kullanicida bile sabit maliyet).
+        // Olay tipine göre ÖZEL SES/KANAL (gol/kırmızı/penaltı/başladı/bitti).
+        // Android: kanal id (kanal sesi app'te kurulu); iOS: aps.sound dosya adı.
+        // Eski app'te kanal/dosya yoksa FCM/iOS varsayılana düşer → geriye uyumlu.
+        final Map<String, String> d = new HashMap<>(data == null ? Map.of() : data);
+        final String _ch = _androidChannelFor(notifType);
+        final String _snd = _iosSoundFor(notifType);
+        if (_ch != null) d.put("androidChannel", _ch);
+        if (_snd != null) d.put("iosSound", _snd);
+
+        // ---- FCM Topics yolu (flag ACIK) — locale ayrimi topic'te yok, TR gonderilir.
         if (useFcmTopics) {
             final String suffix = FcmTopics.suffixFor(notifType);
             final List<String> topics = new ArrayList<>();
             if (teamId != null) {
-                // GOAL/EVENT — ilgili takimin olay topic'i.
                 topics.add(FcmTopics.teamEvent(teamId, suffix));
             } else {
-                // KICKOFF/FINAL/HT/2H — maçin iki takimi.
                 final Fixture fx = fixtureRepository.findById(fixtureId).orElse(null);
                 if (fx != null) {
                     if (fx.getHomeTeam() != null) {
@@ -325,129 +305,106 @@ public class NotificationDispatcherService {
                     }
                 }
             }
-            // Maç-bazli favori takipçiler — her tip bildirimi alir.
             topics.add(FcmTopics.favoriteFixture(fixtureId));
             if (topics.isEmpty()) return 0;
             fcmMessaging.sendToConditionOrThrow(
-                    FcmTopics.orCondition(topics), title, body, data);
-            log.info("FCM topic dispatch: fixtureId={} type={} topics={}",
-                    fixtureId, notifType, topics);
+                    FcmTopics.orCondition(topics), titleTr, bodyTr, d, collapseKey, silent);
             return 1;
         }
 
-        // ---- Token-multicast yolu (flag KAPALI — mevcut, varsayilan) ----
-        final Set<String> tokens = new LinkedHashSet<>();
+        // ---- Token-multicast yolu (varsayilan) — locale'e gore TR/EN ayrimi.
+        final Set<String> trTokens = new LinkedHashSet<>();
+        final Set<String> enTokens = new LinkedHashSet<>();
         if (teamId != null) {
-            // GOAL/EVENT — ilgili takimin (notifType tercihi acik) takipcileri.
             for (UserNotificationPref p : _recipientsFor(notifType, teamId)) {
-                tokens.add(p.getDeviceToken().getFcmToken());
+                _addByLocale(p.getDeviceToken(), trTokens, enTokens);
             }
         } else {
-            // KICKOFF/FINAL — maçın iki takımı.
             final Fixture fixture = fixtureRepository.findById(fixtureId).orElse(null);
             if (fixture != null) {
                 if (fixture.getHomeTeam() != null) {
                     for (UserNotificationPref p :
                             _recipientsFor(notifType, fixture.getHomeTeam().getId())) {
-                        tokens.add(p.getDeviceToken().getFcmToken());
+                        _addByLocale(p.getDeviceToken(), trTokens, enTokens);
                     }
                 }
                 if (fixture.getAwayTeam() != null) {
                     for (UserNotificationPref p :
                             _recipientsFor(notifType, fixture.getAwayTeam().getId())) {
-                        tokens.add(p.getDeviceToken().getFcmToken());
+                        _addByLocale(p.getDeviceToken(), trTokens, enTokens);
                     }
                 }
             }
         }
-        // Mac-bazli favori abonelikleri — her tip bildirimi alir.
         for (DeviceMatchSubscription s :
                 matchSubRepository.findRecipientsForFixture(fixtureId)) {
-            tokens.add(s.getDeviceToken().getFcmToken());
+            _addByLocale(s.getDeviceToken(), trTokens, enTokens);
         }
-        if (tokens.isEmpty()) return 0; // alici yok — basari
+        // Ayni cihaz iki listede olmasin (locale tekildir ama garanti icin).
+        enTokens.removeAll(trTokens);
+        if (trTokens.isEmpty() && enTokens.isEmpty()) return 0;
 
-        // Sert hatada fırlatır → worker retry eder.
-        final int sent = fcmMessaging.sendMulticastOrThrow(
-                List.copyOf(tokens), title, body, data);
-        log.info("FCM outbox dispatch: fixtureId={} type={} alici={} gonderildi={}",
-                fixtureId, notifType, tokens.size(), sent);
+        int sent = 0;
+        if (!trTokens.isEmpty()) {
+            sent += fcmMessaging.sendMulticastOrThrow(
+                    List.copyOf(trTokens), titleTr, bodyTr, d, collapseKey, silent);
+        }
+        if (!enTokens.isEmpty()) {
+            sent += fcmMessaging.sendMulticastOrThrow(
+                    List.copyOf(enTokens), enTitle, enBody, d, collapseKey, silent);
+        }
+        log.info("FCM outbox dispatch: fixtureId={} type={} tr={} en={} gonderildi={} collapse={} silent={}",
+                fixtureId, notifType, trTokens.size(), enTokens.size(), sent, collapseKey, silent);
         return sent;
     }
 
-    private void _dispatchMatchStatus(Fixture fixture, String mobileType) {
-        // 1) Takim takibinden gelen recipient'lar — hem ev hem deplasman takim
-        final Set<Long> teamIds = new LinkedHashSet<>();
-        if (fixture.getHomeTeam() != null) teamIds.add(fixture.getHomeTeam().getId());
-        if (fixture.getAwayTeam() != null) teamIds.add(fixture.getAwayTeam().getId());
-
-        final Set<String> tokens = new LinkedHashSet<>();
-        int teamRecipientCount = 0;
-        for (Long teamId : teamIds) {
-            final List<UserNotificationPref> recipients =
-                    _recipientsFor(mobileType, teamId);
-            teamRecipientCount += recipients.size();
-            for (UserNotificationPref p : recipients) {
-                tokens.add(p.getDeviceToken().getFcmToken());
-            }
+    /** Cihazı locale'ine göre TR ya da EN token listesine ekle (tr* → TR, diğer → EN). */
+    private void _addByLocale(MobileDeviceToken token, Set<String> tr, Set<String> en) {
+        if (token == null) return;
+        final String fcm = token.getFcmToken();
+        if (fcm == null || fcm.isBlank()) return;
+        final String loc = token.getLocale();
+        if (loc != null && loc.toLowerCase().startsWith("tr")) {
+            tr.add(fcm);
+        } else {
+            en.add(fcm);
         }
-
-        // 2) Mac-bazli favori abonelikleri — favori yapan tum cihazlar
-        //    basladi/bitti event'lerini de alir.
-        final List<DeviceMatchSubscription> favRecipients =
-                matchSubRepository.findRecipientsForFixture(fixture.getId());
-        for (DeviceMatchSubscription s : favRecipients) {
-            tokens.add(s.getDeviceToken().getFcmToken());
-        }
-
-        if (tokens.isEmpty()) {
-            log.debug("Dispatch {}: alici yok fixtureId={}", mobileType, fixture.getId());
-            return;
-        }
-
-        final var msg = switch (mobileType) {
-            case "basladi" -> messageBuilder.buildKickoffMessage(fixture);
-            case "kadro" -> messageBuilder.buildLineupMessage(fixture);
-            default -> messageBuilder.buildFinalMessage(fixture);
-        };
-        final Map<String, String> data = new HashMap<>();
-        data.put("type", mobileType);
-        data.put("fixtureId", String.valueOf(fixture.getId()));
-
-        final int sent = fcmMessaging.sendMulticast(
-                List.copyOf(tokens), msg.title(), msg.body(), data);
-        log.info("FCM {} dispatch: fixtureId={} alici={} (takim={} favori={}) gonderildi={}",
-                mobileType, fixture.getId(), tokens.size(),
-                teamRecipientCount, favRecipients.size(), sent);
     }
 
     // ============================================================
     // Yardimcilar
     // ============================================================
 
-    /**
-     * API-Football event type+detail'i mobile bildirim tipine cevir.
-     *
-     * <p>API-Football event kombinasyonlari:
-     * <ul>
-     *   <li>Goal + "Normal Goal" / "Own Goal" / "Penalty" → "gol" (penaltidan gol
-     *       de skor degisiminden "GOL!" atilir; ayrica penalti bildirimi gonderilmez)</li>
-     *   <li>Goal + "Missed Penalty" → "penalti" (kacan penalti)</li>
-     *   <li>Card + "Red Card" / "Second Yellow card" → "kirmizi"</li>
-     *   <li>Var + detail icinde "Penalty" veya "Goal" → "penalti" (VAR karari;
-     *       mesaj builder "📺 VAR: ..." metni uretir)</li>
-     *   <li>Diger (Yellow Card, subst, kart-upgrade Var) → null (bildirim yok)</li>
-     * </ul>
-     */
+    /** Olay tipi → Android bildirim kanalı (özel ses). ht/2yari/kadro → null (varsayılan). */
+    private static String _androidChannelFor(String notifType) {
+        return switch (notifType) {
+            case "gol" -> "scorestv_goal";
+            case "kirmizi" -> "scorestv_redcard";
+            case "penalti" -> "scorestv_penalty";
+            case "basladi" -> "scorestv_start";
+            case "bitti" -> "scorestv_end";
+            default -> null;
+        };
+    }
+
+    /** Olay tipi → iOS bildirim sesi dosyası (bundle'da). Yoksa null (varsayılan). */
+    private static String _iosSoundFor(String notifType) {
+        return switch (notifType) {
+            case "gol" -> "goal.wav";
+            case "kirmizi" -> "red_card.wav";
+            case "penalti" -> "penalty.wav";
+            case "basladi" -> "match_start.wav";
+            case "bitti" -> "match_end.wav";
+            default -> null;
+        };
+    }
+
     private String _mapEventType(FixtureEvent e) {
         if (e.getType() == null) return null;
         final String type = e.getType().toLowerCase();
         final String detail = e.getDetail() == null ? "" : e.getDetail().toLowerCase();
 
         if ("goal".equals(type)) {
-            // Penaltidan GOL → "gol": skor degisimi zaten "⚽ GOL!" atar; burada
-            // "penalti" donsek ayni an iki bildirim (gol + penalti) olurdu.
-            // Sadece KACAN penalti ("Missed Penalty") penalti olarak bildirilir.
             if (detail.contains("missed")) return "penalti";
             return "gol";
         }
@@ -455,21 +412,15 @@ public class NotificationDispatcherService {
             if (detail.contains("red") || detail.contains("second yellow")) {
                 return "kirmizi";
             }
-            return null; // sari kart bildirim listemizde yok
+            return null;
         }
         if ("var".equals(type)) {
-            // Penalti veya gol ile ilgili VAR kararlari "penalti" tercihine duser
-            // (ayri VAR toggle yok). Mesaj builder type=Var'i gorup "VAR:" metni uretir.
             if (detail.contains("penalty") || detail.contains("goal")) return "penalti";
-            return null; // kart upgrade vb. bildirilmez
+            return null;
         }
         return null;
     }
 
-    /**
-     * Verilen olay tipi + takim icin "bildirim acik" olan tum recipient kayitlari.
-     * Repository'deki ayri ayri findRecipientsFor* metodlari kullanilir.
-     */
     private List<UserNotificationPref> _recipientsFor(String mobileType, Long teamId) {
         return switch (mobileType) {
             case "gol" -> prefRepository.findRecipientsForGoal(teamId);

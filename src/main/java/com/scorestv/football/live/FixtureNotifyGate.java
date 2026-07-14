@@ -3,7 +3,7 @@ package com.scorestv.football.live;
 import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.mobile.notify.NotificationMessageBuilder;
-import com.scorestv.mobile.notify.NotificationMessageBuilder.NotificationMessage;
+import com.scorestv.mobile.notify.NotificationMessageBuilder.Localized;
 import com.scorestv.mobile.notify.NotificationOutbox;
 import com.scorestv.mobile.notify.NotificationOutboxEnqueuer;
 import org.springframework.stereotype.Service;
@@ -17,7 +17,7 @@ import java.util.Map;
  * Maç "başladı/bitti" bildirimleri için TAM-BİR-KEZ claim + OUTBOX enqueue.
  *
  * <p>Tek transaction'da: atomik {@code UPDATE ... WHERE notif_*_at IS NULL} ile
- * claim alınır; KAZANILIRSA mesaj render edilip {@link NotificationOutbox}
+ * claim alınır; KAZANILIRSA mesaj (TR+EN) render edilip {@link NotificationOutbox}
  * PENDING satırı yazılır. İki kalkan: (1) {@code notif_*_at} kalıcı flag,
  * (2) outbox {@code dedup_key} UNIQUE. Gerçek FCM gönderimini {@link
  * com.scorestv.mobile.notify.NotificationOutboxWorker} backoff'lu retry ile yapar.
@@ -45,10 +45,9 @@ public class FixtureNotifyGate {
         }
         final Fixture fixture = fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
-        final NotificationMessage msg = messageBuilder.buildKickoffMessage(fixture);
+        final Localized msg = messageBuilder.kickoff(fixture);
         enqueuer.enqueue(NotificationOutbox.KIND_KICKOFF, "basladi", fixtureId, null,
-                msg.title(), msg.body(), statusData("basladi", fixtureId),
-                "KICKOFF:" + fixtureId);
+                msg, statusData("basladi", fixtureId), "KICKOFF:" + fixtureId);
     }
 
     /** Final'i atomik claim et; kazanırsa "bitti" mesajını render edip enqueue et (tek tx). */
@@ -59,10 +58,9 @@ public class FixtureNotifyGate {
         }
         final Fixture fixture = fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
-        final NotificationMessage msg = messageBuilder.buildFinalMessage(fixture);
+        final Localized msg = messageBuilder.finalScore(fixture);
         enqueuer.enqueue(NotificationOutbox.KIND_FINAL, "bitti", fixtureId, null,
-                msg.title(), msg.body(), statusData("bitti", fixtureId),
-                "FINAL:" + fixtureId);
+                msg, statusData("bitti", fixtureId), "FINAL:" + fixtureId);
     }
 
     /**
@@ -73,10 +71,9 @@ public class FixtureNotifyGate {
     public void enqueueHalftime(Long fixtureId) {
         final Fixture fixture = fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
-        final NotificationMessage msg = messageBuilder.buildHalftimeMessage(fixture);
+        final Localized msg = messageBuilder.halftime(fixture);
         enqueuer.enqueue(NotificationOutbox.KIND_HALFTIME, "ht", fixtureId, null,
-                msg.title(), msg.body(), statusData("ht", fixtureId),
-                "HT:" + fixtureId);
+                msg, statusData("ht", fixtureId), "HT:" + fixtureId);
     }
 
     /** "İkinci yarı başladı" (2H) — dedup_key="SECONDHALF:fixture" tek bildirim. */
@@ -84,10 +81,9 @@ public class FixtureNotifyGate {
     public void enqueueSecondHalf(Long fixtureId) {
         final Fixture fixture = fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
-        final NotificationMessage msg = messageBuilder.buildSecondHalfMessage(fixture);
+        final Localized msg = messageBuilder.secondHalf(fixture);
         enqueuer.enqueue(NotificationOutbox.KIND_SECONDHALF, "2yari", fixtureId, null,
-                msg.title(), msg.body(), statusData("2yari", fixtureId),
-                "SECONDHALF:" + fixtureId);
+                msg, statusData("2yari", fixtureId), "SECONDHALF:" + fixtureId);
     }
 
     private static Map<String, String> statusData(String type, Long fixtureId) {

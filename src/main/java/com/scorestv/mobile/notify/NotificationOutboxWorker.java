@@ -87,7 +87,8 @@ public class NotificationOutboxWorker {
         try {
             dispatcher.sendOutboxRow(
                     row.getFixtureId(), row.getTeamId(), row.getNotifType(),
-                    row.getTitle(), row.getBody(), parseData(row.getDataJson()));
+                    row.getTitle(), row.getBody(), row.getTitleEn(), row.getBodyEn(),
+                    parseData(row.getDataJson()), row.getCollapseKey(), row.isSilent());
             row.setStatus(NotificationOutbox.STATUS_SENT);
             repository.save(row);
         } catch (Exception ex) {

@@ -1,6 +1,7 @@
 package com.scorestv.mobile.notify;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scorestv.mobile.notify.NotificationMessageBuilder.Localized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -10,13 +11,14 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Map;
 
 /**
- * Bildirim OUTBOX'ına idempotent satır yazar. Mesaj (title/body/data) ENQUEUE
- * anında render edilip dondurulur; gerçek FCM gönderimini {@link
- * NotificationOutboxWorker} backoff'lu retry ile yapar.
+ * Bildirim OUTBOX'ına idempotent satır yazar. Mesaj (TR+EN title/body + data)
+ * ENQUEUE anında render edilip dondurulur; gerçek FCM gönderimini {@link
+ * NotificationOutboxWorker} backoff'lu retry ile (alıcıyı locale'e göre ayırarak)
+ * yapar.
  *
- * <p><b>İdempotency:</b> {@code dedup_key} aynı bildirim için benzersizdir;
- * önce {@code existsByDedupKey} ile, ek olarak UNIQUE kısıt + yarış yakalama
- * ile çift satır engellenir.
+ * <p><b>İdempotency:</b> {@code dedup_key} aynı bildirim için benzersizdir.
+ * <b>Collapse:</b> {@code collapseKey} aynı OS bildirimini yerinde günceller;
+ * {@code silent=true} sessiz güncelleme (iki fazlı: isimsiz→isimli).
  */
 @Component
 public class NotificationOutboxEnqueuer {
@@ -24,7 +26,6 @@ public class NotificationOutboxEnqueuer {
     private static final Logger log =
             LoggerFactory.getLogger(NotificationOutboxEnqueuer.class);
 
-    /** Basit Map→JSON için yeterli; Spring bean'ine bağımlılık yok. */
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final NotificationOutboxRepository repository;
@@ -33,22 +34,24 @@ public class NotificationOutboxEnqueuer {
         this.repository = repository;
     }
 
+    /** Basit gönderim (collapse yok, sesli). */
+    @Transactional
+    public void enqueue(String kind, String notifType, Long fixtureId, Long teamId,
+                        Localized msg, Map<String, String> data, String dedupKey) {
+        enqueue(kind, notifType, fixtureId, teamId, msg, data, dedupKey, null, false);
+    }
+
     /**
-     * Bildirimi kuyruğa ekler (zaten varsa atlar).
+     * TR+EN mesajı, collapse/silent ile kuyruğa ekler (zaten varsa atlar).
      *
-     * @param kind      KICKOFF|FINAL|GOAL|EVENT
-     * @param notifType basladi|bitti|gol|kirmizi|penalti (alıcı tercih tipi)
-     * @param fixtureId maç id
-     * @param teamId    GOAL/EVENT için ilgili takım; KICKOFF/FINAL için null
-     * @param title     render edilmiş başlık
-     * @param body      render edilmiş gövde
-     * @param data      FCM data payload
-     * @param dedupKey  benzersiz idempotency anahtarı
+     * @param msg         iki dilli metin (TR+EN)
+     * @param collapseKey OS bildirim slotu (Android tag / APNs collapse-id); null olabilir
+     * @param silent      true → sessiz güncelleme
      */
     @Transactional
     public void enqueue(String kind, String notifType, Long fixtureId, Long teamId,
-                        String title, String body, Map<String, String> data,
-                        String dedupKey) {
+                        Localized msg, Map<String, String> data, String dedupKey,
+                        String collapseKey, boolean silent) {
         if (repository.existsByDedupKey(dedupKey)) {
             return; // zaten kuyrukta — tekrar ekleme
         }
@@ -57,15 +60,18 @@ public class NotificationOutboxEnqueuer {
         row.setNotifType(notifType);
         row.setFixtureId(fixtureId);
         row.setTeamId(teamId);
-        row.setTitle(title);
-        row.setBody(body);
+        row.setTitle(msg.titleTr());
+        row.setBody(msg.bodyTr());
+        row.setTitleEn(msg.titleEn());
+        row.setBodyEn(msg.bodyEn());
         row.setDataJson(toJson(data));
         row.setDedupKey(dedupKey);
+        row.setCollapseKey(collapseKey);
+        row.setSilent(silent);
         row.setStatus(NotificationOutbox.STATUS_PENDING);
         try {
             repository.save(row);
         } catch (DataIntegrityViolationException dup) {
-            // Yarış: başka thread aynı dedup_key'i araya yazdı — sorun değil.
             log.debug("Outbox dedup yarışı atlandı: {}", dedupKey);
         }
     }
