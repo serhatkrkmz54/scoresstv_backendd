@@ -89,6 +89,13 @@ public class ApiFootballClient {
     private final ScheduledExecutorService bucketRefiller;
 
     /**
+     * 429/kota sonrası LOKAL cooldown bitiş epoch'u (ms). {@link #refillSingle}
+     * bu süre boyunca token bucket'ları DOLDURMAZ — böylece cooldown bitiminde
+     * dolu kova bir anda boşalıp yeni 429'u tetiklemez (thundering herd önlenir).
+     */
+    private volatile long localCooldownUntilMs = 0L;
+
+    /**
      * API-Football endpoint'lerine yapilan isteklerin onceligi.
      * <ul>
      *   <li>{@link #LIVE}: kullanici-bekleyen veriler (canli skor, mac detay,
@@ -231,8 +238,7 @@ public class ApiFootballClient {
             // quotaExceeded firlat ki SyncQueueWorker rate-limit backoff'una dussun.
             if (ex.getStatusCode().value() == 429) {
                 Duration retryAfter = parseRetryAfter(ex.getResponseHeaders());
-                quotaTracker.startCooldown(
-                        retryAfter != null ? retryAfter : DEFAULT_429_COOLDOWN);
+                _enterCooldown(retryAfter != null ? retryAfter : DEFAULT_429_COOLDOWN);
                 log.warn("API-Football 429 (rate limit): path={} retryAfter={}",
                         path, retryAfter);
                 throw ApiFootballException.quotaExceeded(
@@ -285,7 +291,28 @@ public class ApiFootballClient {
      * saniye-burst guard'ini engeller: 8 paralel istek yerine her 125ms'de
      * 1 istek goruyor. Dakika kotasi yine N×60 olarak korunur.
      */
+    /**
+     * Cooldown'a gir: global (Redis) cooldown'ı başlat, LOKAL cooldown penceresini
+     * ayarla ve token bucket'ları BOŞALT. Boşaltma + cooldown boyunca refill'i
+     * duraklatma birlikte, cooldown bitiminde ANİ boşalmayı engeller — kova 0'dan
+     * nazikçe ramp eder, yeni 429 spirali kurulamaz.
+     */
+    private void _enterCooldown(Duration duration) {
+        quotaTracker.startCooldown(duration);
+        if (duration != null && !duration.isNegative() && !duration.isZero()) {
+            localCooldownUntilMs = System.currentTimeMillis() + duration.toMillis();
+        }
+        liveBucket.drainPermits();
+        lazyBucket.drainPermits();
+    }
+
     private void refillSingle(Semaphore bucket, int maxCapacity) {
+        // Cooldown penceresinde DOLDURMA — aksi halde cooldown bitince dolu kova
+        // (LIVE+LAZY) bir anda boşalıp yeni 429'u tetikler (thundering herd → spiral).
+        // Cooldown bitince kova 0'dan başlar, her tick 1 token ile nazikçe ramp eder.
+        if (System.currentTimeMillis() < localCooldownUntilMs) {
+            return;
+        }
         if (bucket.availablePermits() < maxCapacity) {
             bucket.release(1);
         }
@@ -294,14 +321,19 @@ public class ApiFootballClient {
     /**
      * Path'ten priority cikarir. Kural:
      * <ul>
-     *   <li>{@code /fixtures} ve {@code /fixtures/*} → LIVE
-     *       (canli skor, events, statistics, lineups, players, headtohead)</li>
-     *   <li>diger her yol → LAZY (background sync)</li>
+     *   <li>TAM {@code /fixtures} (yani {@code ?live=all} ve {@code ?ids=}) → LIVE
+     *       (canli-skor tablosu; LiveTicker + LiveDetailBatch)</li>
+     *   <li>{@code /fixtures/*} alt-kaynaklari ve diger her yol → LAZY
+     *       (on-demand mac/oyuncu detay hidrasyonu + background sync)</li>
      * </ul>
      */
     private RequestPriority detectPriority(String path) {
         if (path == null) return RequestPriority.LAZY;
-        if (path.equals("/fixtures") || path.startsWith("/fixtures/")) {
+        // Alt-kaynak uclari (/fixtures/events|statistics|players|lineups|
+        // headtohead) MatchDetailLazySync tarafindan mac acilisinda PARALEL
+        // firlatilir; LIVE olsalardi LIVE kovasini bir anda bosaltip burst
+        // yaparlar. Bu yuzden YALNIZ tam "/fixtures" LIVE; alt-yollar LAZY.
+        if (path.equals("/fixtures")) {
             return RequestPriority.LIVE;
         }
         return RequestPriority.LAZY;
@@ -333,7 +365,7 @@ public class ApiFootballClient {
         if (lower.contains("limit") || lower.contains("quota") || lower.contains("rate")
                 || lower.contains("maximum")) {
             // HTTP 200 + body errors.rateLimit durumu — cooldown'i burada da baslat.
-            quotaTracker.startCooldown(DEFAULT_429_COOLDOWN);
+            _enterCooldown(DEFAULT_429_COOLDOWN);
             return ApiFootballException.quotaExceeded(
                     "Futbol veri saglayicisinin istek kotasi doldu. Lutfen daha sonra tekrar deneyin.");
         }

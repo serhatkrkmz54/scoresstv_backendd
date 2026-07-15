@@ -39,7 +39,14 @@ public class FixtureStatisticsSyncService {
     public FixtureStatisticsSyncResult sync(Long fixtureId) {
         ApiFootballResponse<List<StatisticApiDto>> response = client.get(
                 "/fixtures/statistics", Map.of("fixture", fixtureId), STATS_TYPE);
-        List<StatisticApiDto> items = response.response();
+        return sync(fixtureId, response.response());
+    }
+
+    /**
+     * Bundle'dan ({@code /fixtures?ids=}) gelen ÖNCEDEN ÇEKİLMİŞ istatistik
+     * listesiyle upsert — API çağrısı YAPMAZ. Canlı detay batch'i kullanır.
+     */
+    public FixtureStatisticsSyncResult sync(Long fixtureId, List<StatisticApiDto> items) {
         int written = upserter.replace(fixtureId, items == null ? List.of() : items);
         if (written > 0) {
             log.info("İstatistik senkronu: fixtureId={} — {} satır yazıldı",

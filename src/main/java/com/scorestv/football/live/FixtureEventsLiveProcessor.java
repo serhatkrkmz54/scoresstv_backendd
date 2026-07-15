@@ -5,6 +5,7 @@ import com.scorestv.football.domain.FixtureEvent;
 import com.scorestv.football.domain.FixtureEventRepository;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.football.sync.FixtureEventsSyncService;
+import com.scorestv.football.sync.dto.EventApiDto;
 import com.scorestv.mobile.notify.NotificationDispatcherService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,9 +58,28 @@ public class FixtureEventsLiveProcessor {
     public int syncAndBroadcast(Long fixtureId) {
         Set<EventSignature> before = signaturesOf(
                 eventRepository.findByFixtureIdOrderByTimeElapsedAsc(fixtureId));
-
         eventsSyncService.sync(fixtureId);
+        return diffBroadcastNotify(fixtureId, before);
+    }
 
+    /**
+     * Bundle'dan ({@code /fixtures?ids=}) gelen ÖNCEDEN ÇEKİLMİŞ olay listesiyle
+     * upsert + yayın — API çağrısı YAPMAZ. Canlı detay batch'i kullanır. Liste
+     * boşsa hiçbir şey yapmaz (mevcut olayları SİLMEZ — coverage/transient boş
+     * yanıtta veri kaybını önler).
+     */
+    public int syncAndBroadcast(Long fixtureId, List<EventApiDto> preFetched) {
+        if (preFetched == null || preFetched.isEmpty()) {
+            return 0;
+        }
+        Set<EventSignature> before = signaturesOf(
+                eventRepository.findByFixtureIdOrderByTimeElapsedAsc(fixtureId));
+        eventsSyncService.sync(fixtureId, preFetched);
+        return diffBroadcastNotify(fixtureId, before);
+    }
+
+    /** Sync sonrası DB'yi okuyup YENİ olayları diff'ler, yayar ve FCM tetikler. */
+    private int diffBroadcastNotify(Long fixtureId, Set<EventSignature> before) {
         List<FixtureEvent> after =
                 eventRepository.findByFixtureIdOrderByTimeElapsedAsc(fixtureId);
 

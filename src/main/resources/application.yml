@@ -148,6 +148,10 @@ scorestv:
   notify:
     enrich-updates: ${NOTIFY_ENRICH_UPDATES:true}
     use-fcm-topics: ${NOTIFY_USE_FCM_TOPICS:true}
+    # Outbox worker yoklama araligi (ms). Gol/kart bildirimi enqueue edildikten
+    # sonra en fazla bu kadar bekler. 5000->2000: canli bildirim gecikmesini kisar
+    # (DB yuku ihmal edilebilir — kucuk indexli sorgu).
+    outbox-interval-ms: ${NOTIFY_OUTBOX_INTERVAL_MS:2000}
 
   # ============================================================
   # Bilyoner iddaa oranlari. enabled=false ise oran akisi tamamen kapali
@@ -367,6 +371,13 @@ scorestv:
       # araliklarinin carpani. 4 = non-covered icin events 30->120sn,
       # stats 60->240sn, player_stats 120->480sn. Pik kotayi koruyor.
       non-covered-rate-multiplier: ${FOOTBALL_NONCOVERED_MULT:4}
+      # --- CANLI DETAY BATCH (tek /fixtures?ids= ile events+stats+players) ---
+      # Acikken per-fixture LiveEvents/LiveStatistics/LivePlayerStats joblari ve
+      # skor-tetikli per-fixture sync'ler DEVRE DISI; yerini 20'lik tek bundle
+      # cagrisi alir. Canli kota ~25x duser, saniye-burst (429 spirali) biter.
+      live-bundle-enabled: ${FOOTBALL_LIVE_BUNDLE:false}
+      live-bundle-interval-seconds: ${FOOTBALL_LIVE_BUNDLE_INTERVAL:15}
+      live-bundle-batch-size: ${FOOTBALL_LIVE_BUNDLE_BATCH:20}
     # Anasayfa goruntu/sunum ayarlari.
     serving:
       # Anasayfa lig listesinin EN BASINDA, BU SIRAYLA gosterilecek

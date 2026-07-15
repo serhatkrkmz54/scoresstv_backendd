@@ -51,6 +51,9 @@ public class LivePlayerStatsJob {
             timeUnit = TimeUnit.SECONDS)
     @SchedulerLock(name = "livePlayerStats", lockAtMostFor = "PT3M")
     public void run() {
+        if (rateLimiter.isLiveBundleEnabled()) {
+            return; // batch modu devrede — per-fixture player_stats job devre dışı
+        }
         // JOIN FETCH league: SyncRateLimiter.isCovered() lazy-init hatasını önlemek için.
         List<Fixture> live = fixtureRepository.findByStatusShortInWithLeague(LIVE_STATUSES);
         if (live.isEmpty()) {

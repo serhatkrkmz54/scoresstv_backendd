@@ -138,7 +138,22 @@ public record FootballProperties(
              * aralıklarına uygulanacak çarpan. 4 = non-covered için events 30→120sn,
              * stats 60→240sn, player_stats 120→480sn. Pik kota baskısını yumuşatır.
              */
-            @DefaultValue("4") int nonCoveredRateMultiplier
+            @DefaultValue("4") int nonCoveredRateMultiplier,
+
+            /**
+             * Canlı detay BATCH modu. Açıkken tek {@code /fixtures?ids=} çağrısı
+             * ile 20 maçın events+statistics+players'ı BİRLİKTE çekilir ve ayrı
+             * per-fixture LiveEvents/LiveStatistics/LivePlayerStats joblarının
+             * (ve skor-tetikli per-fixture sync'lerin) yerine geçer. Kota ~25×
+             * düşer, saniye-burst tamamen biter. Default kapalı (kademeli açılış).
+             */
+            @DefaultValue("false") boolean liveBundleEnabled,
+
+            /** Batch çağrı aralığı (saniye). */
+            @DefaultValue("15") int liveBundleIntervalSeconds,
+
+            /** Tek {@code ?ids=} çağrısındaki maks maç id sayısı (API limiti: 20). */
+            @DefaultValue("20") int liveBundleBatchSize
     ) {
 
         /** Penceredeki toplam gün sayısı (öncesi + bugün + sonrası). */

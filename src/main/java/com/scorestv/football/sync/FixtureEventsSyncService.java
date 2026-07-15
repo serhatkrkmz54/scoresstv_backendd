@@ -47,8 +47,14 @@ public class FixtureEventsSyncService {
     public FixtureEventsSyncResult sync(Long fixtureId) {
         ApiFootballResponse<List<EventApiDto>> response = client.get(
                 "/fixtures/events", Map.of("fixture", fixtureId), EVENTS_TYPE);
-        List<EventApiDto> items = response.response();
+        return sync(fixtureId, response.response());
+    }
 
+    /**
+     * Bundle'dan ({@code /fixtures?ids=}) gelen ÖNCEDEN ÇEKİLMİŞ olay listesiyle
+     * upsert — API çağrısı YAPMAZ. Canlı detay batch'i kullanır.
+     */
+    public FixtureEventsSyncResult sync(Long fixtureId, List<EventApiDto> items) {
         int written = upserter.replace(fixtureId, items == null ? List.of() : items);
         log.info("Olay senkronu: fixtureId={} — {} olay yazıldı", fixtureId, written);
         return new FixtureEventsSyncResult(fixtureId, written);

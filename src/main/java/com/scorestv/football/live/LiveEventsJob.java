@@ -54,6 +54,9 @@ public class LiveEventsJob {
             timeUnit = TimeUnit.SECONDS)
     @SchedulerLock(name = "liveEvents", lockAtMostFor = "PT2M")
     public void run() {
+        if (rateLimiter.isLiveBundleEnabled()) {
+            return; // batch modu devrede — per-fixture events job devre dışı
+        }
         // JOIN FETCH league: SyncRateLimiter.isCovered() lazy-init hatasını önlemek için.
         List<Fixture> live = fixtureRepository.findByStatusShortInWithLeague(LIVE_STATUSES);
         if (live.isEmpty()) {

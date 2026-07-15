@@ -208,6 +208,12 @@ scorestv:
       live-enabled: ${FOOTBALL_LIVE_ENABLED:true}
       # API-Football canli yoklama araligi (saniye). 15sn = skor/gol ~15sn'de duser.
       live-interval-seconds: ${FOOTBALL_LIVE_INTERVAL:15}
+      # Canli detay batch — tek /fixtures?ids= ile events+stats+players (20 mac/cagri).
+      # Per-fixture jobların yerine gecer; kota ~25x duser, 429 spirali biter.
+      # ACMAK icin: FOOTBALL_LIVE_BUNDLE=true (env). Once acip logdan dogrula.
+      live-bundle-enabled: ${FOOTBALL_LIVE_BUNDLE:false}
+      live-bundle-interval-seconds: ${FOOTBALL_LIVE_BUNDLE_INTERVAL:15}
+      live-bundle-batch-size: ${FOOTBALL_LIVE_BUNDLE_BATCH:20}
 
   security:
     jwt:

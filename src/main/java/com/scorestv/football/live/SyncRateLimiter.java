@@ -72,6 +72,16 @@ public class SyncRateLimiter {
         return Duration.between(last, Instant.now()).getSeconds() >= intervalSec;
     }
 
+    /**
+     * Canlı detay BATCH modu açık mı? Açıkken per-fixture LiveEvents/
+     * LiveStatistics/LivePlayerStats joblari ve LiveTickerService'in skor-tetikli
+     * per-fixture sync'leri devre disi kalir; yerini tek {@code /fixtures?ids=}
+     * batch cagrisi ({@code LiveDetailBatchJob}) alir.
+     */
+    public boolean isLiveBundleEnabled() {
+        return properties.sync().liveBundleEnabled();
+    }
+
     /** Başarılı sync sonrası çağrılır. */
     public void markSynced(SyncType type, Long fixtureId) {
         lastSync.get(type).put(fixtureId, Instant.now());

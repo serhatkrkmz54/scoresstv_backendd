@@ -268,6 +268,12 @@ public class LiveTickerService {
                 log.warn("FCM skor-gol dispatch hata fixtureId={}: {}",
                         id, ex.getMessage());
             }
+            // Batch modu açıksa per-fixture detay çağrılarını ATLA — canlı
+            // detay artık LiveDetailBatchJob'un tek /fixtures?ids= çağrısıyla
+            // gelir (18'lik burst → 0; hızlı gol FCM'i yukarıda zaten gitti).
+            if (rateLimiter.isLiveBundleEnabled()) {
+                continue;
+            }
             try {
                 eventsProcessor.syncAndBroadcast(id);
                 rateLimiter.markSynced(SyncRateLimiter.SyncType.EVENTS, id);
