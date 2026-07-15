@@ -30,4 +30,18 @@ public interface FixturePlayerStatRepository
     @Modifying
     @Query("DELETE FROM FixturePlayerStat p WHERE p.fixture.id = :fixtureId")
     void deleteByFixtureId(@Param("fixtureId") Long fixtureId);
+
+    /**
+     * Bir oyuncunun verilen zaman penceresindeki (kickoff) OYNANMIS macardaki
+     * istatistik satirlari — duello cozumlemesi bunlari toplar. Yalniz bitmis
+     * maclar (FT/AET/PEN). Oyun (Scores Coin) motoru kullanir.
+     */
+    @Query("SELECT p FROM FixturePlayerStat p JOIN p.fixture f "
+            + "WHERE p.playerId = :playerId "
+            + "AND f.kickoffAt >= :start AND f.kickoffAt < :end "
+            + "AND f.statusShort IN ('FT', 'AET', 'PEN')")
+    List<FixturePlayerStat> findPlayerStatsInWindow(
+            @Param("playerId") Long playerId,
+            @Param("start") java.time.Instant start,
+            @Param("end") java.time.Instant end);
 }

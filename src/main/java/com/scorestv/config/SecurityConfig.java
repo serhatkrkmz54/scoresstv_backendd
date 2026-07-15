@@ -98,6 +98,15 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/broadcasts/**").permitAll()
                 // Maç sonucu tahmin oylaması — anonim okuma + oy (voterId).
                 .requestMatchers("/api/v1/predictions/**").permitAll()
+
+                // Oyun (Scores Coin): GET'ler herkese acik (aktif yarisma, siralama,
+                // yarisma detayi). Tahmin (POST) + cuzdan (/wallet GET) auth ister
+                // (asagidaki anyRequest().authenticated()). Admin uclari /admin/game
+                // altinda + @PreAuthorize("hasRole('ADMIN')").
+                .requestMatchers(org.springframework.http.HttpMethod.GET,
+                        "/api/v1/game/active",
+                        "/api/v1/game/leaderboard",
+                        "/api/v1/game/competitions/**").permitAll()
                 // Haberler — public okuma (yalniz PUBLISHED). Yonetim
                 // /api/v1/admin/news/** ise anyRequest().authenticated() +
                 // controller seviyesinde @PreAuthorize ile korunur (EDITOR/ADMIN).
