@@ -121,6 +121,25 @@ public class FootballMessages {
             }
         }
 
+        // 2b) "ÖNEK SAYI/HARF" deseni BOŞLUKLA (Round 2, Group C, Group A...).
+        // Sondaki token sayı ya da tek harf ise öneki çevir, token'ı {0}'a geçir.
+        // ("Round of 16", "Group Stage" gibi tamlar adım 1'de zaten yakalanır.)
+        int sp = trimmed.lastIndexOf(' ');
+        if (sp > 0) {
+            String tail = trimmed.substring(sp + 1).trim();
+            boolean isNum = !tail.isEmpty() && tail.chars().allMatch(Character::isDigit);
+            boolean isLetter = tail.length() == 1 && Character.isLetter(tail.charAt(0));
+            if (isNum || isLetter) {
+                String prefix = trimmed.substring(0, sp);
+                try {
+                    return messageSource.getMessage(
+                            "football.round." + slug(prefix), new Object[]{tail}, loc);
+                } catch (NoSuchMessageException ignored) {
+                    // sonraki adıma geç
+                }
+            }
+        }
+
         // 3) Bilinmeyen — API kaynak metnine düş.
         return round;
     }
