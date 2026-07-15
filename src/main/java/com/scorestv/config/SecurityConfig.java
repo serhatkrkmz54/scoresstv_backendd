@@ -106,6 +106,7 @@ public class SecurityConfig {
                 .requestMatchers(org.springframework.http.HttpMethod.GET,
                         "/api/v1/game/active",
                         "/api/v1/game/leaderboard",
+                        "/api/v1/game/competitions",
                         "/api/v1/game/competitions/**").permitAll()
                 // Haberler — public okuma (yalniz PUBLISHED). Yonetim
                 // /api/v1/admin/news/** ise anyRequest().authenticated() +

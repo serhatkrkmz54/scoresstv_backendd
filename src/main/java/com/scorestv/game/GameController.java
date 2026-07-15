@@ -43,6 +43,13 @@ public class GameController {
         return v == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(v);
     }
 
+    /** Tüm oynanabilir yarışmalar (OPEN + LOCKED). Public. */
+    @GetMapping("/competitions")
+    public List<CompetitionView> competitions(
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        return service.activeList(currentUser != null ? currentUser.id() : null);
+    }
+
     @GetMapping("/competitions/{id}")
     public CompetitionView competition(@PathVariable Long id,
                                        @AuthenticationPrincipal CurrentUser currentUser) {

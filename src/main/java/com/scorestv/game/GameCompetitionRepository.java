@@ -15,6 +15,9 @@ public interface GameCompetitionRepository extends JpaRepository<GameCompetition
     Optional<GameCompetition> findFirstByScopeAndStatusOrderByStartAtDesc(
             GameScope scope, GameStatus status);
 
+    /** Kullanıcıya gösterilecek TÜM oynanabilir yarışmalar (OPEN + LOCKED). */
+    List<GameCompetition> findByStatusInOrderByLockAtAsc(List<GameStatus> statuses);
+
     /** Çözümleme adayları: dönemi bitmiş ama henüz RESOLVED olmayanlar. */
     List<GameCompetition> findByStatusInAndEndAtLessThanEqual(
             List<GameStatus> statuses, Instant now);

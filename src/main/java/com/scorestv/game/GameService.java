@@ -56,6 +56,15 @@ public class GameService {
     }
 
     @Transactional(readOnly = true)
+    /** Tüm oynanabilir yarışmalar (OPEN + LOCKED) — çoklu yarışma gösterimi. */
+    public List<CompetitionView> activeList(Long userId) {
+        return competitionRepo.findByStatusInOrderByLockAtAsc(
+                        java.util.List.of(GameStatus.OPEN, GameStatus.LOCKED))
+                .stream()
+                .map(c -> toView(c, userId))
+                .toList();
+    }
+
     public CompetitionView getCompetition(Long id, Long userId) {
         final GameCompetition comp = competitionRepo.findById(id)
                 .orElseThrow(() -> ApiException.notFound("Yarışma bulunamadı."));
