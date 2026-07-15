@@ -3,6 +3,9 @@ package com.scorestv.game;
 import com.scorestv.game.GameDtos.CompetitionView;
 import com.scorestv.game.GameDtos.CreateCompetitionRequest;
 import com.scorestv.game.GameDtos.CreateDuelRequest;
+import com.scorestv.game.GameDtos.AdminGrantResult;
+import com.scorestv.game.GameDtos.AdminUserCoinView;
+import com.scorestv.game.GameDtos.GrantCoinsRequest;
 import com.scorestv.game.GameDtos.UpdateStatusRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -13,6 +16,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -68,5 +72,18 @@ public class GameAdminController {
     @DeleteMapping("/competitions/{id}")
     public void deleteCompetition(@PathVariable Long id) {
         adminService.deleteCompetition(id);
+    }
+
+    // ---- Scores Coin yönetimi ----
+
+    @GetMapping("/users")
+    public List<AdminUserCoinView> searchUsers(@RequestParam("q") String q) {
+        return adminService.searchUsers(q);
+    }
+
+    @PostMapping("/users/{userId}/coins")
+    public AdminGrantResult grantCoins(@PathVariable Long userId,
+                                       @Valid @RequestBody GrantCoinsRequest req) {
+        return adminService.grantCoins(userId, req.delta(), req.reason());
     }
 }

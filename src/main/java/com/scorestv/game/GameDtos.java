@@ -81,4 +81,18 @@ public final class GameDtos {
             @NotNull PlayerRef playerB) {}
 
     public record UpdateStatusRequest(@NotNull GameStatus status) {}
+
+    // ---- Admin: Scores Coin yönetimi ----
+
+    /** Üye arama sonucu satırı (bakiye dahil). */
+    public record AdminUserCoinView(
+            Long userId, String email, String displayName,
+            long coinBalance, long lifetimeCoins) {}
+
+    /** Belirli üyeye coin ekle/çıkar isteği. delta + / - olabilir. */
+    public record GrantCoinsRequest(@NotNull Integer delta, String reason) {}
+
+    /** Coin işlemi sonrası güncel bakiye. */
+    public record AdminGrantResult(
+            Long userId, long coinBalance, long lifetimeCoins) {}
 }

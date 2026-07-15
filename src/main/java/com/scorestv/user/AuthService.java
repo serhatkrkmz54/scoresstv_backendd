@@ -15,6 +15,7 @@ import com.scorestv.user.dto.RegisterRequest;
 import com.scorestv.user.dto.TokenRequest;
 import com.scorestv.user.dto.UpdateProfileRequest;
 import com.scorestv.user.dto.UserResponse;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +35,7 @@ public class AuthService {
     private final GoogleTokenVerifier googleTokenVerifier;
     private final AppleTokenVerifier appleTokenVerifier;
     private final Duration refreshTtl;
+    private final ApplicationEventPublisher eventPublisher;
 
     public AuthService(UserRepository userRepository,
                        RefreshTokenRepository refreshTokenRepository,
@@ -42,7 +44,8 @@ public class AuthService {
                        LoginAttemptService loginAttemptService,
                        GoogleTokenVerifier googleTokenVerifier,
                        AppleTokenVerifier appleTokenVerifier,
-                       ScorestvProperties props) {
+                       ScorestvProperties props,
+                       ApplicationEventPublisher eventPublisher) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
@@ -51,6 +54,7 @@ public class AuthService {
         this.googleTokenVerifier = googleTokenVerifier;
         this.appleTokenVerifier = appleTokenVerifier;
         this.refreshTtl = props.security().jwt().refreshTokenTtl();
+        this.eventPublisher = eventPublisher;
     }
 
     /** Herkese acik kayit. Yeni kullanici her zaman USER rolu ile olusur. */
@@ -70,6 +74,7 @@ public class AuthService {
                 .enabled(true)
                 .build();
         userRepository.save(user);
+        eventPublisher.publishEvent(new UserRegisteredEvent(user.getId()));
         return issueTokens(user);
     }
 
@@ -135,6 +140,7 @@ public class AuthService {
                         .enabled(true)
                         .build();
                 userRepository.save(user);
+                eventPublisher.publishEvent(new UserRegisteredEvent(user.getId()));
             }
         }
 
@@ -191,6 +197,7 @@ public class AuthService {
                         .enabled(true)
                         .build();
                 userRepository.save(user);
+                eventPublisher.publishEvent(new UserRegisteredEvent(user.getId()));
             }
         }
 

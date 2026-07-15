@@ -9,4 +9,7 @@ public interface ScoresCoinLedgerRepository extends JpaRepository<ScoresCoinLedg
 
     /** Kullanıcının cüzdan hareketleri (yeniden eskiye). */
     List<ScoresCoinLedger> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
+
+    /** Bu kullanıcıya bu sebeple (ör. WELCOME_BONUS) daha önce coin verildi mi? */
+    boolean existsByUserIdAndReason(Long userId, String reason);
 }

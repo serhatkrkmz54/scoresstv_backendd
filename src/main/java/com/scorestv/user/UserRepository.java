@@ -1,6 +1,9 @@
 package com.scorestv.user;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Pageable;
 
 import java.util.Collection;
 import java.util.List;
@@ -18,4 +21,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     /** Panel "Editör Yönetimi" — yalniz staff (EDITOR/ADMIN) hesaplari. */
     List<User> findByRoleInOrderByEmailAsc(Collection<Role> roles);
+
+    /** Admin coin yönetimi — e-posta VEYA görünen ada göre üye arama. */
+    @Query("SELECT u FROM User u WHERE LOWER(u.email) LIKE LOWER(CONCAT('%', :q, '%')) "
+            + "OR LOWER(u.displayName) LIKE LOWER(CONCAT('%', :q, '%')) "
+            + "ORDER BY u.email ASC")
+    List<User> searchByEmailOrName(@Param("q") String q, Pageable pageable);
 }

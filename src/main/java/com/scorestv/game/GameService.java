@@ -146,8 +146,11 @@ public class GameService {
     /** Genel (all-time) sıralama. */
     @Transactional(readOnly = true)
     public List<LeaderboardEntry> globalLeaderboard(int limit) {
+        // Yalnız oynayanlar (totalPicks > 0) — herkes hoşgeldin bonusuyla coin
+        // sahibi; liderlik gerçekten tahmin yapanlar üzerinden kurulur.
         final List<UserGameStat> top =
-                statRepo.findAllByOrderByLifetimeCoinsDesc(PageRequest.of(0, clampLimit(limit)));
+                statRepo.findByTotalPicksGreaterThanOrderByLifetimeCoinsDesc(
+                        0, PageRequest.of(0, clampLimit(limit)));
         final Map<Long, String> names = displayNames(
                 top.stream().map(UserGameStat::getUserId).collect(Collectors.toSet()));
         final List<LeaderboardEntry> out = new ArrayList<>();

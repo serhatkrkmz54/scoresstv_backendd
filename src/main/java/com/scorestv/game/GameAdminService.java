@@ -4,6 +4,11 @@ import com.scorestv.common.ApiException;
 import com.scorestv.game.GameDtos.CreateCompetitionRequest;
 import com.scorestv.game.GameDtos.CreateDuelRequest;
 import com.scorestv.game.GameDtos.PlayerRef;
+import com.scorestv.game.GameDtos.AdminUserCoinView;
+import com.scorestv.game.GameDtos.AdminGrantResult;
+import com.scorestv.user.User;
+import com.scorestv.user.UserRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,11 +20,20 @@ public class GameAdminService {
 
     private final GameCompetitionRepository competitionRepo;
     private final GameDuelRepository duelRepo;
+    private final UserRepository userRepo;
+    private final ScoresCoinService scoresCoinService;
+    private final UserGameStatRepository statRepo;
 
     public GameAdminService(GameCompetitionRepository competitionRepo,
-                            GameDuelRepository duelRepo) {
+                            GameDuelRepository duelRepo,
+                            UserRepository userRepo,
+                            ScoresCoinService scoresCoinService,
+                            UserGameStatRepository statRepo) {
         this.competitionRepo = competitionRepo;
         this.duelRepo = duelRepo;
+        this.userRepo = userRepo;
+        this.scoresCoinService = scoresCoinService;
+        this.statRepo = statRepo;
     }
 
     @Transactional(readOnly = true)
@@ -89,6 +103,45 @@ public class GameAdminService {
     }
 
     // ---- yardımcılar ----
+
+    // ---- Admin: Scores Coin yönetimi ----
+
+    /** E-posta veya görünen ada göre üye arama (bakiye dahil, en fazla 20). */
+    @Transactional(readOnly = true)
+    public List<AdminUserCoinView> searchUsers(String q) {
+        if (q == null || q.isBlank()) {
+            return List.of();
+        }
+        return userRepo.searchByEmailOrName(q.trim(), PageRequest.of(0, 20))
+                .stream()
+                .map(u -> {
+                    UserGameStat st = statRepo.findById(u.getId()).orElse(null);
+                    long bal = st != null ? st.getCoinBalance() : 0L;
+                    long life = st != null ? st.getLifetimeCoins() : 0L;
+                    return new AdminUserCoinView(u.getId(), u.getEmail(),
+                            u.getDisplayName(), bal, life);
+                })
+                .toList();
+    }
+
+    /** Belirli üyeye coin ekle/çıkar (delta + / -). Bakiye eksiye düşemez. */
+    @Transactional
+    public AdminGrantResult grantCoins(Long userId, Integer delta, String reason) {
+        User user = userRepo.findById(userId).orElseThrow(
+                () -> ApiException.notFound("Kullanıcı bulunamadı."));
+        if (delta == null || delta == 0) {
+            throw ApiException.badRequest("Miktar sıfır olamaz.");
+        }
+        UserGameStat st = scoresCoinService.getOrCreate(user.getId());
+        if (st.getCoinBalance() + delta < 0) {
+            throw ApiException.badRequest("Bakiye eksiye düşemez.");
+        }
+        String r = (reason == null || reason.isBlank()) ? "ADMIN_GRANT" : reason.trim();
+        scoresCoinService.grant(user.getId(), delta, r, "ADMIN", null);
+        UserGameStat updated = scoresCoinService.getOrCreate(user.getId());
+        return new AdminGrantResult(user.getId(), updated.getCoinBalance(),
+                updated.getLifetimeCoins());
+    }
 
     private int nextSortOrder(Long competitionId) {
         return duelRepo.findByCompetitionIdOrderBySortOrderAsc(competitionId).size();
