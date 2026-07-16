@@ -7,9 +7,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -27,6 +30,11 @@ public class HighlightlyClient {
     private final boolean keyConfigured;
     private final int limit;
     private final String timezone;
+
+    /** 429 (özellikle GÜNLÜK limit aşımı) sonrası çağrıları durduracak an (epoch
+     * ms). Aşımda ağa hiç dokunmadan hızlı boş dön → hammer'lama + log spam biter,
+     * boşuna kota (rejected istek) yakılmaz. Günlük aşımda UTC gün sonuna kadar. */
+    private volatile long breachedUntilMs = 0L;
 
     public HighlightlyClient(HighlightlyProperties props) {
         this.keyConfigured = props.apiKey() != null && !props.apiKey().isBlank();
@@ -55,7 +63,7 @@ public class HighlightlyClient {
      */
     public List<HighlightlyHighlightDto> fetchHighlights(
             String date, String homeTeamName, String awayTeamName) {
-        if (!keyConfigured) return List.of();
+        if (!keyConfigured || inBreachCooldown()) return List.of();
         try {
             HighlightlyResponse resp = http.get()
                     .uri(u -> u.path("/highlights")
@@ -70,6 +78,7 @@ public class HighlightlyClient {
             if (resp == null || resp.data() == null) return List.of();
             return resp.data();
         } catch (Exception e) {
+            handleRateLimit(e);
             log.warn("Highlightly fetch hata date={} {} vs {}: {}",
                     date, homeTeamName, awayTeamName, e.toString());
             return List.of();
@@ -82,7 +91,7 @@ public class HighlightlyClient {
      * plan / 404 / ağ) {@code null} döner — çağıran iyimser davranabilir.
      */
     public HighlightlyGeoRestrictionDto fetchGeoRestriction(long highlightId) {
-        if (!keyConfigured) return null;
+        if (!keyConfigured || inBreachCooldown()) return null;
         try {
             return http.get()
                     .uri(u -> u.path("/highlights/geo-restrictions/{id}")
@@ -90,9 +99,36 @@ public class HighlightlyClient {
                     .retrieve()
                     .body(HighlightlyGeoRestrictionDto.class);
         } catch (Exception e) {
+            handleRateLimit(e);
             log.debug("Highlightly geo-restriction hata id={}: {}",
                     highlightId, e.toString());
             return null;
+        }
+    }
+
+    /** 429/limit aşımı cooldown'u aktif mi? */
+    private boolean inBreachCooldown() {
+        return System.currentTimeMillis() < breachedUntilMs;
+    }
+
+    /**
+     * 429 yakalarsa çağrıları geçici durdurur. GÜNLÜK limit aşımı ("daily"/
+     * "breached") → kota UTC gece yarısı sıfırlanana kadar; geçici 429 → 60 sn.
+     * Böylece aşım sonrası bir daha hammer'lanmaz (log spam + boşa kota biter).
+     */
+    private void handleRateLimit(Exception e) {
+        if (!(e instanceof HttpClientErrorException hce)
+                || hce.getStatusCode().value() != 429) {
+            return;
+        }
+        final String body = hce.getResponseBodyAsString().toLowerCase();
+        if (body.contains("daily") || body.contains("breached")) {
+            breachedUntilMs = LocalDate.now(ZoneOffset.UTC).plusDays(1)
+                    .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli();
+            log.warn("Highlightly GÜNLÜK limit aşıldı — UTC gün sonuna kadar çağrılar durduruldu.");
+        } else {
+            breachedUntilMs = System.currentTimeMillis() + 60_000L;
+            log.warn("Highlightly 429 (geçici) — 60 sn çağrı durduruldu.");
         }
     }
 }

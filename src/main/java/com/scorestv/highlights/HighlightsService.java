@@ -171,6 +171,15 @@ public class HighlightsService {
             return putAndReturn(fixtureId, List.of());
         }
 
+        // KOTA KORUMASI: çok eski maçlar için Highlightly'e HİÇ çağrı yapma.
+        // Eski/obskür maçlarda (ör. 2021, alt ligler) highlight zaten yok/gitmiş
+        // ama site/uygulama + arama motoru botları o sayfalara girince günlük
+        // kotayı (7500) boşuna yakıyordu. Boş dön, uzun cache'le.
+        if (props.maxAgeDays() > 0 && f.getKickoffAt()
+                .isBefore(Instant.now().minus(Duration.ofDays(props.maxAgeDays())))) {
+            return putAndReturn(fixtureId, List.of());
+        }
+
         String date = LocalDate
                 .ofInstant(f.getKickoffAt(), ZoneId.of(props.timezone()))
                 .toString(); // YYYY-MM-DD

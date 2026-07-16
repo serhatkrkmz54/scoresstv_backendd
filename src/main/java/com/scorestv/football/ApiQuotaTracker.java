@@ -74,7 +74,11 @@ public class ApiQuotaTracker {
      * (Redis'e gerek yok); fair semaphore → LIVE istekler aç kalmaz (FIFO).
      */
     private final Semaphore globalBucket;
+    /** Saniyelik hız (refill oranı). */
     private final int globalCapacity;
+    /** Anlık (aynı anda) izin verilen max istek — nginx burst toleransını aşmamak
+     * için KÜÇÜK tutulur; sürekli hız yine {@code globalCapacity}/sn kalır. */
+    private final int globalBurst;
     private final ScheduledExecutorService globalRefiller =
             Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "api-global-rate-refill");
@@ -87,18 +91,22 @@ public class ApiQuotaTracker {
             @Value("${scorestv.api-football.global-rate-per-second:18}") int globalRatePerSec) {
         this.redis = redis;
         this.globalCapacity = Math.max(1, globalRatePerSec);
-        this.globalBucket = new Semaphore(globalCapacity, true); // fair → FIFO
-        // Düz refill: her 1000/N ms'de 1 token bırak (kapasiteye kadar). Saniye
-        // başı tek seferde N token yerine dağıtık → saniye-burst de yumuşar.
+        // Anlık burst'u KÜÇÜK tut (nginx 20r/s'ye küçük bir burst toleransı tanır;
+        // büyük ani yığın yine "exceeded ratelimit" ile reddedilir — API-Football
+        // dokümanı). Refill oranı = globalCapacity/sn, ama aynı anda en fazla
+        // globalBurst istek → istekler ZAMANA yayılır (onların önerdiği çözüm).
+        this.globalBurst = Math.min(globalCapacity, 5);
+        this.globalBucket = new Semaphore(globalBurst, true); // fair → FIFO
+        // Düz refill: her 1000/N ms'de 1 token bırak (burst tavanına kadar).
         final long intervalMs = Math.max(1L, 1000L / globalCapacity);
         globalRefiller.scheduleAtFixedRate(() -> {
-            if (globalBucket.availablePermits() < globalCapacity) {
+            if (globalBucket.availablePermits() < globalBurst) {
                 globalBucket.release(1);
             }
         }, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
-        log.info("API GLOBAL rate limiter hazir: {} istek/sn (~{}/dk) — "
-                + "futbol+basketbol+voleybol ORTAK anahtar limiti (1200/dk) altinda.",
-                globalCapacity, globalCapacity * 60);
+        log.info("API GLOBAL rate limiter hazir: {} istek/sn (~{}/dk), burst={} — "
+                + "futbol+basketbol+voleybol ORTAK anahtar limiti (1200/dk=20/sn) altinda.",
+                globalCapacity, globalCapacity * 60, globalBurst);
     }
 
     /**

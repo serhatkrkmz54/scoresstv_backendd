@@ -27,5 +27,9 @@ public record HighlightlyProperties(
         @DefaultValue("360") int cacheTtlMinutes,
         /** Boş sonuç cache süresi (dakika) — highlight maç bitiminden 1-48s
          *  sonra gelir, bu yüzden boş sonuç kısa süre cache'lenir. */
-        @DefaultValue("30") int emptyCacheTtlMinutes
+        @DefaultValue("30") int emptyCacheTtlMinutes,
+        /** Bu kadar GÜNDEN eski maçlar için Highlightly'e HİÇ çağrı yapılmaz
+         *  (günlük kota koruması). Eski/obskür maçlarda highlight zaten yok/gitmiş
+         *  → boşuna kota yakılır. Boş dönülür, uzun cache'lenir. 0 = kapalı. */
+        @DefaultValue("45") int maxAgeDays
 ) {}
