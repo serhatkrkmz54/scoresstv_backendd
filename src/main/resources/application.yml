@@ -152,7 +152,7 @@ scorestv:
   notify:
     enrich-updates: ${NOTIFY_ENRICH_UPDATES:true}
     use-fcm-topics: ${NOTIFY_USE_FCM_TOPICS:true}
-    dual-send: ${NOTIFY_DUAL_SEND:true}
+    dual-send: ${NOTIFY_DUAL_SEND:false}
     # Outbox worker yoklama araligi (ms). Gol/kart bildirimi enqueue edildikten
     # sonra en fazla bu kadar bekler. 5000->2000: canli bildirim gecikmesini kisar
     # (DB yuku ihmal edilebilir — kucuk indexli sorgu).
