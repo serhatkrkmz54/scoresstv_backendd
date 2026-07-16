@@ -1,13 +1,19 @@
 package com.scorestv.football;
 
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -54,8 +60,63 @@ public class ApiQuotaTracker {
 
     private final StringRedisTemplate redis;
 
-    public ApiQuotaTracker(StringRedisTemplate redis) {
+    /**
+     * GLOBAL (hesap-geneli) hız yöneticisi — TÜM sporlar ORTAK.
+     *
+     * <p>API-Football limiti ANAHTAR bazlıdır ve tek anahtar futbol + basketbol +
+     * voleybol için birlikte kullanılır (1200 istek/dk tavan). Futbolun kendi
+     * saniyelik kovası vardı ama basketbol/voleybol'ün hiç yoktu; üç spor
+     * birlikte 1200/dk'yı aşıp <i>"exceeded the limit of requests per minute"</i>
+     * hatası alınıyordu. Bu token-bucket, üç sporun BİRLİKTE saniyede en fazla
+     * {@code globalRatePerSec} istek yapmasını sağlar (varsayılan 18 → ~1080/dk,
+     * 1200 tavanının güvenli altında). Her API isteğinden ÖNCE
+     * {@link #acquireGlobalSlot()} çağrılır. Tek instance → in-process yeterli
+     * (Redis'e gerek yok); fair semaphore → LIVE istekler aç kalmaz (FIFO).
+     */
+    private final Semaphore globalBucket;
+    private final int globalCapacity;
+    private final ScheduledExecutorService globalRefiller =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "api-global-rate-refill");
+                t.setDaemon(true);
+                return t;
+            });
+
+    public ApiQuotaTracker(
+            StringRedisTemplate redis,
+            @Value("${scorestv.api-football.global-rate-per-second:18}") int globalRatePerSec) {
         this.redis = redis;
+        this.globalCapacity = Math.max(1, globalRatePerSec);
+        this.globalBucket = new Semaphore(globalCapacity, true); // fair → FIFO
+        // Düz refill: her 1000/N ms'de 1 token bırak (kapasiteye kadar). Saniye
+        // başı tek seferde N token yerine dağıtık → saniye-burst de yumuşar.
+        final long intervalMs = Math.max(1L, 1000L / globalCapacity);
+        globalRefiller.scheduleAtFixedRate(() -> {
+            if (globalBucket.availablePermits() < globalCapacity) {
+                globalBucket.release(1);
+            }
+        }, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+        log.info("API GLOBAL rate limiter hazir: {} istek/sn (~{}/dk) — "
+                + "futbol+basketbol+voleybol ORTAK anahtar limiti (1200/dk) altinda.",
+                globalCapacity, globalCapacity * 60);
+    }
+
+    /**
+     * Hesap-geneli global hız slotu al (TÜM sporlar). Slot yoksa bir sonraki
+     * token bırakılana kadar BLOKLAR (~≤1 sn). Her API isteğinden ÖNCE çağrılır;
+     * futbol/basketbol/voleybol istemcilerinin hepsi bu tek bucket'ı paylaşır.
+     */
+    public void acquireGlobalSlot() {
+        try {
+            globalBucket.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @PreDestroy
+    void shutdownGlobalRefiller() {
+        globalRefiller.shutdownNow();
     }
 
     /**

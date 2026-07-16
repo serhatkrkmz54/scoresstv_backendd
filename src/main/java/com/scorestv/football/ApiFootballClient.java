@@ -221,6 +221,9 @@ public class ApiFootballClient {
                     "Futbol veri saglayicisi rate limit cooldown aktif ("
                             + cooldownMs + " ms kaldi).");
         }
+        // Hesap-geneli GLOBAL hiz kapisi (futbol+basketbol+voleybol ORTAK anahtar):
+        // uc spor birlikte 1200/dk limitini asmasin. Futbolun kendi kovasi da var.
+        quotaTracker.acquireGlobalSlot();
         acquireToken(priority);
 
         ResponseEntity<ApiFootballResponse<T>> entity;
@@ -245,8 +248,17 @@ public class ApiFootballClient {
             if (ex.getStatusCode().value() == 429) {
                 Duration retryAfter = parseRetryAfter(ex.getResponseHeaders());
                 _enterCooldown(retryAfter != null ? retryAfter : DEFAULT_429_COOLDOWN);
-                log.warn("API-Football 429 (rate limit): path={} retryAfter={}",
-                        path, retryAfter);
+                // Saglayicinin TAM hata mesajini + o andaki limit sayaclarini da
+                // logla (destek talebinde "aldiginiz hata mesaji nedir" sorusuna
+                // birebir cevap icin).
+                final HttpHeaders h = ex.getResponseHeaders();
+                log.warn("API-Football 429 (rate limit): path={} retryAfter={} body=[{}] "
+                                + "dakikalik-kalan={}/{} gunluk-kalan={}/{}",
+                        path, retryAfter, ex.getResponseBodyAsString(),
+                        h != null ? h.getFirst("X-RateLimit-Remaining") : null,
+                        h != null ? h.getFirst("X-RateLimit-Limit") : null,
+                        h != null ? h.getFirst("x-ratelimit-requests-remaining") : null,
+                        h != null ? h.getFirst("x-ratelimit-requests-limit") : null);
                 throw ApiFootballException.quotaExceeded(
                         "Futbol veri saglayicisi rate limit (429 Too Many Requests).");
             }

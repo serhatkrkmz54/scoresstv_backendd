@@ -347,6 +347,13 @@ scorestv:
     requests-per-minute: ${API_FOOTBALL_RPM:450}
     live-tokens-per-second: ${API_FOOTBALL_LIVE_TPS:4}
     lazy-tokens-per-second: ${API_FOOTBALL_LAZY_TPS:2}
+    # GLOBAL (hesap-geneli) saniyelik hiz — TUM sporlar (futbol+basketbol+
+    # voleybol) ORTAK bu anahtari kullanir. API-Sports limiti anahtar-bazlidir
+    # (1200 istek/dk). Futbolun kendi kovasi var ama basketbol/voleybol'un yoktu;
+    # ucu birlikte 1200/dk'yi asip "exceeded per minute" hatasi aliniyordu. Bu
+    # deger ucunun BIRLIKTE saniyelik ust sinirini koyar. 18/sn ~ 1080/dk (1200
+    # tavaninin guvenli altinda). ApiQuotaTracker.acquireGlobalSlot() uygular.
+    global-rate-per-second: ${API_FOOTBALL_GLOBAL_TPS:18}
   football:
     sync:
       # Zamanlanmis senkron isleri calissin mi (dev'de kapali tutulur).

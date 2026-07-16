@@ -79,6 +79,9 @@ public class VolleyballApiClient {
             ParameterizedTypeReference<VolleyballApiResponse<T>> typeRef) {
         guardCooldown();
         throttle();
+        // Hesap-geneli GLOBAL hiz kapisi (futbol+basketbol+voleybol ORTAK anahtar):
+        // uc spor birlikte 1200/dk limitini asmasin.
+        quotaTracker.acquireGlobalSlot();
         try {
             ResponseEntity<VolleyballApiResponse<T>> entity = http.get()
                     .uri(builder -> {
