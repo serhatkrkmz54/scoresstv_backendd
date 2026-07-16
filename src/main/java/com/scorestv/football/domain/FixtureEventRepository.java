@@ -10,8 +10,19 @@ import java.util.List;
 /** Maç olaylarına erişim. */
 public interface FixtureEventRepository extends JpaRepository<FixtureEvent, Long> {
 
-    /** Bir maçın olayları, dakikaya göre sıralı (maç detayı zaman çizelgesi). */
-    List<FixtureEvent> findByFixtureIdOrderByTimeElapsedAsc(Long fixtureId);
+    /**
+     * Bir maçın olayları KRONOLOJİK sıralı (maç detayı zaman çizelgesi).
+     *
+     * <p>Sıralama {@code timeElapsed} + {@code timeExtra} birlikte olmalı: 90'
+     * (extra=null) golü, 90+5 (extra=5) değişikliğin ÜSTÜNDE gelmeli. {@code extra}
+     * nullable olduğu için türetilmiş {@code OrderBy...} NULLS LAST tuzağına düşer
+     * (null'ı sona atıp 90'ı 90+5'in ALTINA koyar); bu yüzden {@code COALESCE(extra,0)}
+     * ile açıkça sıralarız. Eşit (elapsed,extra) için {@code id ASC} = API'nin
+     * verdiği özgün sıra (kararlı).
+     */
+    @Query("SELECT e FROM FixtureEvent e WHERE e.fixture.id = :fixtureId "
+            + "ORDER BY e.timeElapsed ASC, COALESCE(e.timeExtra, 0) ASC, e.id ASC")
+    List<FixtureEvent> findByFixtureIdOrderByTimeElapsedAsc(@Param("fixtureId") Long fixtureId);
 
     /**
      * Bir maçın tüm olaylarını siler. Senkronda olaylar silinip yeniden

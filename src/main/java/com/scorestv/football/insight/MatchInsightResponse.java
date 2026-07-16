@@ -27,12 +27,17 @@ public record MatchInsightResponse(
         String favorite,        // "HOME" | "DRAW" | "AWAY" | null (başa baş)
         String confidence,      // yerelleştirilmiş: Yüksek/Orta/Düşük
         String summary,         // sayıları kelimeye döken analiz okuması (tüyo DEĞİL)
-        String note) {
+        String note,
+        // ---- Biten maç: "Sonuç Karnesi" için ----
+        boolean finished,       // maç bitti mi (FT/AET/PEN...) → istemci tahminleri sonuçla kıyaslar
+        Integer actualHome,     // gerçek skor (yalnız finished iken dolu)
+        Integer actualAway) {
 
     /** Yeterli veri yokken dönülen boş yanıt. */
     public static MatchInsightResponse unavailable(String note) {
         return new MatchInsightResponse(
                 false, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, note);
+                null, null, null, null, null, null, note,
+                false, null, null);
     }
 }

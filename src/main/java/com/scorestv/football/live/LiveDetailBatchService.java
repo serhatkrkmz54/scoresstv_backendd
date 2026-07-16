@@ -5,17 +5,22 @@ import com.scorestv.football.ApiFootballClient;
 import com.scorestv.football.ApiFootballClient.RequestPriority;
 import com.scorestv.football.ApiFootballResponse;
 import com.scorestv.football.FootballProperties;
+import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.football.sync.FixturePlayerStatsSyncService;
 import com.scorestv.football.sync.FixtureStatisticsSyncService;
+import com.scorestv.football.sync.dto.FixtureApiDto;
 import com.scorestv.football.sync.dto.FixtureBundleApiDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -58,19 +63,22 @@ public class LiveDetailBatchService {
     private final FixtureStatisticsSyncService statsSyncService;
     private final FixturePlayerStatsSyncService playerStatsSyncService;
     private final FootballProperties properties;
+    private final LiveBroadcaster broadcaster;
 
     public LiveDetailBatchService(ApiFootballClient client,
                                   FixtureRepository fixtureRepository,
                                   FixtureEventsLiveProcessor eventsProcessor,
                                   FixtureStatisticsSyncService statsSyncService,
                                   FixturePlayerStatsSyncService playerStatsSyncService,
-                                  FootballProperties properties) {
+                                  FootballProperties properties,
+                                  LiveBroadcaster broadcaster) {
         this.client = client;
         this.fixtureRepository = fixtureRepository;
         this.eventsProcessor = eventsProcessor;
         this.statsSyncService = statsSyncService;
         this.playerStatsSyncService = playerStatsSyncService;
         this.properties = properties;
+        this.broadcaster = broadcaster;
     }
 
     /**
@@ -87,6 +95,8 @@ public class LiveDetailBatchService {
                 Math.max(1, properties.sync().liveBundleBatchSize()));
 
         int processed = 0;
+        // Bundle'ın taze fixture bloğundan (elapsed/extra) canlı saat güncellemeleri.
+        List<ClockUpdate> clockUpdates = new ArrayList<>();
         for (int from = 0; from < liveIds.size(); from += batchSize) {
             List<Long> chunk = liveIds.subList(from, Math.min(from + batchSize, liveIds.size()));
             String idsParam = chunk.stream()
@@ -101,6 +111,8 @@ public class LiveDetailBatchService {
                 }
                 for (FixtureBundleApiDto item : items) {
                     processed += processOne(item);
+                    ClockUpdate cu = clockOf(item);
+                    if (cu != null) clockUpdates.add(cu);
                 }
             } catch (ApiException ex) {
                 // 429 cooldown / upstream — bu tick'i bırak, kalan chunk'ları ZORLAMA
@@ -111,8 +123,74 @@ public class LiveDetailBatchService {
                 log.error("Canlı detay batch beklenmedik hata (from=" + from + ")", ex);
             }
         }
+        applyClockUpdates(clockUpdates);
         return processed;
     }
+
+    /** Bundle fixture bloğundan canlı saat anlık görüntüsü (null-güvenli). */
+    private ClockUpdate clockOf(FixtureBundleApiDto item) {
+        if (item == null || item.fixture() == null || item.fixture().id() == null
+                || item.fixture().status() == null) {
+            return null;
+        }
+        FixtureApiDto.Status st = item.fixture().status();
+        return new ClockUpdate(item.fixture().id(), st.elapsed(), st.extra(), st.shortCode());
+    }
+
+    /**
+     * Bundle'dan gelen canlı dakikayı (elapsed/extra) fixture'a yazar ve WS'e yayar.
+     *
+     * <p><b>Neden gerek var:</b> fixture.elapsed'i normalde SADECE
+     * {@link LiveTickerService} ({@code /fixtures?live=all}) yazar. Uzatmada bu
+     * kaynak bazı maçları geç/eksik verince dakika "95" gibi bir değerde donar;
+     * oysa event'ler (bu bundle'dan) 105'e ilerler. Bundle'ın per-maç
+     * {@code ?ids=} fixture bloğu en az live=all kadar tazedir — dakikayı buradan
+     * da tazeleriz.
+     *
+     * <p>API'den ({@code ?ids=} fixture bloğu) ne geldiyse AYNEN yansıtılır —
+     * clamp/uydurma yok. Yalnız değer değiştiyse yazılıp yayılır.
+     */
+    private void applyClockUpdates(List<ClockUpdate> updates) {
+        if (updates.isEmpty()) {
+            return;
+        }
+        Map<Long, ClockUpdate> byId = new HashMap<>();
+        for (ClockUpdate u : updates) {
+            byId.put(u.id(), u); // aynı tick'te son değer kazanır
+        }
+        List<Fixture> fixtures = fixtureRepository.findAllByIdWithDetails(byId.keySet());
+        List<Fixture> changed = new ArrayList<>();
+        for (Fixture f : fixtures) {
+            ClockUpdate u = byId.get(f.getId());
+            if (u == null || u.elapsed() == null) {
+                continue; // API dakika vermediyse dokunma (mevcut değeri boşa çıkarma).
+            }
+            // API'den (?ids= fixture bloğu) ne geldiyse AYNEN yansıt — clamp/uydurma
+            // YOK. Yalnız DEĞİŞTİYSE yaz + yay (gereksiz DB yazımı/broadcast olmasın).
+            if (Objects.equals(f.getElapsed(), u.elapsed())
+                    && Objects.equals(f.getStatusExtra(), u.extra())) {
+                continue;
+            }
+            f.setElapsed(u.elapsed());
+            f.setStatusExtra(u.extra());
+            changed.add(f);
+        }
+        if (changed.isEmpty()) {
+            return;
+        }
+        try {
+            fixtureRepository.saveAll(changed);
+            broadcaster.broadcastAll(changed);
+            log.debug("Canlı detay batch: {} maç dakikası API değeriyle güncellendi + yayıldı.",
+                    changed.size());
+        } catch (RuntimeException ex) {
+            // Eşzamanlı LiveTicker yazımı (opt. lock) vb. — bir sonraki tick düzeltir.
+            log.warn("Canlı detay saat güncellemesi yazılamadı: {}", ex.getMessage());
+        }
+    }
+
+    /** Tek maçın bundle'dan gelen canlı saat anlık görüntüsü. */
+    private record ClockUpdate(Long id, Integer elapsed, Integer extra, String shortCode) {}
 
     /**
      * Tek maçın gömülü detayını ilgili upsert'lere dağıtır. Her blok BOŞSA atlar

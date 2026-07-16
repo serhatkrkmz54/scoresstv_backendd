@@ -5,6 +5,8 @@ import com.scorestv.football.domain.Team;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.Set;
+
 /**
  * Bir maç için "AI Analiz" olasılıklarını üretir: lig+sezon reytinglerini
  * {@link RatingService}'ten alır, iki takımın reytinginden Poisson olasılıkları
@@ -14,6 +16,16 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class MatchInsightService {
+
+    /** Fiilen oynanıp bitmiş maçlar — yalnız bunlarda "Sonuç Karnesi" gösterilir
+     *  (AWD/WO hükmen/forfait olduğu için gerçek futbol sonucu sayılmaz). */
+    private static final Set<String> FINISHED_STATUSES =
+            Set.of("FT", "AET", "PEN");
+
+    /** İptal/ertelenen/yarıda kalan/hükmen — geçerli bir sonuç yok. AI analizi
+     *  (tahmin de karne de) uygulanmaz → kart hiç gösterilmez. */
+    private static final Set<String> VOID_STATUSES =
+            Set.of("CANC", "PST", "ABD", "AWD", "WO");
 
     /** Bir takımın motora girmesi için gereken min. geçmiş maç. */
     private static final int MIN_APPEARANCES = 4;
@@ -34,6 +46,13 @@ public class MatchInsightService {
         String note = turkish
                 ? "İstatistiksel analiz — bahis tavsiyesi değildir."
                 : "Statistical analysis — not betting advice.";
+
+        // İptal / ertelenen / yarıda kalan / hükmen maç → geçerli bir sonuç
+        // yok; ne tahmin ne de sonuç karnesi anlamlı → AI kartı hiç gösterilmez.
+        String status = fixture.getStatusShort();
+        if (status != null && VOID_STATUSES.contains(status)) {
+            return MatchInsightResponse.unavailable(note);
+        }
 
         Long leagueId = fixture.getLeague() != null ? fixture.getLeague().getId() : null;
         Integer season = fixture.getSeason();
@@ -91,6 +110,13 @@ public class MatchInsightService {
         String summary = summary(p, homeName, awayName,
                 wdl[0], wdl[2], over, bttsYes, favorite, turkish);
 
+        // Biten maç → "Sonuç Karnesi" için gerçek skor. İstemci AI tahminlerini
+        // (1X2 / Alt-Üst 2.5 / KG) bu skorla kıyaslayıp tuttu/tutmadı gösterir.
+        boolean finished = fixture.getStatusShort() != null
+                && FINISHED_STATUSES.contains(fixture.getStatusShort());
+        Integer actualHome = finished ? fixture.getHomeGoals() : null;
+        Integer actualAway = finished ? fixture.getAwayGoals() : null;
+
         return new MatchInsightResponse(
                 true,
                 wdl[0], wdl[1], wdl[2],
@@ -98,7 +124,8 @@ public class MatchInsightService {
                 bttsYes, 100 - bttsYes,
                 round1(p.lambdaHome()), round1(p.lambdaAway()),
                 expectedScore, favorite, confidence(max, turkish),
-                summary, note);
+                summary, note,
+                finished, actualHome, actualAway);
     }
 
     private static String displayName(Team t, boolean tr) {

@@ -222,6 +222,13 @@ public class NotificationDispatcherService {
                 fixtureRepository.findById(fixtureId).orElse(null);
         if (fixture == null) return;
 
+        // Penaltı ATIŞLARI sırasında (status "P" = canlı seri) veya sonrasında
+        // ("PEN" = seride bitti) gerçek gol olmaz; goals alanındaki olası oynama
+        // YANLIŞ "⚽ GOL! 0-1" göndermesin. Seri penaltıları event hattından
+        // ("Penaltı Atışları") ayrıca bildirilir.
+        final String st = fixture.getStatusShort();
+        if ("P".equals(st) || "PEN".equals(st)) return;
+
         final int h = fixture.getHomeGoals() == null ? 0 : fixture.getHomeGoals();
         final int a = fixture.getAwayGoals() == null ? 0 : fixture.getAwayGoals();
 
@@ -454,8 +461,13 @@ public class NotificationDispatcherService {
         if (e.getType() == null) return null;
         final String type = e.getType().toLowerCase();
         final String detail = e.getDetail() == null ? "" : e.getDetail().toLowerCase();
+        final String comments = e.getComments() == null ? "" : e.getComments().toLowerCase();
 
         if ("goal".equals(type)) {
+            // Penaltı ATIŞLARI (seri) — API'de type "Goal", comments "Penalty
+            // Shootout". Atılan da kaçan da "penalti" hattından gider ki
+            // "Penaltı Atışları" olarak bildirilsin, normal GOL sanılmasın.
+            if (comments.contains("shootout")) return "penalti";
             if (detail.contains("missed")) return "penalti";
             return "gol";
         }

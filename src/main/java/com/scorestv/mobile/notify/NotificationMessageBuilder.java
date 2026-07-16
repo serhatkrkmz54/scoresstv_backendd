@@ -121,7 +121,33 @@ public class NotificationMessageBuilder {
 
     private Localized _penalty(Fixture f, FixtureEvent e) {
         final String d = e.getDetail() == null ? "" : e.getDetail().toLowerCase();
+        final String c = e.getComments() == null ? "" : e.getComments().toLowerCase();
         final String teamTr = _tr(e.getTeam()), teamEn = _en(e.getTeam());
+
+        // PENALTI ATIŞLARI (seri) — event.comments "Penalty Shootout". Maç-içi
+        // penaltıdan KESİN ayrı: skor, maç skoru (goals=0-1) DEĞİL, atış tallysi
+        // (score.penalty) gösterilir; atılan/kaçan ayrılır.
+        if (c.contains("shootout")) {
+            final boolean missed = d.contains("missed");
+            final String hTr = _tr(f.getHomeTeam()), aTr = _tr(f.getAwayTeam());
+            final String hEn = _en(f.getHomeTeam()), aEn = _en(f.getAwayTeam());
+            final Integer ph = f.getScorePenHome(), pa = f.getScorePenAway();
+            final String scoreTr = (ph != null && pa != null)
+                    ? "%s %d-%d %s".formatted(hTr, ph, pa, aTr)
+                    : "%s - %s".formatted(hTr, aTr);
+            final String scoreEn = (ph != null && pa != null)
+                    ? "%s %d-%d %s".formatted(hEn, ph, pa, aEn)
+                    : "%s - %s".formatted(hEn, aEn);
+            final String player = e.getPlayerName() == null ? "" : e.getPlayerName();
+            final String tTr = missed
+                    ? "🥅 Penaltı Atışları — Kaçırdı!" : "🥅 Penaltı Atışları — Gol!";
+            final String tEn = missed
+                    ? "🥅 Penalty Shootout — Missed!" : "🥅 Penalty Shootout — Scored!";
+            final String bTr = player.isBlank() ? scoreTr : "%s  •  %s".formatted(player, scoreTr);
+            final String bEn = player.isBlank() ? scoreEn : "%s  •  %s".formatted(player, scoreEn);
+            return new Localized(tTr, bTr, tEn, bEn);
+        }
+
         final String titleTr, titleEn;
         if (d.contains("missed")) {
             titleTr = "🚫 Penaltı kaçtı! %s".formatted(teamTr);
