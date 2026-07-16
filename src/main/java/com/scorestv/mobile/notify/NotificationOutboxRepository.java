@@ -26,6 +26,17 @@ public interface NotificationOutboxRepository
      * true → yeni gelen aynı slotlu bildirim bir GÜNCELLEME'dir (sessiz gider). */
     boolean existsByCollapseKey(String collapseKey);
 
+    // ---- Admin "Bildirim Gönderimleri" listesi (takip) ----
+
+    /** Son gönderimler (tüm statüler), created_at DESC — admin listesi. */
+    List<NotificationOutbox> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    /** Son gönderimler tek statüde (PENDING/SENT/FAILED), created_at DESC. */
+    List<NotificationOutbox> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
+
+    /** Admin özet rozetleri için statü sayısı. */
+    long countByStatus(String status);
+
     /**
      * Retention temizliği: verilen statüdeki, {@code before}'dan eski satırları
      * siler (tablo sınırsız büyümesin). {@link NotificationOutboxCleanupJob}

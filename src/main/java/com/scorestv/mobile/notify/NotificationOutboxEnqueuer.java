@@ -34,11 +34,16 @@ public class NotificationOutboxEnqueuer {
         this.repository = repository;
     }
 
-    /** Basit gönderim (collapse yok, sesli). */
+    /**
+     * Basit gönderim (iki fazlı DEĞİL, sesli). collapse_key = dedup_key →
+     * her bildirimin sabit bir OS slotu olur; DUAL-SEND'de topic + token
+     * kopyaları cihazda AYNI tag'e düşüp TEK bildirime iner (kickoff/final/
+     * HT/2H/kadro için çift bildirim engellenir).
+     */
     @Transactional
     public void enqueue(String kind, String notifType, Long fixtureId, Long teamId,
                         Localized msg, Map<String, String> data, String dedupKey) {
-        enqueue(kind, notifType, fixtureId, teamId, msg, data, dedupKey, null, false);
+        enqueue(kind, notifType, fixtureId, teamId, msg, data, dedupKey, dedupKey, false);
     }
 
     /**

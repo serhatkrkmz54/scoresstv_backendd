@@ -58,6 +58,11 @@ public class NotificationDispatcherService {
      * (scorestv.notify.enrich-updates) — magaza surumu cikana dek FALSE; boylece
      * eski app kullanicilari fazla titresim yasamaz (davranis bugunkuyle ayni). */
     private final boolean enrichUpdates;
+    /** Topic + token AYNI ANDA gonderilsin mi? (scorestv.notify.dual-send) —
+     * gecis doneminde topic'e abone OLMAYAN (eski build / henuz reconcile
+     * olmamis) cihazlar token yoluyla da yakalanir; collapse_key ile cihazda
+     * TEK bildirime iner. Rollout tamamlaninca FALSE → sadece topic (olcek). */
+    private final boolean dualSend;
 
     public NotificationDispatcherService(
             UserNotificationPrefRepository prefRepository,
@@ -69,9 +74,11 @@ public class NotificationDispatcherService {
             NotificationOutboxEnqueuer enqueuer,
             NotificationOutboxRepository outboxRepository,
             @Value("${scorestv.notify.use-fcm-topics:false}") boolean useFcmTopics,
-            @Value("${scorestv.notify.enrich-updates:false}") boolean enrichUpdates) {
+            @Value("${scorestv.notify.enrich-updates:false}") boolean enrichUpdates,
+            @Value("${scorestv.notify.dual-send:false}") boolean dualSend) {
         this.useFcmTopics = useFcmTopics;
         this.enrichUpdates = enrichUpdates;
+        this.dualSend = dualSend;
         this.prefRepository = prefRepository;
         this.matchSubRepository = matchSubRepository;
         this.fcmMessaging = fcmMessaging;
@@ -265,12 +272,24 @@ public class NotificationDispatcherService {
 
     /**
      * SENKRON outbox gönderimi — {@link NotificationOutboxWorker} çağırır.
-     * Alıcılar tazece çözülür ve cihaz locale'ine göre TR/EN olarak ayrılıp
-     * gönderilir (collapse/silent ile). Sert FCM hatasında EXCEPTION fırlatır
-     * (worker retry). Alıcı yoksa 0 döner.
+     * Sert FCM hatasında EXCEPTION fırlatır (worker retry).
+     *
+     * <p><b>Gönderim modları</b> (flag'lerle):
+     * <ul>
+     *   <li><b>TOKEN</b> (use-fcm-topics=false): DB'deki cihaz token'larına
+     *       multicast; locale'e göre TR/EN. Herkese ulaşır, teslim görünür.</li>
+     *   <li><b>TOPIC</b> (use-fcm-topics=true, dual-send=false): FCM condition'a
+     *       tek gönderim; fan-out'u Google yapar (ölçek). Dil {@code lang_tr}/
+     *       {@code lang_en} topic'iyle ayrılır.</li>
+     *   <li><b>DUAL</b> (ikisi de açık): topic + token birlikte; geçiş döneminde
+     *       abone olmayan cihazlar da yakalanır, collapse_key cihazda tek
+     *       bildirime indirir.</li>
+     * </ul>
+     *
+     * @return gönderim sonucu (mod + token alıcı + teslim sayısı) — admin takip.
      */
     @Transactional(readOnly = true)
-    public int sendOutboxRow(Long fixtureId, Long teamId, String notifType,
+    public SendResult sendOutboxRow(Long fixtureId, Long teamId, String notifType,
                              String titleTr, String bodyTr, String titleEn, String bodyEn,
                              Map<String, String> data, String collapseKey, boolean silent) {
         if (!fcmMessaging.isEnabled()) {
@@ -287,8 +306,15 @@ public class NotificationDispatcherService {
         final String _snd = _iosSoundFor(notifType);
         if (_ch != null) d.put("androidChannel", _ch);
         if (_snd != null) d.put("iosSound", _snd);
+        // Foreground local-notif'in aynı slotu (tag) kullanabilmesi için
+        // collapse_key'i data'ya da koy → DUAL-SEND'de foreground kopyaları da
+        // cihazda tek bildirime iner. (Arka planda mesaj tag'i zaten set edilir.)
+        if (collapseKey != null && !collapseKey.isBlank()) {
+            d.putIfAbsent("collapseKey", collapseKey);
+        }
 
-        // ---- FCM Topics yolu (flag ACIK) — locale ayrimi topic'te yok, TR gonderilir.
+        // ---- TOPIC yolu (flag ACIK) — dil ayrimi lang_tr/lang_en ile.
+        boolean topicSent = false;
         if (useFcmTopics) {
             final String suffix = FcmTopics.suffixFor(notifType);
             final List<String> topics = new ArrayList<>();
@@ -306,13 +332,24 @@ public class NotificationDispatcherService {
                 }
             }
             topics.add(FcmTopics.favoriteFixture(fixtureId));
-            if (topics.isEmpty()) return 0;
-            fcmMessaging.sendToConditionOrThrow(
-                    FcmTopics.orCondition(topics), titleTr, bodyTr, d, collapseKey, silent);
-            return 1;
+            if (!topics.isEmpty()) {
+                final String orCond = FcmTopics.orCondition(topics);
+                // TR ve EN alicilar ayri condition (dil topic'iyle) → dogru dil.
+                fcmMessaging.sendToConditionOrThrow(
+                        FcmTopics.andLang(orCond, FcmTopics.lang("tr")),
+                        titleTr, bodyTr, d, collapseKey, silent);
+                fcmMessaging.sendToConditionOrThrow(
+                        FcmTopics.andLang(orCond, FcmTopics.lang("en")),
+                        enTitle, enBody, d, collapseKey, silent);
+                topicSent = true;
+            }
+            // dual-send KAPALI → sadece topic (ölçek). Aksi halde token'a devam.
+            if (!dualSend) {
+                return new SendResult(topicSent ? "TOPIC" : "NONE", 0, 0);
+            }
         }
 
-        // ---- Token-multicast yolu (varsayilan) — locale'e gore TR/EN ayrimi.
+        // ---- TOKEN yolu (varsayilan VEYA dual-send) — locale'e gore TR/EN.
         final Set<String> trTokens = new LinkedHashSet<>();
         final Set<String> enTokens = new LinkedHashSet<>();
         if (teamId != null) {
@@ -342,7 +379,11 @@ public class NotificationDispatcherService {
         }
         // Ayni cihaz iki listede olmasin (locale tekildir ama garanti icin).
         enTokens.removeAll(trTokens);
-        if (trTokens.isEmpty() && enTokens.isEmpty()) return 0;
+        final int recipients = trTokens.size() + enTokens.size();
+        final String mode = useFcmTopics ? "DUAL" : "TOKEN";
+        if (recipients == 0) {
+            return new SendResult(topicSent ? "TOPIC" : mode, 0, 0);
+        }
 
         int sent = 0;
         if (!trTokens.isEmpty()) {
@@ -353,10 +394,20 @@ public class NotificationDispatcherService {
             sent += fcmMessaging.sendMulticastOrThrow(
                     List.copyOf(enTokens), enTitle, enBody, d, collapseKey, silent);
         }
-        log.info("FCM outbox dispatch: fixtureId={} type={} tr={} en={} gonderildi={} collapse={} silent={}",
-                fixtureId, notifType, trTokens.size(), enTokens.size(), sent, collapseKey, silent);
-        return sent;
+        log.info("FCM outbox dispatch: fixtureId={} type={} mode={} tr={} en={} teslim={} collapse={} silent={}",
+                fixtureId, notifType, mode, trTokens.size(), enTokens.size(), sent, collapseKey, silent);
+        return new SendResult(mode, recipients, sent);
     }
+
+    /**
+     * Gönderim sonucu — admin panelde teslim takibi için.
+     *
+     * @param mode       "TOKEN" | "TOPIC" | "DUAL" | "NONE"
+     * @param recipients token yolunda hedeflenen cihaz sayısı (topic fan-out
+     *                   sayısı FCM'de görünmez → 0)
+     * @param delivered  token yolunda FCM'in başarılı bildirdiği sayı
+     */
+    public record SendResult(String mode, int recipients, int delivered) {}
 
     /** Cihazı locale'ine göre TR ya da EN token listesine ekle (tr* → TR, diğer → EN). */
     private void _addByLocale(MobileDeviceToken token, Set<String> tr, Set<String> en) {

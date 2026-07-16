@@ -70,4 +70,25 @@ public final class FcmTopics {
                 .map(t -> "'" + t + "' in topics")
                 .collect(Collectors.joining(" || "));
     }
+
+    /**
+     * Dil topic'i: {@code lang_tr} / {@code lang_en}. Cihaz aktif diline abone
+     * olur; gönderim dile göre ayrı condition'la yapılır (topic yolunda TR/EN).
+     * Kod boş/null → "en" (varsayılan global sürüm).
+     */
+    public static String lang(String code) {
+        final String c = (code != null && code.toLowerCase().startsWith("tr")) ? "tr" : "en";
+        return "lang_" + c;
+    }
+
+    /**
+     * OR condition'ını bir dil topic'iyle AND'ler:
+     * {@code ('t549_gol' in topics || 'fix1' in topics) && 'lang_tr' in topics}.
+     * Böylece topic yolunda da alıcı diline göre TR/EN metin gönderilir.
+     * Toplam topic sayısı ≤5 olmalı (FCM condition limiti) — OR'da en çok 3
+     * (2 takım + fav) + 1 dil = 4, sınır içinde.
+     */
+    public static String andLang(String orCondition, String langTopic) {
+        return "(" + orCondition + ") && '" + langTopic + "' in topics";
+    }
 }

@@ -76,20 +76,31 @@ public class NotificationOutboxWorker {
 
     /** Tek satırı işler — her durumda repo'ya kendi kaydını yazar (idempotent). */
     private void processOne(NotificationOutbox row) {
-        // Stale → gönderme, FAILED işaretle.
+        // Stale → gönderme, FAILED işaretle. Bu bir SESSİZ KAYIP (bildirim hiç
+        // gitmedi); WARN'la görünür yap ki alarm/log takibinde fark edilsin.
+        // Ayrıca admin "Bildirim Takip" panelinde FAILED olarak listelenir.
         if (row.getCreatedAt() != null
                 && Duration.between(row.getCreatedAt(), Instant.now()).compareTo(EXPIRE) > 0) {
             row.setStatus(NotificationOutbox.STATUS_FAILED);
             row.setLastError("expired (>" + EXPIRE.toMinutes() + "dk bekledi)");
             repository.save(row);
+            log.warn("Outbox EXPIRE — bildirim gonderilmeden dustu (kayip) id={} kind={} "
+                    + "fixtureId={} yas={}dk attempts={}", row.getId(), row.getKind(),
+                    row.getFixtureId(),
+                    Duration.between(row.getCreatedAt(), Instant.now()).toMinutes(),
+                    row.getAttempts());
             return;
         }
         try {
-            dispatcher.sendOutboxRow(
+            NotificationDispatcherService.SendResult result = dispatcher.sendOutboxRow(
                     row.getFixtureId(), row.getTeamId(), row.getNotifType(),
                     row.getTitle(), row.getBody(), row.getTitleEn(), row.getBodyEn(),
                     parseData(row.getDataJson()), row.getCollapseKey(), row.isSilent());
             row.setStatus(NotificationOutbox.STATUS_SENT);
+            row.setSendMode(result.mode());
+            row.setRecipients(result.recipients());
+            row.setDeliveredCount(result.delivered());
+            row.setSentAt(Instant.now());
             repository.save(row);
         } catch (Exception ex) {
             row.setAttempts(row.getAttempts() + 1);

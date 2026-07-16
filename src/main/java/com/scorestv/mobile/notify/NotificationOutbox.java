@@ -102,6 +102,22 @@ public class NotificationOutbox {
     @Column(name = "last_error", length = 500)
     private String lastError;
 
+    /** Gönderim yolu: TOKEN | TOPIC | DUAL | NONE (admin takip). */
+    @Column(name = "send_mode", length = 12)
+    private String sendMode;
+
+    /** Token yolunda hedeflenen cihaz sayısı (topic fan-out görünmez → 0/null). */
+    @Column(name = "recipients")
+    private Integer recipients;
+
+    /** FCM'in başarılı bildirdiği teslim sayısı (token yolu). */
+    @Column(name = "delivered_count")
+    private Integer deliveredCount;
+
+    /** Başarılı gönderim anı (SENT olduğunda set edilir). */
+    @Column(name = "sent_at")
+    private Instant sentAt;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private Instant createdAt;

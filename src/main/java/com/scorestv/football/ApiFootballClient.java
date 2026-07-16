@@ -143,10 +143,10 @@ public class ApiFootballClient {
         long liveIntervalMs = Math.max(1L, 1000L / liveTokensPerSecond);
         long lazyIntervalMs = Math.max(1L, 1000L / lazyTokensPerSecond);
         bucketRefiller.scheduleAtFixedRate(
-                () -> refillSingle(liveBucket, liveTokensPerSecond),
+                () -> refillSingle(liveBucket, liveTokensPerSecond, false),
                 liveIntervalMs, liveIntervalMs, TimeUnit.MILLISECONDS);
         bucketRefiller.scheduleAtFixedRate(
-                () -> refillSingle(lazyBucket, lazyTokensPerSecond),
+                () -> refillSingle(lazyBucket, lazyTokensPerSecond, true),
                 lazyIntervalMs, lazyIntervalMs, TimeUnit.MILLISECONDS);
 
         if (keyConfigured) {
@@ -209,8 +209,14 @@ public class ApiFootballClient {
         // 429 sonrasi global cooldown aktifse istegi HEMEN reddet — agi hic
         // dokunma. Boylece "429 aldiktan sonra hammer'lama → IP/key blok"
         // riski engellenir (api-football ratelimit dokumantasyonu).
+        //
+        // ISTISNA: LIVE oncelikli istekler (canli skor pollingi, ~1 istek/15sn)
+        // cooldown'dan MUAF. Cooldown'i tetikleyen neredeyse her zaman arka plan
+        // LAZY sync burst'udur; canli pollingi de dondurmak tum mac olaylarinin
+        // (gol/kart/basladi/bitti) bildirimini cooldown boyunca geciktiriyordu.
+        // Canli poll cok ucuz oldugu icin muaf tutmak rate-limit ban'ini uzatmaz.
         long cooldownMs = quotaTracker.cooldownRemainingMillis();
-        if (cooldownMs > 0) {
+        if (cooldownMs > 0 && priority != RequestPriority.LIVE) {
             throw ApiFootballException.quotaExceeded(
                     "Futbol veri saglayicisi rate limit cooldown aktif ("
                             + cooldownMs + " ms kaldi).");
@@ -284,33 +290,28 @@ public class ApiFootballClient {
     }
 
     /**
-     * Token-basi smooth refill — bir kovaya bir token release eder, ama
-     * sadece kapasite altinda ise. Dolu kovada no-op.
-     *
-     * <p>Saniye-basi tek refill yerine her 1000/N ms'de 1 token vermek API'nin
-     * saniye-burst guard'ini engeller: 8 paralel istek yerine her 125ms'de
-     * 1 istek goruyor. Dakika kotasi yine N×60 olarak korunur.
-     */
-    /**
      * Cooldown'a gir: global (Redis) cooldown'ı başlat, LOKAL cooldown penceresini
-     * ayarla ve token bucket'ları BOŞALT. Boşaltma + cooldown boyunca refill'i
-     * duraklatma birlikte, cooldown bitiminde ANİ boşalmayı engeller — kova 0'dan
-     * nazikçe ramp eder, yeni 429 spirali kurulamaz.
+     * ayarla ve LAZY token bucket'ını BOŞALT. Boşaltma + cooldown boyunca LAZY
+     * refill'i duraklatma birlikte, cooldown bitiminde ANİ boşalmayı engeller —
+     * LAZY kova 0'dan nazikçe ramp eder, yeni 429 spirali kurulamaz.
+     *
+     * <p>LIVE kova boşaltılmaz ve refill'i durmaz: canlı skor pollingi cooldown
+     * boyunca kesintisiz akmaya devam eder (bkz. {@link #get}'teki LIVE istisnası).
      */
     private void _enterCooldown(Duration duration) {
         quotaTracker.startCooldown(duration);
         if (duration != null && !duration.isNegative() && !duration.isZero()) {
             localCooldownUntilMs = System.currentTimeMillis() + duration.toMillis();
         }
-        liveBucket.drainPermits();
         lazyBucket.drainPermits();
     }
 
-    private void refillSingle(Semaphore bucket, int maxCapacity) {
-        // Cooldown penceresinde DOLDURMA — aksi halde cooldown bitince dolu kova
-        // (LIVE+LAZY) bir anda boşalıp yeni 429'u tetikler (thundering herd → spiral).
+    private void refillSingle(Semaphore bucket, int maxCapacity, boolean honorCooldown) {
+        // LAZY kova: cooldown penceresinde DOLDURMA — aksi halde cooldown bitince
+        // dolu kova bir anda boşalıp yeni 429'u tetikler (thundering herd → spiral).
         // Cooldown bitince kova 0'dan başlar, her tick 1 token ile nazikçe ramp eder.
-        if (System.currentTimeMillis() < localCooldownUntilMs) {
+        // LIVE kova (honorCooldown=false): cooldown'da bile dolar → canlı poll akar.
+        if (honorCooldown && System.currentTimeMillis() < localCooldownUntilMs) {
             return;
         }
         if (bucket.availablePermits() < maxCapacity) {

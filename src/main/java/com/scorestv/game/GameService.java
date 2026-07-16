@@ -65,8 +65,12 @@ public class GameService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    /** Tek yarışma detayı. DRAFT (henüz yayınlanmamış) yarışmalar herkese açık
+     * uçtan gizlenir (ID tahminiyle önizleme sızıntısını önler) → 404. */
     public CompetitionView getCompetition(Long id, Long userId) {
         final GameCompetition comp = competitionRepo.findById(id)
+                .filter(c -> c.getStatus() != GameStatus.DRAFT)
                 .orElseThrow(() -> ApiException.notFound("Yarışma bulunamadı."));
         return toView(comp, userId);
     }

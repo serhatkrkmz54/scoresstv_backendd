@@ -65,7 +65,8 @@ public class FixtureNotifyGate {
 
     /**
      * "İlk yarı bitti" (HT) — claim flag YOK; outbox {@code dedup_key="HT:fixture"}
-     * tek bildirim sağlar (outbox satırları silinmez → kalıcı exactly-once).
+     * tek bildirim sağlar. Dedup, maçın birkaç saatlik ömrü boyunca yeterli;
+     * outbox temizlik job'ı satırları çok sonra (SENT 3g / FAILED 14g) siler.
      */
     @Transactional
     public void enqueueHalftime(Long fixtureId) {
