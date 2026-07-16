@@ -50,7 +50,7 @@ public class GameAdminController {
 
     @GetMapping("/competitions/{id}")
     public CompetitionView detail(@PathVariable Long id) {
-        return gameService.getCompetition(id, null);
+        return gameService.getCompetitionForAdmin(id);
     }
 
     @PostMapping("/competitions/{id}/duels")

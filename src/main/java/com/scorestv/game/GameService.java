@@ -75,6 +75,13 @@ public class GameService {
         return toView(comp, userId);
     }
 
+    /** Admin görünümü — DRAFT dahil her durumdaki yarışmayı getirir (panel detay). */
+    public CompetitionView getCompetitionForAdmin(Long id) {
+        final GameCompetition comp = competitionRepo.findById(id)
+                .orElseThrow(() -> ApiException.notFound("Yarışma bulunamadı."));
+        return toView(comp, null);
+    }
+
     private CompetitionView toView(GameCompetition comp, Long userId) {
         final List<GameDuel> duels = duelRepo.findByCompetitionIdOrderBySortOrderAsc(comp.getId());
 
@@ -110,6 +117,7 @@ public class GameService {
                 .toList();
 
         return new CompetitionView(comp.getId(), comp.getScope(), comp.getTitle(),
+                comp.getTitleEn(),
                 comp.getStatus(), comp.getStartAt(), comp.getEndAt(), comp.getLockAt(),
                 locked, duelViews);
     }

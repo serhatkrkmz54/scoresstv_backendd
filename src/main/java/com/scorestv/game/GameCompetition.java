@@ -25,6 +25,9 @@ public class GameCompetition extends BaseEntity {
     @Column(nullable = false, length = 160)
     private String title;
 
+    @Column(name = "title_en", length = 160)
+    private String titleEn;
+
     @Column(nullable = false, length = 16)
     private String sport = "FOOTBALL";
 

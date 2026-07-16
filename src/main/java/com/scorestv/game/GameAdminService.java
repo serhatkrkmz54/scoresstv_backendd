@@ -51,6 +51,7 @@ public class GameAdminService {
         final GameCompetition c = new GameCompetition();
         c.setScope(req.scope());
         c.setTitle(req.title());
+        c.setTitleEn(req.titleEn());
         c.setSeason(req.season());
         c.setLeagueId(req.leagueId());
         c.setStartAt(req.startAt());

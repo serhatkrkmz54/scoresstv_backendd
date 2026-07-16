@@ -35,6 +35,7 @@ public final class GameDtos {
             Long id,
             GameScope scope,
             String title,
+            String titleEn,
             GameStatus status,
             Instant startAt,
             Instant endAt,
@@ -63,6 +64,7 @@ public final class GameDtos {
     public record CreateCompetitionRequest(
             @NotNull GameScope scope,
             @NotNull String title,
+            String titleEn,
             Integer season,
             Long leagueId,
             @NotNull Instant startAt,
