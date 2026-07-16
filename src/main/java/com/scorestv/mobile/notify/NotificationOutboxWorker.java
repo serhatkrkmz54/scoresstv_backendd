@@ -3,6 +3,7 @@ package com.scorestv.mobile.notify;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scorestv.mobile.fcm.FcmMessagingService;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -12,8 +13,13 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Bildirim OUTBOX worker'ı — GARANTİLİ teslim.
@@ -37,18 +43,35 @@ public class NotificationOutboxWorker {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationOutboxWorker.class);
 
-    private static final int BATCH = 50;
+    private static final int BATCH = 100;
     private static final int MAX_ATTEMPTS = 6;
     private static final int MAX_ERR_LEN = 500;
+    /** Gönderim eşzamanlılığı (FCM + alıcı sorgusu I/O-bound). */
+    private static final int SEND_CONCURRENCY = 8;
     /** Bu kadar eski PENDING satır artık gönderilmez (geç bildirim olmasın). */
     private static final Duration EXPIRE = Duration.ofMinutes(20);
 
     /** Basit JSON→Map için yeterli; Spring bean'ine bağımlılık yok. */
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final AtomicInteger SEND_N = new AtomicInteger();
 
     private final NotificationOutboxRepository repository;
     private final NotificationDispatcherService dispatcher;
     private final FcmMessagingService fcm;
+
+    /**
+     * Gönderim havuzu — bir tur içindeki satırları PARALEL işler. Önceden seri
+     * for-loop vardı; yoğun anda (çok maçta gol/kart) 50+ satırın her biri
+     * alıcı sorgusu + FCM (ağ) beklediği için tur uzuyor, satırlar birikip
+     * 20dk EXPIRE ile SESSİZCE düşüyordu. Sınırlı eşzamanlılık ile drenaj hızı
+     * ~{@value #SEND_CONCURRENCY}× artar. Daemon thread'ler.
+     */
+    private final ExecutorService sendPool =
+            Executors.newFixedThreadPool(SEND_CONCURRENCY, r -> {
+                Thread t = new Thread(r, "stv-notif-send-" + SEND_N.incrementAndGet());
+                t.setDaemon(true);
+                return t;
+            });
 
     public NotificationOutboxWorker(NotificationOutboxRepository repository,
                                     NotificationDispatcherService dispatcher,
@@ -56,6 +79,11 @@ public class NotificationOutboxWorker {
         this.repository = repository;
         this.dispatcher = dispatcher;
         this.fcm = fcm;
+    }
+
+    @PreDestroy
+    void shutdownSendPool() {
+        sendPool.shutdown();
     }
 
     @Scheduled(fixedDelayString = "${scorestv.notify.outbox-interval-ms:5000}")
@@ -69,8 +97,18 @@ public class NotificationOutboxWorker {
                         NotificationOutbox.STATUS_PENDING, Instant.now(),
                         PageRequest.of(0, BATCH));
         if (due.isEmpty()) return;
+        // Satırları PARALEL işle (I/O-bound); turun sonunda hepsini bekle —
+        // böylece ShedLock kilidi işlem boyunca tutulur ve fixedDelay aralığı
+        // önceki tur bitmeden yenisini başlatmaz.
+        final List<CompletableFuture<Void>> tasks = new ArrayList<>(due.size());
         for (NotificationOutbox row : due) {
-            processOne(row);
+            tasks.add(CompletableFuture.runAsync(() -> processOne(row), sendPool));
+        }
+        try {
+            CompletableFuture.allOf(tasks.toArray(new CompletableFuture[0])).join();
+        } catch (Exception ex) {
+            // processOne kendi hatalarını yutar; buraya normalde gelinmez.
+            log.warn("Outbox paralel tur hatası: {}", ex.getMessage());
         }
     }
 

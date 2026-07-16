@@ -46,6 +46,9 @@ public class SyncRateLimiter {
 
     private final FootballProperties properties;
     private final Map<SyncType, Map<Long, Instant>> lastSync = new EnumMap<>(SyncType.class);
+    /** Gol sonrası EVENTS hızlandırma bitiş anı (fixtureId → until). Boost aktifken
+     *  o maçın olay senkronu non-covered çarpanını bypass eder → golcü adı hızlı gelir. */
+    private final Map<Long, Instant> eventsBoostUntil = new ConcurrentHashMap<>();
 
     public SyncRateLimiter(FootballProperties properties) {
         this.properties = properties;
@@ -88,6 +91,23 @@ public class SyncRateLimiter {
     }
 
     /**
+     * Gol saptandığında çağrılır — o maçın EVENTS senkronunu belirtilen süre
+     * boyunca hızlandırır (non-covered çarpanını bypass eder, covered gibi
+     * ~15sn cadence). Golcü adının (faz-2 sessiz güncelleme) 60sn yerine ~15sn'de
+     * düşmesini sağlar; süre bitince normale döner (kota korunur).
+     */
+    public void boostEvents(Long fixtureId, Duration window) {
+        if (fixtureId == null || window == null) return;
+        eventsBoostUntil.put(fixtureId, Instant.now().plus(window));
+    }
+
+    /** Bu maç şu an gol-sonrası EVENTS boost penceresinde mi? */
+    private boolean isEventsBoosted(Long fixtureId) {
+        Instant until = eventsBoostUntil.get(fixtureId);
+        return until != null && Instant.now().isBefore(until);
+    }
+
+    /**
      * Artık canlı olmayan maçların kayıtlarını temizler (her tick'in sonunda
      * çağrılması önerilir). Aksi halde harita zamanla büyür.
      */
@@ -95,6 +115,7 @@ public class SyncRateLimiter {
         for (Map<Long, Instant> typeMap : lastSync.values()) {
             typeMap.keySet().retainAll(currentLiveFixtureIds);
         }
+        eventsBoostUntil.keySet().retainAll(currentLiveFixtureIds);
     }
 
     /**
@@ -103,6 +124,11 @@ public class SyncRateLimiter {
      */
     private long effectiveIntervalSeconds(SyncType type, Fixture fixture) {
         long baseline = baseIntervalSeconds(type);
+        // Gol sonrası EVENTS boost: o maç geçici olarak covered gibi (çarpansız)
+        // yoklanır → golcü adı ~15sn'de yakalanır, non-covered'da 60sn beklenmez.
+        if (type == SyncType.EVENTS && isEventsBoosted(fixture.getId())) {
+            return baseline;
+        }
         boolean covered = fixture.getLeague() != null && fixture.getLeague().isCovered();
         if (covered) {
             return baseline;

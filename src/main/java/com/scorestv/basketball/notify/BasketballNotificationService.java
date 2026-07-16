@@ -56,7 +56,7 @@ public class BasketballNotificationService {
     }
 
     /** NS→canlı: maç başladı. */
-    @Async
+    @Async("notifyExecutor")
     @Transactional(readOnly = true)
     public void dispatchStart(Long gameId, Long homeTeamId, Long awayTeamId,
                               String home, String away) {
@@ -67,7 +67,7 @@ public class BasketballNotificationService {
     }
 
     /** Çeyrek bitti — o ana kadarki toplam skorla birlikte. */
-    @Async
+    @Async("notifyExecutor")
     @Transactional(readOnly = true)
     public void dispatchPeriodEnd(Long gameId, Long homeTeamId, Long awayTeamId,
                                   String home, String away,
@@ -81,7 +81,7 @@ public class BasketballNotificationService {
     }
 
     /** →FT/AOT: maç bitti (final skor). */
-    @Async
+    @Async("notifyExecutor")
     @Transactional(readOnly = true)
     public void dispatchFinal(Long gameId, Long homeTeamId, Long awayTeamId,
                               String home, String away,

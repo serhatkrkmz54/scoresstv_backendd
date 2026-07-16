@@ -268,6 +268,11 @@ public class LiveTickerService {
                 log.warn("FCM skor-gol dispatch hata fixtureId={}: {}",
                         id, ex.getMessage());
             }
+            // Gol sonrası: bu maçın EVENTS senkronunu ~90sn HIZLANDIR (non-covered
+            // 60sn çarpanını bypass et). API golcü adını gecikmeli yazdığı için,
+            // hızlı yoklamayla golcü adı (faz-2 sessiz güncelleme) ~15sn'de düşer,
+            // ~2 dk sonra değil. Süre bitince normale döner (kota korunur).
+            rateLimiter.boostEvents(id, Duration.ofSeconds(90));
             // Batch modu açıksa per-fixture detay çağrılarını ATLA — canlı
             // detay artık LiveDetailBatchJob'un tek /fixtures?ids= çağrısıyla
             // gelir (18'lik burst → 0; hızlı gol FCM'i yukarıda zaten gitti).

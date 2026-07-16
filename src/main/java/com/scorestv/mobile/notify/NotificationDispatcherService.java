@@ -132,7 +132,7 @@ public class NotificationDispatcherService {
     // EVENT (gol faz-2 / kart / penalti) — FixtureEventsLiveProcessor'dan
     // ============================================================
 
-    @Async
+    @Async("notifyExecutor")
     @Transactional
     public void dispatchEvent(Fixture fixtureArg, FixtureEvent eventArg) {
         if (!fcmMessaging.isEnabled()) return;
@@ -214,7 +214,7 @@ public class NotificationDispatcherService {
     // GOL faz-1 — LiveTickerService SKOR degisimini gorunce ANINDA cagrilir.
     // ============================================================
 
-    @Async
+    @Async("notifyExecutor")
     @Transactional
     public void dispatchGoal(Long fixtureId, Long scoringTeamId) {
         if (!fcmMessaging.isEnabled() || fixtureId == null) return;
@@ -255,7 +255,7 @@ public class NotificationDispatcherService {
     // KADRO (İlk 11) — ImminentLineupsJob kadro İLK açıklandığında cagrilir.
     // ============================================================
 
-    @Async
+    @Async("notifyExecutor")
     @Transactional
     public void dispatchLineup(Long fixtureId) {
         if (!fcmMessaging.isEnabled() || fixtureId == null) return;

@@ -419,7 +419,15 @@ public class MatchDetailLazySync {
                             fixtureId, "events")));
         }
 
-        // Hepsinin bitmesini bekle — hatalar tasklar icinde yutuldu
+        // Async (bot/normal açılış) yolunda BEKLEME: çağıran (@Async stv-async)
+        // thread'i hemen serbest bırak — böylece bildirim dispatch'i gibi diğer
+        // @Async işleri bu thread'i 20sn beklemez. Tasklar arka planda
+        // lazyExecutor'da koşar; her modül bitince WebSocket "data-ready" push'u
+        // zaten gider. Yalnız SENKRON (force-refresh) yolda beklenir ki hemen
+        // ardından loadCachedResponse taze veriyi okusun.
+        if (botPath) {
+            return;
+        }
         try {
             CompletableFuture.allOf(tasks.toArray(new CompletableFuture[0]))
                     .get(20, java.util.concurrent.TimeUnit.SECONDS);

@@ -55,7 +55,7 @@ public class VolleyballNotificationService {
     }
 
     /** NS→canli: mac basladi. */
-    @Async
+    @Async("notifyExecutor")
     @Transactional(readOnly = true)
     public void dispatchStart(Long gameId, Long homeTeamId, Long awayTeamId,
                               String home, String away) {
@@ -66,7 +66,7 @@ public class VolleyballNotificationService {
     }
 
     /** Set bitti — o ana kadarki set skoruyla birlikte. */
-    @Async
+    @Async("notifyExecutor")
     @Transactional(readOnly = true)
     public void dispatchSetEnd(Long gameId, Long homeTeamId, Long awayTeamId,
                                String home, String away,
@@ -79,7 +79,7 @@ public class VolleyballNotificationService {
     }
 
     /** →FT/AW: mac bitti (final set skoru). */
-    @Async
+    @Async("notifyExecutor")
     @Transactional(readOnly = true)
     public void dispatchFinal(Long gameId, Long homeTeamId, Long awayTeamId,
                               String home, String away,

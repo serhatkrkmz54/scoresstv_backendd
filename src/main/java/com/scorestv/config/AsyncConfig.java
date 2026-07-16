@@ -45,6 +45,30 @@ public class AsyncConfig implements AsyncConfigurer {
         return ex;
     }
 
+    /**
+     * BİLDİRİM enqueue için AYRI havuz. Gol/kart/kadro dispatch'i ({@code @Async})
+     * eskiden {@link #asyncExecutor()} (stv-async) havuzunu lazy-sync + bot
+     * taramasıyla PAYLAŞIYORDU; o havuz dolunca bildirim enqueue'su gecikiyor ya
+     * da {@code DiscardPolicy} ile DÜŞÜYORDU (bildirim hiç gitmiyordu). Bu havuz
+     * bildirime ayrılmıştır; kuyruk dolarsa {@link ThreadPoolExecutor.CallerRunsPolicy}
+     * ile çağıran (canlı tick) enqueue'yu satır-içi yapar → bildirim ASLA düşmez,
+     * sadece nadiren birkaç ms yavaşlar. İş kısa (DB'ye outbox satırı yazımı);
+     * asıl FCM gönderimi worker'da.
+     */
+    @Bean
+    public ThreadPoolTaskExecutor notifyExecutor() {
+        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+        ex.setCorePoolSize(4);
+        ex.setMaxPoolSize(8);
+        ex.setQueueCapacity(500);
+        ex.setThreadNamePrefix("stv-notify-");
+        ex.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        ex.setWaitForTasksToCompleteOnShutdown(true);
+        ex.setAwaitTerminationSeconds(20);
+        ex.initialize();
+        return ex;
+    }
+
     @Override
     public Executor getAsyncExecutor() {
         return asyncExecutor();
