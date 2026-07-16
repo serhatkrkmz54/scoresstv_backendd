@@ -1,6 +1,7 @@
 package com.scorestv.football.detail;
 
 import com.scorestv.common.ApiException;
+import com.scorestv.football.ApiQuotaTracker;
 import com.scorestv.football.domain.Fixture;
 import com.scorestv.football.domain.FixtureEventRepository;
 import com.scorestv.football.domain.FixtureLineupRepository;
@@ -19,6 +20,7 @@ import com.scorestv.football.sync.H2hSyncService;
 import com.scorestv.football.sync.InjuriesSyncService;
 import com.scorestv.football.sync.PredictionsSyncService;
 import com.scorestv.football.sync.StandingsSyncService;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
@@ -35,6 +37,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Maç detayı endpoint'ine geldiğinde DB'deki yan modülleri (h2h, lineups,
@@ -66,6 +74,12 @@ public class MatchDetailLazySync {
 
     /** Empty-debounce: API boş yanıt verirse bu pencerede tekrar denenmez. */
     private static final Duration EMPTY_RETRY = Duration.ofMinutes(10);
+
+    /** Async (fire-and-forget) yol için maç-bazlı tetik koruması: aynı maç bu
+     *  pencerede zaten tetiklendiyse yeniden fan-out açılmaz. Bot/crawler aynı
+     *  URL'leri döngüde tarayınca commonPool/rate-limiter selini keser. Force-
+     *  refresh senkron yoldan gelir → bu korumadan ETKİLENMEZ. */
+    private static final Duration RECENT_ENSURE_GUARD = Duration.ofSeconds(15);
 
     /** Lineups deneme penceresi: kickoff'a ≤ 3 sa kala veya başlamış maç. */
     private static final Duration LINEUPS_WINDOW_BEFORE_KICKOFF = Duration.ofHours(3);
@@ -135,6 +149,43 @@ public class MatchDetailLazySync {
     private final Map<String, Instant> lastSuccessfulSync = new ConcurrentHashMap<>();
     /** Son deneme zamanı — empty-debounce için (API boş döndüğünde). */
     private final Map<String, Instant> lastAttempt = new ConcurrentHashMap<>();
+    /** Async yol maç-bazlı tetik zamanı — {@link #RECENT_ENSURE_GUARD} için. */
+    private final Map<Long, Instant> recentlyEnsured = new ConcurrentHashMap<>();
+
+    /** 429 cooldown durumu — cooldown aktifken fan-out'u hiç açmamak için. */
+    private final ApiQuotaTracker quotaTracker;
+
+    /**
+     * Lazy sync fan-out'u için ÖZEL sınırlı havuz. Önceden {@code runAsync}
+     * paylaşımlı {@link java.util.concurrent.ForkJoinPool#commonPool()} kullanıyordu;
+     * her task ağ + rate-limiter üstünde bloklandığı için bot yükünde commonPool
+     * açlığa düşüp uygulamanın geri kalanını da yavaşlatıyordu. Kendi havuzu ile
+     * izole; kuyruk dolunca {@link ThreadPoolExecutor.CallerRunsPolicy} çağıran
+     * thread'e geri baskı uygular (deadlock yok — dış {@code stv-async} havuzu
+     * ayrıdır). Daemon thread'ler.
+     */
+    private final ExecutorService lazyExecutor = new ThreadPoolExecutor(
+            8, 24, 60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(256),
+            new ThreadFactory() {
+                private final AtomicInteger n = new AtomicInteger();
+                @Override public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "stv-lazysync-" + n.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                }
+            },
+            new ThreadPoolExecutor.CallerRunsPolicy());
+
+    @PreDestroy
+    void shutdownLazyExecutor() {
+        lazyExecutor.shutdown();
+    }
+
+    /** Fan-out task'ini commonPool yerine özel havuzda çalıştırır. */
+    private CompletableFuture<Void> async(Runnable task) {
+        return CompletableFuture.runAsync(task, lazyExecutor);
+    }
 
     public MatchDetailLazySync(FixtureRepository fixtureRepository,
                                FixtureEventRepository eventRepository,
@@ -153,6 +204,7 @@ public class MatchDetailLazySync {
                                PredictionsSyncService predictionsSyncService,
                                StandingsSyncService standingsSyncService,
                                MatchDataReadyBroadcaster readyBroadcaster,
+                               ApiQuotaTracker quotaTracker,
                                @Lazy MatchDetailLazySync self) {
         this.fixtureRepository = fixtureRepository;
         this.eventRepository = eventRepository;
@@ -171,6 +223,7 @@ public class MatchDetailLazySync {
         this.predictionsSyncService = predictionsSyncService;
         this.standingsSyncService = standingsSyncService;
         this.readyBroadcaster = readyBroadcaster;
+        this.quotaTracker = quotaTracker;
         this.self = self;
     }
 
@@ -194,7 +247,32 @@ public class MatchDetailLazySync {
      */
     @Async
     public void ensureForAsync(Long fixtureId) {
-        ensureFor(fixtureId);
+        // 429 cooldown aktifken alt çağrıların hepsi nasılsa hızlı-hata verir;
+        // fan-out açmak sadece commonPool/log spam üretir → hiç başlama.
+        if (quotaTracker.cooldownRemainingMillis() > 0) {
+            return;
+        }
+        // Aynı maç için kısa süre önce zaten tetiklendiyse tekrar tetikleme —
+        // bot/crawler aynı URL'leri döngüde tarar. Force-refresh bu yoldan
+        // GEÇMEZ (senkron ensureFor çağrılır) → kullanıcı "Yenile"si etkilenmez.
+        Instant now = Instant.now();
+        Instant last = recentlyEnsured.get(fixtureId);
+        if (last != null && last.isAfter(now.minus(RECENT_ENSURE_GUARD))) {
+            return;
+        }
+        if (recentlyEnsured.size() > 20_000) {
+            recentlyEnsured.clear();  // sınırsız büyümeyi önle (bot binlerce maç tarar)
+        }
+        recentlyEnsured.put(fixtureId, now);
+        ensureForInternal(fixtureId, true);
+    }
+
+    /**
+     * Senkron / force-refresh yolu — arşiv-yaş kapısı UYGULANMAZ (kullanıcı
+     * açıkça "Yenile"ye bastı, eski maç bile olsa fresh veri istiyor).
+     */
+    public void ensureFor(Long fixtureId) {
+        ensureForInternal(fixtureId, false);
     }
 
     /**
@@ -211,7 +289,7 @@ public class MatchDetailLazySync {
      * <p>Hatalar her future içinde yutulur (runIfNeeded warn loglar) — bir
      * modülün hatası diğerlerini etkilemez.
      */
-    public void ensureFor(Long fixtureId) {
+    private void ensureForInternal(Long fixtureId, boolean botPath) {
         Fixture fixture = fixtureRepository.findOneWithDetails(fixtureId).orElse(null);
         if (fixture == null) {
             return;  // Maç DB'de yok → getById nasılsa 404 dönecek.
@@ -239,11 +317,21 @@ public class MatchDetailLazySync {
         boolean prematchOrLive = started
                 || (upcoming && timeToKickoff.compareTo(PREMATCH_WINDOW) <= 0);
 
+        // Bot/crawler yolu + eski-bitmiş arşiv maçı → lazy fetch HİÇ açma.
+        // refreshAllowed=false ise (bitmiş + kickoff POST_KICKOFF_REFRESH_WINDOW'dan
+        // eski) zaten yalnız initial-fill kalırdı; bot'un döngüde taradığı binlerce
+        // eski maç için bu initial-fetch'ler rate-limit cooldown + 20sn timeout
+        // selini yaratıyor. DB'de ne varsa o gösterilir; gerçek kullanıcı
+        // pull-to-refresh ile (senkron yol, botPath=false) yine çektirebilir.
+        if (botPath && !refreshAllowed) {
+            return;
+        }
+
         // Tum tasklari paralel topla
         List<CompletableFuture<Void>> tasks = new ArrayList<>();
 
         // 1) H2H — TÜM karşılaşmalar. 12sa tazeleme.
-        tasks.add(CompletableFuture.runAsync(() ->
+        tasks.add(async(() ->
                 runIfNeeded("h2h:" + fixtureId, freshOrNone(FRESH_H2H, refreshAllowed),
                         () -> {
                             List<Fixture> meetings = fixtureRepository.findMeetings(
@@ -257,7 +345,7 @@ public class MatchDetailLazySync {
         // 2) Lineups — başlamış veya kickoff'a ≤3 sa kala
         if (lineupWindow) {
             Duration freshness = (live && refreshAllowed) ? FRESH_LINEUPS_LIVE : null;
-            tasks.add(CompletableFuture.runAsync(() ->
+            tasks.add(async(() ->
                     runIfNeeded("lineups:" + fixtureId, freshness,
                             () -> lineupRepository.findByFixtureId(fixtureId).isEmpty(),
                             () -> lineupsSyncService.sync(fixtureId),
@@ -266,7 +354,7 @@ public class MatchDetailLazySync {
 
         // 3) Injuries — başlamış veya ≤48 sa kala. 4sa tazeleme
         if (prematchOrLive) {
-            tasks.add(CompletableFuture.runAsync(() ->
+            tasks.add(async(() ->
                     runIfNeeded("injuries:" + fixtureId,
                             freshOrNone(FRESH_INJURIES, refreshAllowed),
                             () -> injuryRepository.findByFixtureId(fixtureId).isEmpty(),
@@ -276,7 +364,7 @@ public class MatchDetailLazySync {
 
         // 4) Predictions — başlamış/canlı/upcoming. 2sa tazeleme
         if (prematchOrLive) {
-            tasks.add(CompletableFuture.runAsync(() ->
+            tasks.add(async(() ->
                     runIfNeeded("predictions:" + fixtureId,
                             freshOrNone(FRESH_PREDICTIONS, refreshAllowed),
                             () -> predictionRepository.findByFixtureId(fixtureId)
@@ -292,7 +380,7 @@ public class MatchDetailLazySync {
         if (leagueId != null && season != null) {
             final Long lid = leagueId;
             final Integer s = season;
-            tasks.add(CompletableFuture.runAsync(() ->
+            tasks.add(async(() ->
                     runIfNeeded("standings:" + lid + "-" + s,
                             freshOrNone(FRESH_STANDINGS, refreshAllowed),
                             () -> standingRepository
@@ -304,7 +392,7 @@ public class MatchDetailLazySync {
         // 6) Statistics — başlamış maç. Canlıda 2dk
         if (started) {
             Duration freshness = (live && refreshAllowed) ? FRESH_STATS_LIVE : null;
-            tasks.add(CompletableFuture.runAsync(() ->
+            tasks.add(async(() ->
                     runIfNeeded("statistics:" + fixtureId, freshness,
                             () -> statisticRepository.findByFixtureId(fixtureId).isEmpty(),
                             () -> statisticsSyncService.sync(fixtureId),
@@ -314,7 +402,7 @@ public class MatchDetailLazySync {
         // 7) Player stats — başlamış maç. Canlıda 3dk
         if (started) {
             Duration freshness = (live && refreshAllowed) ? FRESH_PLAYERSTATS_LIVE : null;
-            tasks.add(CompletableFuture.runAsync(() ->
+            tasks.add(async(() ->
                     runIfNeeded("playerStats:" + fixtureId, freshness,
                             () -> playerStatRepository.findByFixtureId(fixtureId).isEmpty(),
                             () -> playerStatsSyncService.sync(fixtureId),
@@ -324,7 +412,7 @@ public class MatchDetailLazySync {
         // 8) Events — başlamış maç. Canlıda 30sn
         if (started) {
             Duration freshness = (live && refreshAllowed) ? Duration.ofSeconds(30) : null;
-            tasks.add(CompletableFuture.runAsync(() ->
+            tasks.add(async(() ->
                     runIfNeeded("events:" + fixtureId, freshness,
                             () -> eventRepository.findByFixtureIdOrderByTimeElapsedAsc(fixtureId).isEmpty(),
                             () -> eventsSyncService.sync(fixtureId),
