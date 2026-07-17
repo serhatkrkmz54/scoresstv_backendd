@@ -9,6 +9,7 @@ import com.scorestv.security.CurrentUser;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -73,6 +74,14 @@ public class GameController {
                      @AuthenticationPrincipal CurrentUser currentUser) {
         if (currentUser == null) throw ApiException.unauthorized("Tahmin için giriş gerekli.");
         service.submitPick(currentUser.id(), duelId, req.pick());
+    }
+
+    /** Tahmini kaldır/iptal et (yarışma açıkken; hiçbir oyuncuya vermemek için). */
+    @DeleteMapping("/duels/{duelId}/pick")
+    public void removePick(@PathVariable Long duelId,
+                           @AuthenticationPrincipal CurrentUser currentUser) {
+        if (currentUser == null) throw ApiException.unauthorized("İptal için giriş gerekli.");
+        service.removePick(currentUser.id(), duelId);
     }
 
     @GetMapping("/wallet")

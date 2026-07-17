@@ -108,6 +108,9 @@ public class SecurityConfig {
                         "/api/v1/game/leaderboard",
                         "/api/v1/game/competitions",
                         "/api/v1/game/competitions/**").permitAll()
+                // AI Analiz isabet karnesi — public okuma.
+                .requestMatchers(org.springframework.http.HttpMethod.GET,
+                        "/api/v1/ai/performance").permitAll()
                 // Haberler — public okuma (yalniz PUBLISHED). Yonetim
                 // /api/v1/admin/news/** ise anyRequest().authenticated() +
                 // controller seviyesinde @PreAuthorize ile korunur (EDITOR/ADMIN).

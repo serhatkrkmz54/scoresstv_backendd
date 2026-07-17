@@ -164,6 +164,30 @@ public class GameService {
         coinService.getOrCreate(userId); // profil satırı garanti
     }
 
+    /**
+     * Kullanıcının bu düellodaki tahminini kaldırır (hiçbir oyuncuya vermemek
+     * için). Yalnız yarışma OPEN + kilit saatinden önce + düello OPEN iken.
+     * İdempotent: tahmin yoksa sessizce geçer. Tahmin sayıları GamePick
+     * satırlarından türetildiği için silme, dağılımı otomatik günceller.
+     */
+    @Transactional
+    public void removePick(Long userId, Long duelId) {
+        final GameDuel duel = duelRepo.findById(duelId)
+                .orElseThrow(() -> ApiException.notFound("Düello bulunamadı."));
+        final GameCompetition comp = competitionRepo.findById(duel.getCompetitionId())
+                .orElseThrow(() -> ApiException.notFound("Yarışma bulunamadı."));
+        if (comp.getStatus() != GameStatus.OPEN) {
+            throw ApiException.badRequest("Yarışma tahmine kapalı.");
+        }
+        if (Instant.now().isAfter(comp.getLockAt())) {
+            throw ApiException.badRequest("Tahmin süresi doldu.");
+        }
+        if (duel.getStatus() != DuelStatus.OPEN) {
+            throw ApiException.badRequest("Bu düello tahmine kapalı.");
+        }
+        pickRepo.findByDuelIdAndUserId(duelId, userId).ifPresent(pickRepo::delete);
+    }
+
     /** Genel (all-time) sıralama. */
     @Transactional(readOnly = true)
     public List<LeaderboardEntry> globalLeaderboard(int limit) {
