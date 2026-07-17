@@ -9,6 +9,8 @@ import com.scorestv.basketball.domain.BasketballTeamRepository;
 import com.scorestv.basketball.notify.BasketballNotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +22,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -46,19 +49,43 @@ public class BasketballSyncService {
     private final BasketballLeagueRepository leagueRepo;
     private final BasketballTeamRepository teamRepo;
     private final BasketballNotificationService notifications;
+    /** Detay Redis cache ("BASKETBALL_GAME_DETAIL") coherency evict'i için. */
+    private final CacheManager cacheManager;
 
     public BasketballSyncService(BasketballApiClient client,
                                  BasketballProperties props,
                                  BasketballGameRepository gameRepo,
                                  BasketballLeagueRepository leagueRepo,
                                  BasketballTeamRepository teamRepo,
-                                 BasketballNotificationService notifications) {
+                                 BasketballNotificationService notifications,
+                                 CacheManager cacheManager) {
         this.client = client;
         this.props = props;
         this.gameRepo = gameRepo;
         this.leagueRepo = leagueRepo;
         this.teamRepo = teamRepo;
         this.notifications = notifications;
+        this.cacheManager = cacheManager;
+    }
+
+    /**
+     * Canlı sync'te skor/status değişen maçın detay Redis cache'ini
+     * ("BASKETBALL_GAME_DETAIL", key = Objects.hash(id, turkish)) her iki dil
+     * varyantı için evict eder. Böylece kullanıcı bir sonraki açılışta / WS
+     * refetch'inde DAİMA taze skoru görür — api'ye gitmeden, "Yenile"siz.
+     * (Futbol FixtureDetailCacheEvictor paritesi; bk key hash-tabanlı olduğu
+     * için 2 varyant yeter, SCAN gerekmez.)
+     */
+    private void evictGameDetailCache(Long gameId) {
+        if (gameId == null) return;
+        try {
+            Cache cache = cacheManager.getCache("BASKETBALL_GAME_DETAIL");
+            if (cache == null) return;
+            cache.evict(Objects.hash(gameId, true));
+            cache.evict(Objects.hash(gameId, false));
+        } catch (RuntimeException ex) {
+            log.debug("Basketbol detay cache evict hata id={}: {}", gameId, ex.getMessage());
+        }
     }
 
     /** Bir takvim gününün maçlarını çek + upsert. Döner: yazılan maç sayısı. */
@@ -141,8 +168,11 @@ public class BasketballSyncService {
         if (startAt == null) return false;
 
         BasketballGame game = gameRepo.findById(dto.id()).orElseGet(BasketballGame::new);
-        // Durum geçişi tespiti için ESKİ statüyü (overwrite'tan önce) yakala.
+        // Durum geçişi + skor değişimi tespiti için ESKİ değerleri (overwrite'tan
+        // önce) yakala — detay cache coherency evict'i için de kullanılır.
         final String oldStatus = game.getStatusShort();
+        final Integer oldHomeTotal = game.getHomeTotal();
+        final Integer oldAwayTotal = game.getAwayTotal();
 
         game.setId(dto.id());
         game.setLeague(league);
@@ -166,6 +196,17 @@ public class BasketballSyncService {
         }
 
         gameRepo.save(game);
+
+        // COHERENCY: canlı sync'te (notify) skor VEYA status değiştiyse detay
+        // Redis cache'ini evict et → kullanıcı taze skoru "Yenile"siz görür.
+        if (notify) {
+            boolean changed = !Objects.equals(oldStatus, game.getStatusShort())
+                    || !Objects.equals(oldHomeTotal, game.getHomeTotal())
+                    || !Objects.equals(oldAwayTotal, game.getAwayTotal());
+            if (changed) {
+                evictGameDetailCache(game.getId());
+            }
+        }
         return true;
     }
 

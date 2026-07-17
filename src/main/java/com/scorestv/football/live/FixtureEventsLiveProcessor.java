@@ -37,17 +37,20 @@ public class FixtureEventsLiveProcessor {
     private final EventBroadcaster broadcaster;
     private final FixtureRepository fixtureRepository;
     private final NotificationDispatcherService notificationDispatcher;
+    private final com.scorestv.football.detail.FixtureDetailCacheEvictor cacheEvictor;
 
     public FixtureEventsLiveProcessor(FixtureEventRepository eventRepository,
                                       FixtureEventsSyncService eventsSyncService,
                                       EventBroadcaster broadcaster,
                                       FixtureRepository fixtureRepository,
-                                      NotificationDispatcherService notificationDispatcher) {
+                                      NotificationDispatcherService notificationDispatcher,
+                                      com.scorestv.football.detail.FixtureDetailCacheEvictor cacheEvictor) {
         this.eventRepository = eventRepository;
         this.eventsSyncService = eventsSyncService;
         this.broadcaster = broadcaster;
         this.fixtureRepository = fixtureRepository;
         this.notificationDispatcher = notificationDispatcher;
+        this.cacheEvictor = cacheEvictor;
     }
 
     /**
@@ -99,6 +102,13 @@ public class FixtureEventsLiveProcessor {
         for (FixtureEvent ev : newEvents) {
             broadcaster.broadcast(fixtureId, ev);
         }
+
+        // Yeni olay(lar) geldi → detay Redis cache'ini evict et. Olaylar zaten
+        // events topic'inde TAM push'lu; bu evict, cache coherency içindir:
+        // maçı O ANDA (WS öncesi) açan ya da refetch eden kullanıcı yeni olayı
+        // bayat cache yerine taze görsün (kart/değişiklik gibi skorsuz olaylarda
+        // LiveTicker evict'i tetiklenmez — burada garanti altına alınır).
+        cacheEvictor.evictAll(fixtureId);
 
         // Push notification dispatch — her yeni event icin FCM gonderim
         // tetiklenir (gol/kart/penalti). Async oldugu icin live ticker'i bekletmez.

@@ -58,9 +58,12 @@ public class MatchDataReadyBroadcaster {
     private static final String TOPIC_FMT = "/topic/fixtures/%d/ready";
 
     private final SimpMessagingTemplate messagingTemplate;
+    private final com.scorestv.football.detail.FixtureDetailCacheEvictor cacheEvictor;
 
-    public MatchDataReadyBroadcaster(SimpMessagingTemplate messagingTemplate) {
+    public MatchDataReadyBroadcaster(SimpMessagingTemplate messagingTemplate,
+                                     com.scorestv.football.detail.FixtureDetailCacheEvictor cacheEvictor) {
         this.messagingTemplate = messagingTemplate;
+        this.cacheEvictor = cacheEvictor;
     }
 
     /**
@@ -77,6 +80,11 @@ public class MatchDataReadyBroadcaster {
         if (fixtureId == null || module == null || module.isBlank()) {
             return;
         }
+        // ÖNEMLİ: sinyalden ÖNCE detay cache'ini evict et. Client bu /ready'yi
+        // alınca detay endpoint'ini yeniden çeker; cache evict edilmezse o refetch
+        // 15sn eski modülü döndürürdü. Böylece "veri geldi → cache tazelendi →
+        // client anında taze görür" akışı tamamlanır (her modül için).
+        cacheEvictor.evictAll(fixtureId);
         try {
             Map<String, Object> payload = Map.of(
                     "fixtureId", fixtureId,

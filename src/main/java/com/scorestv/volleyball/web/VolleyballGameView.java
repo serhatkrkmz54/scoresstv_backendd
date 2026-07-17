@@ -15,6 +15,8 @@ public record VolleyballGameView(
         Long id,
         Instant startAt,
         String season,
+        /** Anasayfa lig basligi alt satiri: "Hafta 3" / "Week 3" ya da asama. */
+        String round,
         Status status,
         League league,
         Team home,
@@ -51,6 +53,7 @@ public record VolleyballGameView(
                 g.getId(),
                 g.getStartAt(),
                 g.getSeason(),
+                round(g.getWeek(), g.getStage(), turkish),
                 new Status(g.getStatusShort(), g.getStatusLong()),
                 new League(l.getId(),
                         pick(l.getNameTr(), l.getName(), turkish),
@@ -72,5 +75,20 @@ public record VolleyballGameView(
     private static String pick(String tr, String base, boolean turkish) {
         if (turkish && tr != null && !tr.isBlank()) return tr;
         return base;
+    }
+
+    /**
+     * Anasayfa lig başlığı alt satırındaki "round" etiketi (futbol paritesi).
+     * week SADECE sayıysa "Hafta N"/"Week N"; değilse week metni olduğu gibi;
+     * week yoksa stage; hiçbiri yoksa null.
+     */
+    private static String round(String week, String stage, boolean turkish) {
+        if (week != null && !week.isBlank()) {
+            String w = week.trim();
+            if (w.matches("\\d+")) return (turkish ? "Hafta " : "Week ") + w;
+            return w;
+        }
+        if (stage != null && !stage.isBlank()) return stage.trim();
+        return null;
     }
 }

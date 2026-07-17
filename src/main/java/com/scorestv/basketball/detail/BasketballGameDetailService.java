@@ -145,7 +145,16 @@ public class BasketballGameDetailService {
 
     @Cacheable(
             value = CACHE_NAME,
-            key = "T(java.util.Objects).hash(#id, #turkish)"
+            key = "T(java.util.Objects).hash(#id, #turkish)",
+            // Yan modüllerin TAMAMI boşsa (ilk açılış, lazy sync henüz bitmemiş)
+            // cevabı CACHE'LEME — aksi halde 30sn TTL boyunca thin kalır ve
+            // modüller geç dolar. Cache'lemeyince sonraki istek tazelenmiş DB'yi
+            // okur; async sync + WS zaten dolduruyor. (futbol af-live paritesi)
+            unless = "#result == null || ("
+                + "#result.teamStats().isEmpty() "
+                + "&& #result.playerStats().isEmpty() "
+                + "&& #result.headToHead().isEmpty() "
+                + "&& #result.standings().isEmpty())"
     )
     @Transactional(readOnly = true)
     public BasketballGameDetailResponse loadCached(Long id, boolean turkish) {

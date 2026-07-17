@@ -111,6 +111,19 @@ public class MatchDetailLazySync {
     private static final Set<String> LIVE_STATUSES =
             Set.of("1H", "HT", "2H", "ET", "BT", "P", "LIVE");
 
+    /**
+     * Senkron (force-refresh) yolda fan-out'un tamamlanması için ÜST SINIR.
+     *
+     * <p>Eskiden 20sn'di; API/rate-limiter tıkandığında (çok canlı maç + çok
+     * detay açılışı) request thread'i 20sn bloklanıyor, mobil {@code receiveTimeout}
+     * (15sn) dolup "internet yavaş/yok" hatası veriyordu ve detay ekranı sonsuz
+     * dönüyordu. Skor zaten fixture entity'de (live ticker) taze; ağır modüller
+     * (h2h/lineup/stats/events) bitince WebSocket "data-ready" push'u ile gelir.
+     * Bu yüzden kısa bir cap yeter: response ≤6sn döner (mobil timeout'un çok
+     * altında), eksik modüller arkada tamamlanıp push'lanır.
+     */
+    private static final int FORCE_SYNC_WAIT_SECONDS = 6;
+
     private final FixtureRepository fixtureRepository;
     private final FixtureEventRepository eventRepository;
     private final FixtureLineupRepository lineupRepository;
@@ -430,9 +443,13 @@ public class MatchDetailLazySync {
         }
         try {
             CompletableFuture.allOf(tasks.toArray(new CompletableFuture[0]))
-                    .get(20, java.util.concurrent.TimeUnit.SECONDS);
+                    .get(FORCE_SYNC_WAIT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
         } catch (java.util.concurrent.TimeoutException ex) {
-            log.warn("Parallel ensureFor 20sn'de tamamlanmadi: fixtureId={}", fixtureId);
+            // Cap'e takildi: yavaş modüller arkada lazyExecutor'da devam eder ve
+            // bitince WebSocket "data-ready" push'u ile gelir. Response yine ≤cap
+            // döner (mobil timeout'u dolmaz). Bu artik NORMAL akış — debug seviyesi.
+            log.debug("ensureFor {}sn cap'inde tamamlanmadi (modüller arkada devam): fixtureId={}",
+                    FORCE_SYNC_WAIT_SECONDS, fixtureId);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         } catch (java.util.concurrent.ExecutionException ignored) {

@@ -98,7 +98,13 @@ public class VolleyballGameDetailService {
 
     @Cacheable(
             value = CACHE_NAME,
-            key = "T(java.util.Objects).hash(#id, #turkish)"
+            key = "T(java.util.Objects).hash(#id, #turkish)",
+            // Yan modüllerin TAMAMI boşsa (ilk açılış, lazy sync bitmemiş) cevabı
+            // CACHE'LEME — thin 30sn takılıp modüller geç dolmasın. (bk paritesi)
+            unless = "#result == null || ("
+                + "#result.teamStats().isEmpty() "
+                + "&& #result.headToHead().isEmpty() "
+                + "&& #result.standings().isEmpty())"
     )
     @Transactional(readOnly = true)
     public VolleyballGameDetailResponse loadCached(Long id, boolean turkish) {

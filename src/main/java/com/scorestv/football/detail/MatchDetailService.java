@@ -57,6 +57,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -66,6 +67,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Tek bir maçın detay yanıtını ({@link MatchDetailResponse}) üretir.
@@ -83,6 +85,19 @@ public class MatchDetailService {
 
     /** Henüz başlamamış maç durumları — bunlar için olay/istatistik vs. yüklenmez. */
     private static final Set<String> NOT_STARTED = Set.of("NS", "TBD");
+
+    /**
+     * Aynı maçı çok kısa aralıklarla defalarca force-refresh açmaya karşı guard.
+     * Bu pencerede ikinci bir force AĞIR senkron fan-out'u ({@code ensureFor})
+     * TEKRAR tetiklemez — cache yine evict edilir ve taze fixture (canlı skor)
+     * okunur, ama 8-modül API seli açılmaz. Cold-start/deep-link açılışları ve
+     * aynı canlı maçı açan birden çok kullanıcı, rate-limiter'ı doldurup
+     * 20sn'lik bloklara yol açmasın diye.
+     */
+    private static final Duration FORCE_SYNC_GUARD = Duration.ofSeconds(8);
+
+    /** Maç bazlı son force-sync anı — {@link #FORCE_SYNC_GUARD} penceresi için. */
+    private final Map<Long, Instant> recentlyForced = new ConcurrentHashMap<>();
 
     /**
      * SEO meta/JSON-LD için kanal çözümünde kullanılan BİRİNCİL PAZAR ülke kodu.
@@ -124,6 +139,7 @@ public class MatchDetailService {
     private final com.scorestv.bilyoner.BilyonerOddsService bilyonerOddsService;
     private final FifaRankLookupService fifaRankLookupService;
     private final LeagueTopPlayerRepository topPlayerRepository;
+    private final FixtureDetailCacheEvictor cacheEvictor;
     /**
      * Kendi proxy referansı — {@code loadCachedResponse}'a self-invocation
      * yerine proxy üstünden çağırmak için. Aksi halde Spring'in @Cacheable
@@ -152,6 +168,7 @@ public class MatchDetailService {
                               com.scorestv.bilyoner.BilyonerOddsService bilyonerOddsService,
                               FifaRankLookupService fifaRankLookupService,
                               LeagueTopPlayerRepository topPlayerRepository,
+                              FixtureDetailCacheEvictor cacheEvictor,
                               @Lazy MatchDetailService self) {
         this.fixtureRepository = fixtureRepository;
         this.eventRepository = eventRepository;
@@ -173,6 +190,7 @@ public class MatchDetailService {
         this.bilyonerOddsService = bilyonerOddsService;
         this.fifaRankLookupService = fifaRankLookupService;
         this.topPlayerRepository = topPlayerRepository;
+        this.cacheEvictor = cacheEvictor;
         this.self = self;
     }
 
@@ -217,12 +235,29 @@ public class MatchDetailService {
     public MatchDetailResponse getById(Long id, String country, boolean turkish,
                                        boolean forceRefresh) {
         if (forceRefresh) {
-            // Stale "henuz gelmedi" cevabini at; debounce'i sifirla
+            // Stale "henuz gelmedi" cevabini HER force'ta at — asagidaki okuma
+            // fixture'in TAZE skorunu (live ticker gunceller) getirsin.
             self.evictDetailCache(id, country, turkish);
-            lazySync.resetForFixture(id);
-            // INLINE — kullanici "Yenile"ye basti, fresh veri istiyor.
-            // 3-4sn bekleyebilir cunku zaten manuel tetikledi.
-            lazySync.ensureFor(id);
+            // Ama AGIR 8-modul fan-out'u ayni maç için kisa pencerede yalniz BIR
+            // kez tetikle. Cold-start/deep-link her acilista force gonderiyor;
+            // ayni canli maci acan cok kullanici da var. Guard olmadan her biri
+            // resetForFixture + ensureFor ile rate-limiter'i doldurup 20sn'lik
+            // bloklara ("internet yavaş/yok") yol açiyordu.
+            Instant now = Instant.now();
+            Instant last = recentlyForced.get(id);
+            if (last == null || last.isBefore(now.minus(FORCE_SYNC_GUARD))) {
+                recentlyForced.put(id, now);
+                if (recentlyForced.size() > 20_000) {
+                    recentlyForced.clear();  // sinirsiz büyümeyi önle
+                }
+                lazySync.resetForFixture(id);
+                // INLINE — kullanici "Yenile"ye basti, fresh veri istiyor.
+                // ensureFor artik ≤6sn cap'li: tikanikta bile response hizli doner,
+                // eksik modüller WebSocket "data-ready" push'u ile arkadan gelir.
+                lazySync.ensureFor(id);
+            }
+            // Guard'a takildiysa: cache zaten evict edildi + fixture taze okunur;
+            // modüller yakinda zaten senkronlanmisti / senkronlaniyor.
         } else {
             // FIRE-AND-FORGET — request thread'i beklemez. Cevap DB'de o
             // anda ne varsa onunla doner; eksik modüller arkada doldurulur.
@@ -274,7 +309,12 @@ public class MatchDetailService {
     public MatchDetailResponse loadCachedResponse(Long id, String country, boolean turkish) {
         Fixture fixture = fixtureRepository.findOneWithDetails(id)
                 .orElseThrow(() -> ApiException.notFound("Maç bulunamadı."));
-        return toResponse(fixture, country, turkish);
+        MatchDetailResponse response = toResponse(fixture, country, turkish);
+        // Bu cevap birazdan af-live cache'ine yazılacak — varyantı index'e ekle
+        // ki canlı ticker skor/status değiştirince bu giriş de anında evict
+        // edilebilsin (cache coherency; country'ye göre çok varyant olabilir).
+        cacheEvictor.recordVariant(id, country, turkish);
+        return response;
     }
 
     /** Geriye uyumluluk — country yoksa "TR" varsayilir. */

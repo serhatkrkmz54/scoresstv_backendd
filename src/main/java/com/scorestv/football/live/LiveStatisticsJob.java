@@ -39,13 +39,16 @@ public class LiveStatisticsJob {
     private final FixtureRepository fixtureRepository;
     private final FixtureStatisticsSyncService statsSyncService;
     private final SyncRateLimiter rateLimiter;
+    private final MatchDataReadyBroadcaster readyBroadcaster;
 
     public LiveStatisticsJob(FixtureRepository fixtureRepository,
                              FixtureStatisticsSyncService statsSyncService,
-                             SyncRateLimiter rateLimiter) {
+                             SyncRateLimiter rateLimiter,
+                             MatchDataReadyBroadcaster readyBroadcaster) {
         this.fixtureRepository = fixtureRepository;
         this.statsSyncService = statsSyncService;
         this.rateLimiter = rateLimiter;
+        this.readyBroadcaster = readyBroadcaster;
     }
 
     @Scheduled(
@@ -71,7 +74,14 @@ public class LiveStatisticsJob {
                 continue;
             }
             try {
-                written += statsSyncService.sync(fixture.getId()).statsWritten();
+                int w = statsSyncService.sync(fixture.getId()).statsWritten();
+                written += w;
+                // Yeni istatistik yazıldıysa açık ekranlara ANINDA haber ver:
+                // /ready → client silent refetch (cache publish() içinde evict
+                // edildiği için TAZE döner). İstatistik sekmesi canlı güncellenir.
+                if (w > 0) {
+                    readyBroadcaster.publish(fixture.getId(), "stats");
+                }
                 rateLimiter.markSynced(SyncRateLimiter.SyncType.STATISTICS, fixture.getId());
                 total++;
             } catch (ApiException ex) {

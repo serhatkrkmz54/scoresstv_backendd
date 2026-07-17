@@ -9,6 +9,8 @@ import com.scorestv.volleyball.domain.VolleyballTeamRepository;
 import com.scorestv.volleyball.notify.VolleyballNotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +20,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -44,19 +47,40 @@ public class VolleyballSyncService {
     private final VolleyballLeagueRepository leagueRepo;
     private final VolleyballTeamRepository teamRepo;
     private final VolleyballNotificationService notifications;
+    /** Detay Redis cache ("VOLLEYBALL_GAME_DETAIL") coherency evict'i için. */
+    private final CacheManager cacheManager;
 
     public VolleyballSyncService(VolleyballApiClient client,
                                  VolleyballProperties props,
                                  VolleyballGameRepository gameRepo,
                                  VolleyballLeagueRepository leagueRepo,
                                  VolleyballTeamRepository teamRepo,
-                                 VolleyballNotificationService notifications) {
+                                 VolleyballNotificationService notifications,
+                                 CacheManager cacheManager) {
         this.client = client;
         this.props = props;
         this.gameRepo = gameRepo;
         this.leagueRepo = leagueRepo;
         this.teamRepo = teamRepo;
         this.notifications = notifications;
+        this.cacheManager = cacheManager;
+    }
+
+    /**
+     * Canlı sync'te skor/status değişen maçın detay Redis cache'ini
+     * ("VOLLEYBALL_GAME_DETAIL", key = Objects.hash(id, turkish)) her iki dil
+     * varyantı için evict eder → kullanıcı taze skoru "Yenile"siz görür.
+     */
+    private void evictGameDetailCache(Long gameId) {
+        if (gameId == null) return;
+        try {
+            Cache cache = cacheManager.getCache("VOLLEYBALL_GAME_DETAIL");
+            if (cache == null) return;
+            cache.evict(Objects.hash(gameId, true));
+            cache.evict(Objects.hash(gameId, false));
+        } catch (RuntimeException ex) {
+            log.debug("Voleybol detay cache evict hata id={}: {}", gameId, ex.getMessage());
+        }
     }
 
     /** Bir takvim gununun maclarini cek + upsert. Doner: yazilan mac sayisi. */
@@ -134,6 +158,8 @@ public class VolleyballSyncService {
 
         VolleyballGame game = gameRepo.findById(dto.id()).orElseGet(VolleyballGame::new);
         final String oldStatus = game.getStatusShort();
+        final Integer oldHomeTotal = game.getHomeTotal();
+        final Integer oldAwayTotal = game.getAwayTotal();
 
         game.setId(dto.id());
         game.setLeague(league);
@@ -153,6 +179,17 @@ public class VolleyballSyncService {
         }
 
         gameRepo.save(game);
+
+        // COHERENCY: canlı sync'te (notify) skor VEYA status değiştiyse detay
+        // Redis cache'ini evict et → kullanıcı taze skoru "Yenile"siz görür.
+        if (notify) {
+            boolean changed = !Objects.equals(oldStatus, game.getStatusShort())
+                    || !Objects.equals(oldHomeTotal, game.getHomeTotal())
+                    || !Objects.equals(oldAwayTotal, game.getAwayTotal());
+            if (changed) {
+                evictGameDetailCache(game.getId());
+            }
+        }
         return true;
     }
 

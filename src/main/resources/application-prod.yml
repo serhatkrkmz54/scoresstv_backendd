@@ -206,8 +206,10 @@ scorestv:
       # Bu bayrak kapaliyken tum @ConditionalOnProperty(live-enabled) bean'leri
       # olusmaz; canli skor/dakika WebSocket'e hic dusmez. Prod'da ACIK olmali.
       live-enabled: ${FOOTBALL_LIVE_ENABLED:true}
-      # API-Football canli yoklama araligi (saniye). 15sn = skor/gol ~15sn'de duser.
-      live-interval-seconds: ${FOOTBALL_LIVE_INTERVAL:15}
+      # API-Football canli yoklama araligi (saniye). 10sn = skor/gol/status
+      # ~10sn'de duser (15->10, ~5sn hizlanma). Tek /fixtures?live=all cagrisi
+      # (6/dk); Custom600 planinda (600 req/dk) ihmal edilebilir.
+      live-interval-seconds: ${FOOTBALL_LIVE_INTERVAL:10}
       # Canli detay batch — tek /fixtures?ids= ile events+stats+players (20 mac/cagri).
       # Per-fixture jobların yerine gecer; kota ~25x duser, 429 spirali biter.
       # ACMAK icin: FOOTBALL_LIVE_BUNDLE=true (env). Once acip logdan dogrula.

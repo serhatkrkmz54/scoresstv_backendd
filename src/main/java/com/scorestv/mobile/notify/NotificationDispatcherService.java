@@ -132,6 +132,14 @@ public class NotificationDispatcherService {
     // EVENT (gol faz-2 / kart / penalti) — FixtureEventsLiveProcessor'dan
     // ============================================================
 
+    /**
+     * Olay bildirimi "bayatlık" eşiği (dakika). Maçın canlı dakikası, olay
+     * dakikasından bu kadar İLERİDEYSE olay geç yüzeye çıkmış demektir (ör. VAR
+     * kararı sonrası 24. dk'da eklenen 2. dk olayı) → push ATILMAZ. Normal
+     * api+poll gecikmesi (~1-3 dk) bu eşiğin altında kalır.
+     */
+    private static final int STALE_EVENT_MINUTES = 6;
+
     @Async("notifyExecutor")
     @Transactional
     public void dispatchEvent(Fixture fixtureArg, FixtureEvent eventArg) {
@@ -144,6 +152,16 @@ public class NotificationDispatcherService {
         final FixtureEvent event = eventArg.getId() != null
                 ? fixtureEventRepository.findById(eventArg.getId()).orElse(eventArg)
                 : eventArg;
+
+        // RECENCY GUARD: olay dakikası maçın MEVCUT canlı dakikasından çok geride
+        // ise (geç yüzeye çıkan eski/ VAR-sonrası olay) push atma — an geçti,
+        // kullanıcıya bayat bildirim gitmesin. elapsed null (canlı değil) ise
+        // guard uygulanmaz; skor değişimi kaynaklı GOL faz-1 zaten dispatchGoal'da.
+        final Integer curMin = fixture.getElapsed();
+        final Integer evMin = event.getTimeElapsed();
+        if (curMin != null && evMin != null && curMin - evMin > STALE_EVENT_MINUTES) {
+            return;
+        }
 
         final String mobileType = _mapEventType(event);
         if (mobileType == null) return;
@@ -256,6 +274,47 @@ public class NotificationDispatcherService {
         _putCollapse(data, collapseKey, false);
         enqueuer.enqueue(NotificationOutbox.KIND_GOAL, "gol", fixtureId,
                 scoringTeamId, msg, data, dedupKey, collapseKey, false);
+    }
+
+    // ============================================================
+    // GOL İPTAL (VAR) — LiveTickerService SKOR DÜŞÜŞÜ görünce cagrilir.
+    // ============================================================
+
+    /**
+     * VAR ile iptal edilen gol bildirimi. İptal edilen golün AYNI collapse
+     * slotunu ({@code _goalCollapse}) kullanır → cihazdaki "⚽ GOL!" kartı bu
+     * "🚫 Gol iptal!" bildirimiyle DEĞİŞİR (ve yeniden uyarır, sessiz değil).
+     *
+     * <p>{@code type=gol} bırakılır: mobil bunu golle aynı kanal/deep-link ile
+     * işler → yeni uygulama sürümü GEREKMEZ. Alıcılar da gol aboneleriyle aynı.
+     *
+     * @param cancelledGoalNo iptal edilen golün takım-içi sıra no'su (skor
+     *                        düşmeden ÖNCEki sayaç) — collapse eşleşmesi için.
+     */
+    @Async("notifyExecutor")
+    @Transactional
+    public void dispatchGoalCancelled(Long fixtureId, Long teamId, int cancelledGoalNo) {
+        if (!fcmMessaging.isEnabled() || fixtureId == null || teamId == null) return;
+        final Fixture fixture =
+                fixtureRepository.findById(fixtureId).orElse(null);
+        if (fixture == null) return;
+        // Penaltı ATIŞLARI sırasında skor "oynaması" gerçek gol/iptal değildir.
+        final String st = fixture.getStatusShort();
+        if ("P".equals(st) || "PEN".equals(st)) return;
+
+        final boolean homeTeam = fixture.getHomeTeam() != null
+                && teamId.equals(fixture.getHomeTeam().getId());
+        // AYNI gol collapse slotu → "GOL!" kartını yerinde günceller.
+        final String collapseKey = _goalCollapse(fixtureId, teamId, cancelledGoalNo);
+        final String dedupKey = String.format("GOALCANCEL:%d:%d:%d",
+                fixtureId, teamId, cancelledGoalNo);
+        final var msg = messageBuilder.goalCancelled(fixture, homeTeam);
+        final Map<String, String> data = new HashMap<>();
+        data.put("type", "gol");
+        data.put("fixtureId", String.valueOf(fixtureId));
+        _putCollapse(data, collapseKey, false); // alert (sessiz değil) — kullanıcı bilsin
+        enqueuer.enqueue(NotificationOutbox.KIND_GOAL, "gol", fixtureId,
+                teamId, msg, data, dedupKey, collapseKey, false);
     }
 
     // ============================================================
@@ -478,7 +537,17 @@ public class NotificationDispatcherService {
             return null;
         }
         if ("var".equals(type)) {
-            if (detail.contains("penalty") || detail.contains("goal")) return "penalti";
+            // İPTAL / GERİ ALMA kararları bildirim ÜRETMEZ: "Goal cancelled",
+            // "Goal Disallowed - offside", "Penalty cancelled" gibi. Bunları eskiden
+            // detail.contains("goal") yakalayıp YANLIŞLIKLA "penaltı" bildiriyordu
+            // (kullanıcı 24. dk'da 2. dk'nın iptal golüne "penaltı" pushu alıyordu).
+            // İptal edilen gol zaten skor geri alınınca ekranda düzelir.
+            if (detail.contains("cancel") || detail.contains("disallow")
+                    || detail.contains("overturn") || detail.contains("no goal")) {
+                return null;
+            }
+            // Yalnız penaltı VERİLDİĞİNDE/onaylandığında bildir.
+            if (detail.contains("penalty")) return "penalti";
             return null;
         }
         return null;

@@ -68,7 +68,11 @@ public class MatchStatusNotifier {
      * @param items o tick'te işlenen API fixture DTO'ları (plain data — thread'ler
      *              arası güvenli)
      */
-    @Async
+    // ÖNEMLİ: notifyExecutor (CallerRunsPolicy) — varsayılan @Async havuzu
+    // lazy-sync/bot ile paylaşımlı + DiscardPolicy olduğundan yük altında
+    // status-geçiş bildirimlerini SESSİZCE düşürüyordu (goller gelir, başladı/
+    // İY/2Y/bitti gelmezdi). notifyExecutor asla düşürmez (gol yoluyla eşit).
+    @Async("notifyExecutor")
     public void notifyStatusTransitions(List<FixtureApiDto> items) {
         if (items == null || items.isEmpty()) return;
         final Instant now = Instant.now();

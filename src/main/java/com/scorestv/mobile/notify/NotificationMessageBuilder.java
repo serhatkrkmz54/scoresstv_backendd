@@ -106,6 +106,30 @@ public class NotificationMessageBuilder {
         return new Localized(titleTr, bodyTr, titleEn, bodyEn);
     }
 
+    /**
+     * VAR ile İPTAL edilen gol bildirimi. Skor düşüşü ({@link
+     * com.scorestv.football.live.LiveTickerService}) tetikler; aynı gol collapse
+     * slotu kullanıldığından cihazdaki "GOL!" kartı bununla değişir.
+     *
+     * @param homeTeam iptal edilen golün ev sahibine mi ait olduğu
+     */
+    public Localized goalCancelled(Fixture f, boolean homeTeam) {
+        final String teamTr = homeTeam ? _tr(f.getHomeTeam()) : _tr(f.getAwayTeam());
+        final String teamEn = homeTeam ? _en(f.getHomeTeam()) : _en(f.getAwayTeam());
+        final String hTr = _tr(f.getHomeTeam()), aTr = _tr(f.getAwayTeam());
+        final String hEn = _en(f.getHomeTeam()), aEn = _en(f.getAwayTeam());
+        final Integer h = f.getHomeGoals(), a = f.getAwayGoals();
+        final String scoreTr = (h != null && a != null)
+                ? "%s %d-%d %s".formatted(hTr, h, a, aTr) : "%s - %s".formatted(hTr, aTr);
+        final String scoreEn = (h != null && a != null)
+                ? "%s %d-%d %s".formatted(hEn, h, a, aEn) : "%s - %s".formatted(hEn, aEn);
+        return new Localized(
+                "🚫 Gol iptal! %s".formatted(teamTr),
+                "VAR sonrası iptal edildi  •  %s".formatted(scoreTr),
+                "🚫 Goal disallowed! %s".formatted(teamEn),
+                "Cancelled after VAR  •  %s".formatted(scoreEn));
+    }
+
     private Localized _redCard(Fixture f, FixtureEvent e) {
         return new Localized(
                 "🟥 Kırmızı kart! %s".formatted(_tr(e.getTeam())),

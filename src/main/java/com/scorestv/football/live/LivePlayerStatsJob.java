@@ -37,13 +37,16 @@ public class LivePlayerStatsJob {
     private final FixtureRepository fixtureRepository;
     private final FixturePlayerStatsSyncService syncService;
     private final SyncRateLimiter rateLimiter;
+    private final MatchDataReadyBroadcaster readyBroadcaster;
 
     public LivePlayerStatsJob(FixtureRepository fixtureRepository,
                               FixturePlayerStatsSyncService syncService,
-                              SyncRateLimiter rateLimiter) {
+                              SyncRateLimiter rateLimiter,
+                              MatchDataReadyBroadcaster readyBroadcaster) {
         this.fixtureRepository = fixtureRepository;
         this.syncService = syncService;
         this.rateLimiter = rateLimiter;
+        this.readyBroadcaster = readyBroadcaster;
     }
 
     @Scheduled(
@@ -68,7 +71,14 @@ public class LivePlayerStatsJob {
                 continue;
             }
             try {
-                written += syncService.sync(fixture.getId()).playersWritten();
+                int w = syncService.sync(fixture.getId()).playersWritten();
+                written += w;
+                // Yeni oyuncu istatistiği yazıldıysa açık ekranlara ANINDA haber
+                // ver: /ready → client silent refetch (cache taze). Oyuncu
+                // reytingleri / MOTM / ScoresTV puanı canlı güncellenir.
+                if (w > 0) {
+                    readyBroadcaster.publish(fixture.getId(), "playerStats");
+                }
                 rateLimiter.markSynced(SyncRateLimiter.SyncType.PLAYER_STATS, fixture.getId());
                 total++;
             } catch (ApiException ex) {

@@ -374,7 +374,9 @@ scorestv:
       # live-interval-seconds saniyede bir API yoklanir ve degisimler
       # WebSocket /topic/fixtures/live/{lang} kanallarina yayilir.
       live-enabled: ${FOOTBALL_LIVE_ENABLED:false}
-      live-interval-seconds: ${FOOTBALL_LIVE_INTERVAL:15}
+      # 15->10sn: skor/gol/status bildirimini ~5sn hizlandirir. /fixtures?live=all
+      # tek cagri (6/dk); Custom600 planinda (600 req/dk) ihmal edilebilir yuk.
+      live-interval-seconds: ${FOOTBALL_LIVE_INTERVAL:10}
       # Canli olay (gol/kart/penalti) yoklama araligi. Kaynak (/fixtures/events)
       # 15sn'de bir tazelenir; golun timeline detayini kaynakla AYNI hiza
       # cektik. Custom600 plani (600 req/dk) rahat tasir. NOT: SyncRateLimiter

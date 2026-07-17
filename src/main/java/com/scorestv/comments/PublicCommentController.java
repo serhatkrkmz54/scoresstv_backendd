@@ -74,6 +74,18 @@ public class PublicCommentController {
         return doList("VOLLEYBALL", gameId, page, size, sort, currentUser);
     }
 
+    /** Bir haberin yorumlari (segment="NEWS", matchId=haber id). Yorum sistemi
+     *  sport-agnostik; "NEWS" serbest string olarak saklanir, maca FK yok. */
+    @GetMapping("/news/{newsId}")
+    public CommentPageResponse listNews(
+            @PathVariable Long newsId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size,
+            @RequestParam(defaultValue = "newest") String sort,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        return doList("NEWS", newsId, page, size, sort, currentUser);
+    }
+
     private CommentPageResponse doList(String sport, Long matchId, int page, int size,
                                        String sort, CurrentUser currentUser) {
         int safePage = Math.max(0, page);
@@ -113,6 +125,16 @@ public class PublicCommentController {
             @Valid @RequestBody CommentCreateRequest req,
             @AuthenticationPrincipal CurrentUser currentUser) {
         return service.create(gameId, "VOLLEYBALL", currentUser.id(), req);
+    }
+
+    /** Yeni haber yorumu (auth gerekli). matchId=haber id, sport="NEWS". */
+    @PostMapping("/news/{newsId}")
+    @ResponseStatus(HttpStatus.CREATED)
+    public CommentView createNews(
+            @PathVariable Long newsId,
+            @Valid @RequestBody CommentCreateRequest req,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        return service.create(newsId, "NEWS", currentUser.id(), req);
     }
 
     /** Yorum sil (sahibi veya admin, auth gerekli). */

@@ -89,6 +89,7 @@ public class LiveTickerService {
     private final SyncRateLimiter rateLimiter;
     private final NotificationDispatcherService notificationDispatcher;
     private final MatchStatusNotifier statusNotifier;
+    private final com.scorestv.football.detail.FixtureDetailCacheEvictor detailCacheEvictor;
 
     public LiveTickerService(ApiFootballClient client,
                              FixtureUpserter upserter,
@@ -99,7 +100,8 @@ public class LiveTickerService {
                              FixturePlayerStatsSyncService playerStatsSyncService,
                              SyncRateLimiter rateLimiter,
                              NotificationDispatcherService notificationDispatcher,
-                             MatchStatusNotifier statusNotifier) {
+                             MatchStatusNotifier statusNotifier,
+                             com.scorestv.football.detail.FixtureDetailCacheEvictor detailCacheEvictor) {
         this.client = client;
         this.upserter = upserter;
         this.fixtureRepository = fixtureRepository;
@@ -110,6 +112,7 @@ public class LiveTickerService {
         this.rateLimiter = rateLimiter;
         this.notificationDispatcher = notificationDispatcher;
         this.statusNotifier = statusNotifier;
+        this.detailCacheEvictor = detailCacheEvictor;
     }
 
     /**
@@ -215,6 +218,10 @@ public class LiveTickerService {
         //    sync'i tetikleriz (gol → oyuncu adıyla mesaj ~15sn'de düşer).
         Set<Long> changedIds = new HashSet<>();
         Set<Long> scoreChangedIds = new HashSet<>();
+        // Skor VEYA status değişen maçlar → detay Redis cache'i evict edilecek.
+        // Dakika (elapsed) değişimi HARİÇ: o WS + lokal sayaçla gelir, cache'i
+        // her tick evict etmeye gerek yok (cache canlı maçta işe yarar kalır).
+        Set<Long> detailEvictIds = new HashSet<>();
         for (FixtureApiDto item : items) {
             if (item.fixture() == null || item.fixture().id() == null) {
                 continue;
@@ -224,8 +231,16 @@ public class LiveTickerService {
             Snapshot previous = before.get(id);
             if (previous == null || !previous.equals(incoming)) {
                 changedIds.add(id);
-                if (previous != null && scoreChanged(previous, incoming)) {
-                    scoreChangedIds.add(id);
+                if (previous != null) {
+                    boolean sc = scoreChanged(previous, incoming);
+                    boolean stc = !Objects.equals(
+                            previous.statusShort(), incoming.statusShort());
+                    if (sc) {
+                        scoreChangedIds.add(id);
+                    }
+                    if (sc || stc) {
+                        detailEvictIds.add(id);
+                    }
                 }
             }
         }
@@ -237,6 +252,17 @@ public class LiveTickerService {
         // 5) Değişenleri lig + takım ilişkileriyle tam yükleyip yay.
         List<Fixture> updated = fixtureRepository.findAllByIdWithDetails(changedIds);
         broadcaster.broadcastAll(updated);
+
+        // 5b) COHERENCY: skor/status değişen maçların detay Redis cache'ini
+        // (af-live → detail-{id}-...) evict et. Böylece kullanıcı bir sonraki
+        // açılışta / WS "data-ready" refetch'inde DAİMA taze skoru görür —
+        // api-football'a hiç gitmeden, "Yenile"ye basmadan. Bu, canlı-veri
+        // cache tutarsızlığının ("skor değişti ama detay eski gösteriyor")
+        // kökten çözümüdür. Ağ/Redis maliyeti düşük: yalnız gerçek değişimde,
+        // dakika tick'lerinde değil.
+        for (Long id : detailEvictIds) {
+            detailCacheEvictor.evictAll(id);
+        }
 
         // 6) Skor değişimi olan maçlar için ANINDA events + stats + player_stats
         //    sync — periyodik joblar beklenmeden gol "(Andrada 25')" oyuncu adıyla,
@@ -262,6 +288,15 @@ public class LiveTickerService {
                     }
                     if (scoringTeamId != null) {
                         notificationDispatcher.dispatchGoal(id, scoringTeamId);
+                    } else if (_decreased(fx.getHomeGoals(), prev.homeGoals())) {
+                        // SKOR DÜŞTÜ → gol iptal (VAR). İptal edilen golün no'su =
+                        // önceki (yüksek) sayaç. Aynı collapse slotuyla cihazdaki
+                        // "GOL!" kartını "Gol iptal!" olarak günceller.
+                        notificationDispatcher.dispatchGoalCancelled(
+                                id, fx.getHomeTeam().getId(), prev.homeGoals());
+                    } else if (_decreased(fx.getAwayGoals(), prev.awayGoals())) {
+                        notificationDispatcher.dispatchGoalCancelled(
+                                id, fx.getAwayTeam().getId(), prev.awayGoals());
                     }
                 }
             } catch (RuntimeException ex) {
@@ -318,6 +353,13 @@ public class LiveTickerService {
         final int n = now == null ? 0 : now;
         final int p = prev == null ? 0 : prev;
         return n > p;
+    }
+
+    /** Skor DÜŞTÜ mü — VAR gol iptali tespiti (now &lt; prev). */
+    private static boolean _decreased(Integer now, Integer prev) {
+        final int n = now == null ? 0 : now;
+        final int p = prev == null ? 0 : prev;
+        return n < p;
     }
 
     /**
