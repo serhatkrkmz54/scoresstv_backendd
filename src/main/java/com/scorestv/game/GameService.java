@@ -212,7 +212,18 @@ public class GameService {
                 .toList();
         return new WalletView(s.getCoinBalance(), s.getLifetimeCoins(),
                 s.getTotalPicks(), s.getCorrectPicks(),
-                s.getCurrentStreak(), s.getBestStreak(), hist);
+                s.getCurrentStreak(), s.getBestStreak(),
+                !s.isWelcomeShown(), hist);
+    }
+
+    /** Hoşgeldin kutlamasını "gösterildi" işaretle (ömür boyu 1 kez). */
+    @Transactional
+    public void markWelcomeShown(Long userId) {
+        final UserGameStat s = coinService.getOrCreate(userId);
+        if (!s.isWelcomeShown()) {
+            s.setWelcomeShown(true);
+            statRepo.save(s);
+        }
     }
 
     private Map<Long, String> displayNames(Set<Long> userIds) {

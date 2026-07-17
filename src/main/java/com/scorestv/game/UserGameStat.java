@@ -42,6 +42,10 @@ public class UserGameStat {
     @Column(name = "best_streak", nullable = false)
     private int bestStreak = 0;
 
+    /** Hoşgeldin kutlaması bu kullanıcıya gösterildi mi (ömür boyu 1 kez). */
+    @Column(name = "welcome_shown", nullable = false)
+    private boolean welcomeShown = false;
+
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;

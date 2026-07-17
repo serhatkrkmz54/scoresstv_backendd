@@ -55,6 +55,7 @@ public final class GameDtos {
             long balance, long lifetimeCoins,
             int totalPicks, int correctPicks,
             int currentStreak, int bestStreak,
+            boolean showWelcome, // hoşgeldin kutlaması henüz gösterilmedi mi
             List<LedgerEntry> history) {}
 
     // ---- İstek ----

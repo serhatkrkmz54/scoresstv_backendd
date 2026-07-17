@@ -80,4 +80,11 @@ public class GameController {
         if (currentUser == null) throw ApiException.unauthorized("Cüzdan için giriş gerekli.");
         return service.wallet(currentUser.id());
     }
+
+    /** Hoşgeldin kutlamasını gördü olarak işaretle (ömür boyu 1 kez). */
+    @PostMapping("/welcome/ack")
+    public void ackWelcome(@AuthenticationPrincipal CurrentUser currentUser) {
+        if (currentUser == null) throw ApiException.unauthorized("Giriş gerekli.");
+        service.markWelcomeShown(currentUser.id());
+    }
 }
