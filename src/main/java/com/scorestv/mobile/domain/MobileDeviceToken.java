@@ -45,6 +45,15 @@ public class MobileDeviceToken extends BaseEntity {
     private Instant lastSeenAt;
 
     /**
+     * (Opsiyonel) Bu cihazi kullanan giris yapmis kullanicinin id'si. Anonim
+     * cihaz modeli korunur (null olabilir); register isteginde JWT varsa
+     * backend doldurur/gunceller. KULLANICIYA OZEL push (orn. oyun sonucu:
+     * "3/5 tahminin tuttu, +820 puan") dogru cihaza gitsin diye kullanilir.
+     */
+    @Column(name = "app_user_id")
+    private Long appUserId;
+
+    /**
      * Master "Tum bildirimleri kapat" toggle. Default TRUE (acik).
      * Kullanici Profil > "Bildirimler" satirindan kapatinca PATCH
      * {@code /api/v1/mobile/device-tokens/notifications-enabled} ile FALSE

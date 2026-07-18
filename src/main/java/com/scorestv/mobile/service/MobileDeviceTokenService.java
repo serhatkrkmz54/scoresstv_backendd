@@ -33,6 +33,19 @@ public class MobileDeviceTokenService {
 
     @Transactional
     public DeviceTokenResponse registerOrUpdate(RegisterDeviceTokenRequest req) {
+        return registerOrUpdate(req, null);
+    }
+
+    /**
+     * @param appUserId giris yapmis kullanicinin id'si (yoksa null — anonim).
+     *                  Cihazi kullaniciya baglar; kullaniciya ozel push (oyun
+     *                  sonucu) icin. Her register'da guncellenir (aktif
+     *                  kullaniciyi yansitir; logout sonrasi anonim register
+     *                  null'a ceker).
+     */
+    @Transactional
+    public DeviceTokenResponse registerOrUpdate(RegisterDeviceTokenRequest req,
+                                                Long appUserId) {
         String token = req.fcmToken().trim();
         String platform = req.platform().toLowerCase(Locale.ROOT);
         String locale = (req.locale() == null || req.locale().isBlank())
@@ -54,6 +67,13 @@ public class MobileDeviceTokenService {
             if (req.notifyNews() != null) {
                 existing.setNotifyNews(req.notifyNews());
             }
+            // Kullanici↔cihaz bagi: JWT geldiyse (giris yapmis) guncelle.
+            // null ise KORU (countryCode ile ayni "null=koru" deseni) —
+            // token yenileme sirasinda gecici anonim register mevcut bagi
+            // silmesin.
+            if (appUserId != null) {
+                existing.setAppUserId(appUserId);
+            }
             existing.setLastSeenAt(Instant.now());
             repository.save(existing);
             log.debug("Device token guncellendi: id={} platform={} country={}",
@@ -67,6 +87,7 @@ public class MobileDeviceTokenService {
         fresh.setAppVersion(req.appVersion());
         fresh.setLocale(locale);
         fresh.setCountryCode(countryCode);
+        fresh.setAppUserId(appUserId);
         fresh.setLastSeenAt(Instant.now());
         MobileDeviceToken saved = repository.save(fresh);
         log.info("Yeni device token kaydedildi: id={} platform={} version={}",

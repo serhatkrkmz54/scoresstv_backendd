@@ -4,11 +4,13 @@ import com.scorestv.football.domain.FixturePlayerStat;
 import com.scorestv.football.domain.FixturePlayerStatRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -40,6 +42,7 @@ public class GameResolutionService {
     private final ScoresCoinService coinService;
     private final FixturePlayerStatRepository fpsRepo;
     private final DuelValueResolver resolver;
+    private final ApplicationEventPublisher events;
 
     public GameResolutionService(GameCompetitionRepository competitionRepo,
                                  GameDuelRepository duelRepo,
@@ -47,7 +50,8 @@ public class GameResolutionService {
                                  UserGameStatRepository statRepo,
                                  ScoresCoinService coinService,
                                  FixturePlayerStatRepository fpsRepo,
-                                 DuelValueResolver resolver) {
+                                 DuelValueResolver resolver,
+                                 ApplicationEventPublisher events) {
         this.competitionRepo = competitionRepo;
         this.duelRepo = duelRepo;
         this.pickRepo = pickRepo;
@@ -55,6 +59,7 @@ public class GameResolutionService {
         this.coinService = coinService;
         this.fpsRepo = fpsRepo;
         this.resolver = resolver;
+        this.events = events;
     }
 
     @Transactional
@@ -90,15 +95,26 @@ public class GameResolutionService {
         //    → seri (streak) tutarlı, coin dağıtılır.
         final Map<Long, List<GamePick>> byUser =
                 allPicks.stream().collect(Collectors.groupingBy(GamePick::getUserId));
+        final List<GameResolvedNotificationEvent.UserResult> winners = new ArrayList<>();
         for (Map.Entry<Long, List<GamePick>> e : byUser.entrySet()) {
-            resolveUser(e.getKey(), e.getValue(), duelById, multById);
+            final GameResolvedNotificationEvent.UserResult res =
+                    resolveUser(e.getKey(), e.getValue(), duelById, multById);
+            if (res != null) winners.add(res);
         }
 
         comp.setStatus(GameStatus.RESOLVED);
         comp.setResolvedAt(Instant.now());
         competitionRepo.save(comp);
-        log.info("Oyun yarismasi cozuldu: id={} duels={} picks={}",
-                competitionId, duels.size(), allPicks.size());
+        log.info("Oyun yarismasi cozuldu: id={} duels={} picks={} kazanan={}",
+                competitionId, duels.size(), allPicks.size(), winners.size());
+
+        // Kazananlara kisisel FCM push (AFTER_COMMIT + @Async dinleyici). Yalnizca
+        // coin kazananlar listede → pozitif, spam degil. Commit-sonrasi tetiklenir,
+        // rollback'te bildirim gitmez.
+        if (!winners.isEmpty()) {
+            events.publishEvent(new GameResolvedNotificationEvent(
+                    comp.getId(), comp.getTitle(), comp.getTitleEn(), winners));
+        }
     }
 
     private void resolveOneDuel(GameDuel d, Instant start, Instant end) {
@@ -140,8 +156,15 @@ public class GameResolutionService {
         return Math.min(MAX_MULT, Math.max(1.0, m));
     }
 
-    private void resolveUser(Long userId, List<GamePick> picks,
-                             Map<Long, GameDuel> duelById, Map<Long, Double> multById) {
+    /**
+     * Bir kullanicinin bu yarismadaki tahminlerini cozer (coin + seri).
+     *
+     * @return kullanici bu yarismada coin kazandiysa ozet (bildirim icin);
+     *         hic kazanmadiysa (0 coin) null.
+     */
+    private GameResolvedNotificationEvent.UserResult resolveUser(
+            Long userId, List<GamePick> picks,
+            Map<Long, GameDuel> duelById, Map<Long, Double> multById) {
         picks.sort(Comparator.comparingInt(p -> {
             final GameDuel d = duelById.get(p.getDuelId());
             return d == null ? 0 : d.getSortOrder();
@@ -154,6 +177,11 @@ public class GameResolutionService {
         int totalPicks = stat.getTotalPicks();
         int correctPicks = stat.getCorrectPicks();
 
+        // Bu yarismaya ozel ozet (bildirim mesaji icin).
+        int compGraded = 0;
+        int compCorrect = 0;
+        long compCoins = 0;
+
         for (GamePick p : picks) {
             if (p.getCorrect() != null) continue; // zaten çözülmüş (idempotent)
             final GameDuel d = duelById.get(p.getDuelId());
@@ -163,15 +191,18 @@ public class GameResolutionService {
             }
             final boolean correct = p.getPick().equals(d.getWinner());
             totalPicks++;
+            compGraded++;
             if (correct) {
                 streak++;
                 if (streak > best) best = streak;
                 correctPicks++;
+                compCorrect++;
                 final double mult = multById.getOrDefault(d.getId(), 1.0);
                 final double streakFactor = 1.0 + Math.min(Math.max(streak - 1, 0), 10) * 0.05;
                 final int reward = (int) Math.round(BASE_REWARD * mult * streakFactor);
                 balance += reward;
                 lifetime += reward;
+                compCoins += reward;
                 p.setCoinsAwarded(reward);
                 coinService.appendLedger(userId, reward, balance, "PICK_WIN", "DUEL", d.getId());
             } else {
@@ -188,5 +219,12 @@ public class GameResolutionService {
         stat.setTotalPicks(totalPicks);
         stat.setCorrectPicks(correctPicks);
         statRepo.save(stat);
+
+        // Yalnizca coin kazananlara bildirim (pozitif; kaybedene "kaybettin"
+        // push'u gitmez). Kaybedenlere de bildirim istenirse compGraded>0 yeter.
+        return compCoins > 0
+                ? new GameResolvedNotificationEvent.UserResult(
+                        userId, compCorrect, compGraded, compCoins)
+                : null;
     }
 }

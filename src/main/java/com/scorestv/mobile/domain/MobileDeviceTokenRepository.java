@@ -17,6 +17,13 @@ public interface MobileDeviceTokenRepository
     void deleteByFcmToken(String fcmToken);
 
     /**
+     * Belirli bir kullanicinin, master bildirimi acik tum cihazlari.
+     * Kullaniciya ozel push (oyun sonucu: "3/5 tahminin tuttu, +820 puan")
+     * icin hedefleme. app_user_id register aninda JWT'den doldurulur.
+     */
+    List<MobileDeviceToken> findByAppUserIdAndNotificationsEnabledTrue(Long appUserId);
+
+    /**
      * Belirli bir ulke kodu icin FIFA / UEFA Ulke siralama bildirimi alacak
      * aktif cihazlar. Filtreler: ulke eslesir (buyuk/kucuk harf duyarsiz),
      * master bildirim acik, siralama-ulke toggle acik.

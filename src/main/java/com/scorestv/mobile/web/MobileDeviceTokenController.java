@@ -3,8 +3,10 @@ package com.scorestv.mobile.web;
 import com.scorestv.mobile.service.MobileDeviceTokenService;
 import com.scorestv.mobile.web.dto.DeviceTokenResponse;
 import com.scorestv.mobile.web.dto.RegisterDeviceTokenRequest;
+import com.scorestv.security.CurrentUser;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -34,8 +36,13 @@ public class MobileDeviceTokenController {
 
     @PostMapping
     public DeviceTokenResponse register(
-            @Valid @RequestBody RegisterDeviceTokenRequest req) {
-        return service.registerOrUpdate(req);
+            @Valid @RequestBody RegisterDeviceTokenRequest req,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        // Uc public (JWT gerekmez) ama JWT filtresi token varsa principal'i
+        // yine set eder → giris yapmis kullaniciyi cihaza baglariz (opsiyonel,
+        // anonimlik korunur). Kullaniciya ozel push (oyun sonucu) icin sart.
+        final Long appUserId = currentUser != null ? currentUser.id() : null;
+        return service.registerOrUpdate(req, appUserId);
     }
 
     /**
