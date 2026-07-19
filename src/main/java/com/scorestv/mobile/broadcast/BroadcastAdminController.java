@@ -20,6 +20,7 @@ import java.util.List;
  * <ul>
  *   <li>POST /broadcast — herkese/platforma/dile gore push gonder</li>
  *   <li>GET  /broadcast — gonderim gecmisi (en yeni ustte)</li>
+ *   <li>POST /test — yalnizca bir e-postanin cihazlarina test push (senkron)</li>
  * </ul>
  */
 @RestController
@@ -52,5 +53,18 @@ public class BroadcastAdminController {
     public List<BroadcastListItem> history(
             @RequestParam(value = "limit", defaultValue = "50") int limit) {
         return service.history(limit).stream().map(BroadcastListItem::from).toList();
+    }
+
+    /**
+     * TEST: yalnizca verilen e-postaya ait hesabin cihazlarina push gonderir
+     * (senkron, herkese gitmez, gecmise yazilmaz). Push'un telefonda dogru
+     * geldigini denemek icin.
+     */
+    @PostMapping("/test")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public TestNotificationResult sendTest(
+            @Valid @RequestBody SendTestNotificationRequest req) {
+        return service.sendTest(req.email().trim(), req.title().trim(),
+                req.body().trim(), req.link());
     }
 }

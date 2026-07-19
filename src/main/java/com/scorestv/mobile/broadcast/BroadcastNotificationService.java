@@ -1,8 +1,11 @@
 package com.scorestv.mobile.broadcast;
 
+import com.scorestv.common.ApiException;
 import com.scorestv.mobile.domain.MobileDeviceToken;
 import com.scorestv.mobile.domain.MobileDeviceTokenRepository;
 import com.scorestv.mobile.fcm.FcmMessagingService;
+import com.scorestv.user.User;
+import com.scorestv.user.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -39,13 +42,59 @@ public class BroadcastNotificationService {
     private final MobileDeviceTokenRepository deviceRepository;
     private final FcmMessagingService fcm;
     private final BroadcastNotificationRepository historyRepository;
+    private final UserRepository userRepository;
 
     public BroadcastNotificationService(MobileDeviceTokenRepository deviceRepository,
                                         FcmMessagingService fcm,
-                                        BroadcastNotificationRepository historyRepository) {
+                                        BroadcastNotificationRepository historyRepository,
+                                        UserRepository userRepository) {
         this.deviceRepository = deviceRepository;
         this.fcm = fcm;
         this.historyRepository = historyRepository;
+        this.userRepository = userRepository;
+    }
+
+    /**
+     * TEST gonderimi — yalnizca verilen e-postaya ait hesabin (app_user_id)
+     * cihazlarina, SENKRON gonderir (kuyruk yok; tek kullanici birkac cihaz).
+     * Genel broadcast'ten farki: herkese GITMEZ, gecmise yazilmaz. Push'un
+     * telefonda dogru geldigini test etmek icin.
+     *
+     * @throws ApiException e-posta ile hesap yoksa ya da hesaba bagli bildirimi
+     *                      acik cihaz yoksa (400).
+     */
+    public TestNotificationResult sendTest(String email, String title, String body,
+                                           String link) {
+        String normEmail = email == null ? "" : email.trim();
+        User user = userRepository.findByEmail(normEmail).orElseThrow(
+                () -> ApiException.badRequest(
+                        "Bu e-posta ile kayitli kullanici yok: " + normEmail));
+
+        List<String> tokens = deviceRepository
+                .findByAppUserIdAndNotificationsEnabledTrue(user.getId())
+                .stream()
+                .map(MobileDeviceToken::getFcmToken)
+                .filter(t -> t != null && !t.isBlank())
+                .distinct()
+                .toList();
+
+        if (tokens.isEmpty()) {
+            throw ApiException.badRequest(
+                    "Bu hesaba bagli, bildirimi acik cihaz bulunamadi. Telefonda "
+                    + "bu hesapla giris yapip bildirim iznini verdiginden emin ol "
+                    + "(gerekirse cikis/giris yapip uygulamayi bir kez ac).");
+        }
+
+        Map<String, String> data = new HashMap<>();
+        data.put("type", "broadcast");
+        if (link != null && !link.isBlank()) {
+            data.put("link", link.trim());
+        }
+
+        int sent = fcm.sendMulticast(tokens, title.trim(), body.trim(), data);
+        log.info("Test bildirimi gonderildi: email={} cihaz={} iletilen={}",
+                normEmail, tokens.size(), sent);
+        return new TestNotificationResult(normEmail, tokens.size(), sent, fcm.isEnabled());
     }
 
     /**
