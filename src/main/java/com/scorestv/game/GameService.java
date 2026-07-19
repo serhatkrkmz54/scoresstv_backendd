@@ -155,10 +155,13 @@ public class GameService {
             try {
                 pickRepo.save(gp);
             } catch (DataIntegrityViolationException race) {
-                final GamePick e2 = pickRepo.findByDuelIdAndUserId(duelId, userId)
-                        .orElseThrow(() -> race);
-                e2.setPick(pick);
-                pickRepo.save(e2);
+                // Nadir yarış: aynı kullanıcı aynı düelloya EŞZAMANLI 2 istek
+                // gönderdi; diğer istek tahmini önce yazdı (UNIQUE ihlali).
+                // Postgres bu noktada tx'i abort eder → AYNI tx'te tekrar
+                // find/save DENENEMEZ (25P02). Temiz bir hata döndür; istemci
+                // tekrar deneyince mevcut tahmin bulunup güncellenir.
+                throw ApiException.badRequest(
+                        "Tahmin aynı anda gönderildi, lütfen tekrar deneyin.");
             }
         }
         coinService.getOrCreate(userId); // profil satırı garanti
