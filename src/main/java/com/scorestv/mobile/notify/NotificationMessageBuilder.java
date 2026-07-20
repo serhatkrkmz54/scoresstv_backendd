@@ -26,7 +26,7 @@ public class NotificationMessageBuilder {
         return switch (mobileType) {
             case "kirmizi" -> _redCard(fixture, event);
             case "penalti" -> _penaltyOrVar(fixture, event);
-            default -> new Localized("ScoresTV", "Yeni olay", "ScoresTV", "New event");
+            default -> new Localized("Scores TV", "Yeni olay", "Scores TV", "New event");
         };
     }
 

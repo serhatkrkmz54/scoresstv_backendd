@@ -35,11 +35,24 @@ public class SitemapService {
                 "teams", count("Team"),
                 "players", count("Player"),
                 "leagues", count("League"),
-                "matches", count("Fixture"));
+                "matches", indexableMatchCount());
     }
 
     private long count(String entity) {
         return (Long) em.createQuery("select count(e) from " + entity + " e")
+                .getSingleResult();
+    }
+
+    /**
+     * SEO: sitemap'e yalnızca "içeriği olan" maçlar girer — skoru gelmiş
+     * (oynanmış/canlı) fikstürler. Henüz oynanmamış/verisi hiç gelmemiş "thin"
+     * maç sayfaları web tarafında noindex olduğu için sitemap'te de sayılmaz;
+     * böylece Google'a boş/noindex URL sunmayız (crawl bütçesi + SC uyarısı).
+     */
+    private long indexableMatchCount() {
+        return (Long) em.createQuery(
+                        "select count(f) from Fixture f "
+                                + "where f.homeGoals is not null and f.awayGoals is not null")
                 .getSingleResult();
     }
 
@@ -104,7 +117,10 @@ public class SitemapService {
         List<Object[]> rows = em.createQuery(
                         "select f.id, f.homeTeam.name, f.homeTeam.nameTr, "
                                 + "f.awayTeam.name, f.awayTeam.nameTr, f.updatedAt "
-                                + "from Fixture f order by f.id", Object[].class)
+                                + "from Fixture f "
+                                // SEO: içeriksiz (skoru gelmemiş) maçlar sitemap'e girmez.
+                                + "where f.homeGoals is not null and f.awayGoals is not null "
+                                + "order by f.id", Object[].class)
                 .setFirstResult(Math.max(0, page) * size)
                 .setMaxResults(size)
                 .getResultList();

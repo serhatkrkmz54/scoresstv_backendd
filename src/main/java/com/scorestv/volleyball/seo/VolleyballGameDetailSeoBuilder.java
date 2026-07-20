@@ -43,7 +43,7 @@ public class VolleyballGameDetailSeoBuilder {
 
     private static final Locale TURKISH = Locale.of("tr");
     private static final Locale ENGLISH = Locale.ENGLISH;
-    private static final String SITE_NAME = "ScoresTV";
+    private static final String SITE_NAME = "Scores TV";
     private static final Set<String> FINISHED_STATUSES = Set.of("FT", "AW");
 
     private static final ObjectMapper JSON_LD_MAPPER = new ObjectMapper();
@@ -177,11 +177,11 @@ public class VolleyballGameDetailSeoBuilder {
     }
 
     private static String fallbackTitle(String home, String away) {
-        return home + " vs " + away + " | ScoresTV";
+        return home + " vs " + away + " | Scores TV";
     }
 
     private static String fallbackDesc(String home, String away) {
-        return home + " vs " + away + " volleyball match on ScoresTV.";
+        return home + " vs " + away + " volleyball match on Scores TV.";
     }
 
     private static String trimTrailingSlash(String s) {

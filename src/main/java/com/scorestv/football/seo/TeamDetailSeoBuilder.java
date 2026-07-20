@@ -37,7 +37,7 @@ public class TeamDetailSeoBuilder {
 
     private static final Locale TURKISH = Locale.of("tr");
     private static final Locale ENGLISH = Locale.ENGLISH;
-    private static final String SITE_NAME = "ScoresTV";
+    private static final String SITE_NAME = "Scores TV";
 
     private static final ObjectMapper JSON_LD_MAPPER = new ObjectMapper();
 

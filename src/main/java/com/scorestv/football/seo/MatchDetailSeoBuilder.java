@@ -44,7 +44,7 @@ public class MatchDetailSeoBuilder {
 
     private static final Locale TURKISH = Locale.of("tr");
     private static final Locale ENGLISH = Locale.ENGLISH;
-    private static final String SITE_NAME = "ScoresTV";
+    private static final String SITE_NAME = "Scores TV";
 
     /** Sonuç bilinen biten maç statüleri — özel SEO başlık/açıklama uygulanır. */
     private static final Set<String> FINISHED_STATUSES = Set.of("FT", "AET", "PEN");

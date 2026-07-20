@@ -75,7 +75,7 @@ public class LivePlayerStatsJob {
                 written += w;
                 // Yeni oyuncu istatistiği yazıldıysa açık ekranlara ANINDA haber
                 // ver: /ready → client silent refetch (cache taze). Oyuncu
-                // reytingleri / MOTM / ScoresTV puanı canlı güncellenir.
+                // reytingleri / MOTM / Scores TV puanı canlı güncellenir.
                 if (w > 0) {
                     readyBroadcaster.publish(fixture.getId(), "playerStats");
                 }

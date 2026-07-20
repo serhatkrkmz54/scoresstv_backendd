@@ -97,9 +97,9 @@ public record MatchDetailResponse(
         Integer awayFifaRank,
         /** Maçın oyuncusu — yalnız BİTEN maçta, oyuncu rating verisi varsa. */
         PlayerOfMatch playerOfTheMatch,
-        /** ScoresTV Puanı (0-10) — ev sahibi; istatistik yoksa null. Canlı, FT'de sabit. */
+        /** Scores TV Puanı (0-10) — ev sahibi; istatistik yoksa null. Canlı, FT'de sabit. */
         Double homeScorestvRating,
-        /** ScoresTV Puanı (0-10) — deplasman; istatistik yoksa null. */
+        /** Scores TV Puanı (0-10) — deplasman; istatistik yoksa null. */
         Double awayScorestvRating,
         /** Ev sahibinin bu maçtan ÖNCEKİ son 5 oynanmış maçı (yeni → eski). */
         List<TeamFormMatch> homeForm,

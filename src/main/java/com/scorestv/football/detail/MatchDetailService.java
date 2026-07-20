@@ -406,7 +406,7 @@ public class MatchDetailService {
         Integer homeFifaRank = fifaIndex.rankFor(fixture.getHomeTeam());
         Integer awayFifaRank = fifaIndex.rankFor(fixture.getAwayTeam());
 
-        // Maçın oyuncusu (yalnız biten maç) + ScoresTV Puanı (canlı 0-10).
+        // Maçın oyuncusu (yalnız biten maç) + Scores TV Puanı (canlı 0-10).
         MatchDetailResponse.PlayerOfMatch playerOfTheMatch = selectPlayerOfMatch(
                 playerStats, home, away, turkish, fixture.getStatusShort());
         Double homeScorestvRating = scorestvRating(
@@ -596,7 +596,7 @@ public class MatchDetailService {
     }
 
     // ============================================================
-    // Maçın Oyuncusu + ScoresTV Puanı
+    // Maçın Oyuncusu + Scores TV Puanı
     // ============================================================
 
     private static final java.util.Set<String> MOTM_FINISHED =
@@ -672,7 +672,7 @@ public class MatchDetailService {
     }
 
     /**
-     * ScoresTV Puanı — bir takımın 0-10 canlı performans puanı. İstatistik +
+     * Scores TV Puanı — bir takımın 0-10 canlı performans puanı. İstatistik +
      * skordan hesaplanır; istatistik yoksa null (UI gizler). Ağırlıklar
      * markamıza özel — gol/isabetli şut/xG/topa sahip olma artı, kart eksi.
      */
