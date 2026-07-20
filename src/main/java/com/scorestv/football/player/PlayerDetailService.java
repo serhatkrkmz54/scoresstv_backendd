@@ -24,6 +24,9 @@ import com.scorestv.football.domain.TranslatableName;
 import com.scorestv.football.domain.Transfer;
 import com.scorestv.football.domain.TransferRepository;
 import com.scorestv.football.seo.PlayerDetailSeoBuilder;
+
+import java.time.LocalDate;
+import java.time.Period;
 import com.scorestv.football.web.dto.PlayerDetailResponse;
 import com.scorestv.football.web.dto.PlayerDetailResponse.BirthInfo;
 import com.scorestv.football.web.dto.PlayerDetailResponse.CareerTeamView;
@@ -224,7 +227,9 @@ public class PlayerDetailService {
                 displayName,
                 player.getFirstname(),
                 player.getLastname(),
-                player.getAge(),
+                // Yasi DOGUM TARIHINDEN hesapla — API'nin sabit "age" alani
+                // bayat/yanlis olabiliyordu (±1 yil).
+                computeAge(player.getBirthDate(), player.getAge()),
                 player.getNationality(),
                 nationalityText,
                 nationalityFlag,
@@ -244,6 +249,17 @@ public class PlayerDetailService {
                 transfers,
                 trophies,
                 seo);
+    }
+
+    /**
+     * Yasi DOGUM TARIHINDEN hesaplar. API-Football'in sabit {@code age} alani
+     * o kaydin cekildigi ana gore hesaplanmis; dogum gunu gecti mi kontrol
+     * edilmedigi/kayit bayatladigi icin ±1 yil sapabiliyordu. {@link Period}
+     * takvim yasini dogru verir. birthDate yoksa mevcut (fallback) degere doner.
+     */
+    private static Integer computeAge(LocalDate birthDate, Integer fallback) {
+        if (birthDate == null) return fallback;
+        return Period.between(birthDate, LocalDate.now()).getYears();
     }
 
     /**
