@@ -83,8 +83,11 @@ public class BasketballGameDetailSeoBuilder {
                 away != null ? away.getName() : "away",
                 game.getId());
         String baseUrl = trimTrailingSlash(seoProperties.siteUrl());
-        // Web URL paterni: /basketbol/mac/{slug}
-        String canonicalUrl = baseUrl + "/basketbol/mac/" + slug;
+        // Web URL paterni: TR /basketbol/mac/{slug}, EN /basketball/match/{slug}.
+        // Canonical o dilin KENDI URL'ine isaret eder (self-referencing).
+        String urlTr = baseUrl + "/basketbol/mac/" + slug;
+        String urlEn = baseUrl + "/basketball/match/" + slug;
+        String canonicalUrl = turkish ? urlTr : urlEn;
 
         // Title + description
         String title;
@@ -129,12 +132,9 @@ public class BasketballGameDetailSeoBuilder {
 
         // Hreflang alternatif URL'leri
         List<HreflangAlt> hreflang = List.of(
-                new HreflangAlt("tr",
-                        baseUrl + "/basketbol/mac/" + slug),
-                new HreflangAlt("en",
-                        baseUrl + "/en/basketball/game/" + slug),
-                new HreflangAlt("x-default",
-                        baseUrl + "/basketbol/mac/" + slug)
+                new HreflangAlt("tr", urlTr),
+                new HreflangAlt("en", urlEn),
+                new HreflangAlt("x-default", urlEn)
         );
 
         return new SeoBundle(

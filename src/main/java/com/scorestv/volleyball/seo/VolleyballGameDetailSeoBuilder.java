@@ -82,8 +82,11 @@ public class VolleyballGameDetailSeoBuilder {
                 away != null ? away.getName() : "away",
                 game.getId());
         String baseUrl = trimTrailingSlash(seoProperties.siteUrl());
-        // Web URL paterni: /voleybol/mac/{slug}
-        String canonicalUrl = baseUrl + "/voleybol/mac/" + slug;
+        // Web URL paterni: TR /voleybol/mac/{slug}, EN /volleyball/match/{slug}.
+        // Canonical o dilin KENDI URL'ine isaret eder (self-referencing).
+        String urlTr = baseUrl + "/voleybol/mac/" + slug;
+        String urlEn = baseUrl + "/volleyball/match/" + slug;
+        String canonicalUrl = turkish ? urlTr : urlEn;
 
         // Title + description
         String title;
@@ -125,12 +128,9 @@ public class VolleyballGameDetailSeoBuilder {
 
         // Hreflang alternatif URL'leri
         List<HreflangAlt> hreflang = List.of(
-                new HreflangAlt("tr",
-                        baseUrl + "/voleybol/mac/" + slug),
-                new HreflangAlt("en",
-                        baseUrl + "/volleyball/match/" + slug),
-                new HreflangAlt("x-default",
-                        baseUrl + "/voleybol/mac/" + slug)
+                new HreflangAlt("tr", urlTr),
+                new HreflangAlt("en", urlEn),
+                new HreflangAlt("x-default", urlEn)
         );
 
         return new SeoBundle(

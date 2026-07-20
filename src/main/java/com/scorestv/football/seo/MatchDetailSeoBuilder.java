@@ -106,10 +106,18 @@ public class MatchDetailSeoBuilder {
         String leagueName = displayName(league, turkish);
         String date = formatDate(fixture, locale);
 
-        // Slug DAİMA İngilizce addan — URL'ler dilden bağımsız sabit kalır.
-        String slug = SlugUtil.fixtureSlug(home.getName(), away.getName(), fixture.getId());
+        // Slug DİLE GÖRE: TR takım adlarından /mac/, EN adlarından /match/.
+        // Her iki dilin de gerçek URL'i üretilir; canonical o dilin KENDİ URL'ine
+        // işaret eder (self-referencing), hreflang ikisini karşılıklı bağlar.
         String baseUrl = trimTrailingSlash(seoProperties.siteUrl());
-        String canonicalUrl = baseUrl + "/" + slug;
+        String slugTr = SlugUtil.fixtureSlug(
+                displayName(home, true), displayName(away, true), fixture.getId());
+        String slugEn = SlugUtil.fixtureSlug(
+                home.getName(), away.getName(), fixture.getId());
+        String urlTr = baseUrl + "/mac/" + slugTr;
+        String urlEn = baseUrl + "/match/" + slugEn;
+        String slug = turkish ? slugTr : slugEn;
+        String canonicalUrl = turkish ? urlTr : urlEn;
 
         // Title/desc/keywords — messages_tr veya messages_en'den.
         Object[] args = {homeName, awayName, leagueName, date};
@@ -159,13 +167,13 @@ public class MatchDetailSeoBuilder {
                 image);
 
         String jsonLd = buildJsonLd(
-                fixture, canonicalUrl, homeName, awayName, leagueName, image,
+                fixture, canonicalUrl, baseUrl, homeName, awayName, leagueName, image,
                 description, channelNames);
 
         List<MatchSeoResponse.Breadcrumb> breadcrumbs = buildBreadcrumbs(
-                fixture, homeName, awayName, leagueName, slug, turkish, baseUrl);
+                fixture, homeName, awayName, leagueName, canonicalUrl, turkish, baseUrl);
 
-        List<MatchSeoResponse.Hreflang> hreflang = buildHreflang(canonicalUrl);
+        List<MatchSeoResponse.Hreflang> hreflang = buildHreflang(urlTr, urlEn);
 
         return new MatchSeoResponse(
                 title, description, keywords, canonicalUrl, slug, localeCode,
@@ -173,7 +181,7 @@ public class MatchDetailSeoBuilder {
     }
 
     /** Schema.org SportsEvent JSON-LD'sini hazır string olarak üretir. */
-    private String buildJsonLd(Fixture fixture, String canonicalUrl,
+    private String buildJsonLd(Fixture fixture, String canonicalUrl, String baseUrl,
                                String homeName, String awayName, String leagueName,
                                String image, String description,
                                List<String> channelNames) {
@@ -211,10 +219,8 @@ public class MatchDetailSeoBuilder {
         organizer.put("@type", "Organization");
         organizer.put("name", leagueName);
         // organizer.url — lig sayfası (Google Event "organizer.url" önerisi).
-        // baseUrl = canonicalUrl'in son segmenti (fikstür slug'ı) atılmışı.
-        if (fixture.getLeague() != null && canonicalUrl != null
-                && canonicalUrl.lastIndexOf('/') > 0) {
-            String baseUrl = canonicalUrl.substring(0, canonicalUrl.lastIndexOf('/'));
+        // baseUrl doğrudan parametreden gelir (canonical artık /mac|/match önekli).
+        if (fixture.getLeague() != null && baseUrl != null) {
             String leagueSlug = SlugUtil.slugify(fixture.getLeague().getName());
             if (leagueSlug.isEmpty()) {
                 leagueSlug = "league";
@@ -333,7 +339,7 @@ public class MatchDetailSeoBuilder {
                                                                String homeName,
                                                                String awayName,
                                                                String leagueName,
-                                                               String slug,
+                                                               String matchUrl,
                                                                boolean turkish,
                                                                String baseUrl) {
         List<MatchSeoResponse.Breadcrumb> list = new ArrayList<>();
@@ -350,16 +356,16 @@ public class MatchDetailSeoBuilder {
                 2, leagueName, baseUrl + "/league/" + leagueSlug + "-" + fixture.getLeague().getId()));
 
         list.add(new MatchSeoResponse.Breadcrumb(
-                3, homeName + " - " + awayName, baseUrl + "/" + slug));
+                3, homeName + " - " + awayName, matchUrl));
         return list;
     }
 
-    /** Dil alternatifleri: tr, en, x-default (en'e işaret eder). */
-    private List<MatchSeoResponse.Hreflang> buildHreflang(String canonicalUrl) {
+    /** Dil alternatifleri: tr (/mac/...), en (/match/...), x-default (en). */
+    private List<MatchSeoResponse.Hreflang> buildHreflang(String urlTr, String urlEn) {
         return List.of(
-                new MatchSeoResponse.Hreflang("tr", canonicalUrl + "?lang=tr"),
-                new MatchSeoResponse.Hreflang("en", canonicalUrl + "?lang=en"),
-                new MatchSeoResponse.Hreflang("x-default", canonicalUrl));
+                new MatchSeoResponse.Hreflang("tr", urlTr),
+                new MatchSeoResponse.Hreflang("en", urlEn),
+                new MatchSeoResponse.Hreflang("x-default", urlEn));
     }
 
     /** OG/Twitter görseli: önce lig logosu, yoksa ev sahibi takım logosu, yoksa null. */
