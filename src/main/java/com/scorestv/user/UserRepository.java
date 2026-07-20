@@ -17,6 +17,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByAppleId(String appleId);
 
+    Optional<User> findByReferralCode(String referralCode);
+
+    boolean existsByReferralCode(String referralCode);
+
     boolean existsByEmail(String email);
 
     /** Panel "Editör Yönetimi" — yalniz staff (EDITOR/ADMIN) hesaplari. */

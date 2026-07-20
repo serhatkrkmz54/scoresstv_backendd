@@ -6,6 +6,8 @@ import com.scorestv.mobile.web.dto.DeviceTokenResponse;
 import com.scorestv.mobile.web.dto.RegisterDeviceTokenRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,14 +28,35 @@ public class MobileDeviceTokenService {
             LoggerFactory.getLogger(MobileDeviceTokenService.class);
 
     private final MobileDeviceTokenRepository repository;
+    /** Self-proxy — @Transactional metoda proxy uzerinden gidip dup-key
+     *  yarisinda YENI transaction'da UPDATE olarak yeniden deneyebilmek icin. */
+    private final MobileDeviceTokenService self;
 
-    public MobileDeviceTokenService(MobileDeviceTokenRepository repository) {
+    public MobileDeviceTokenService(MobileDeviceTokenRepository repository,
+                                    @Lazy MobileDeviceTokenService self) {
         this.repository = repository;
+        this.self = self;
     }
 
-    @Transactional
     public DeviceTokenResponse registerOrUpdate(RegisterDeviceTokenRequest req) {
         return registerOrUpdate(req, null);
+    }
+
+    /**
+     * Orkestrator (transaction DISI): ayni fcm_token'i iki istek AYNI ANDA
+     * register ederse ilk INSERT kazanir, ikincisi unique (fcm_token) ihlali
+     * alir. Burada onu yakalayip UPDATE yoluna cevirerek dup-key/500 hatasini
+     * onleriz. Ilk deneme rollback oldugundan yeniden deneme YENI bir
+     * transaction'da (self-proxy) calisir; token artik var → UPDATE yolu.
+     */
+    public DeviceTokenResponse registerOrUpdate(RegisterDeviceTokenRequest req,
+                                                Long appUserId) {
+        try {
+            return self.doRegisterOrUpdate(req, appUserId);
+        } catch (DataIntegrityViolationException race) {
+            log.debug("Device token yaris (dup fcm_token) — UPDATE olarak yeniden deniyorum");
+            return self.doRegisterOrUpdate(req, appUserId);
+        }
     }
 
     /**
@@ -44,8 +67,8 @@ public class MobileDeviceTokenService {
      *                  null'a ceker).
      */
     @Transactional
-    public DeviceTokenResponse registerOrUpdate(RegisterDeviceTokenRequest req,
-                                                Long appUserId) {
+    public DeviceTokenResponse doRegisterOrUpdate(RegisterDeviceTokenRequest req,
+                                                  Long appUserId) {
         String token = req.fcmToken().trim();
         String platform = req.platform().toLowerCase(Locale.ROOT);
         String locale = (req.locale() == null || req.locale().isBlank())

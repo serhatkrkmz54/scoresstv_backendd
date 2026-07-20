@@ -53,4 +53,12 @@ public class User extends BaseEntity {
     /** Apple 'sub' degeri; Apple ile giris yapabilen kullanicilarda dolu. */
     @Column(name = "apple_id", length = 255, unique = true)
     private String appleId;
+
+    /**
+     * Kullanicinin benzersiz davet (referans) kodu — arkadasini davet etmek
+     * icin. Talep edildiginde (ilk goruntulemede) lazily uretilir; o zamana
+     * kadar null.
+     */
+    @Column(name = "referral_code", length = 12, unique = true)
+    private String referralCode;
 }
