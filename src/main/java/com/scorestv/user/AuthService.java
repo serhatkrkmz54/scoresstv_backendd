@@ -6,6 +6,7 @@ import com.scorestv.security.AppleTokenVerifier;
 import com.scorestv.security.GoogleTokenVerifier;
 import com.scorestv.security.JwtService;
 import com.scorestv.security.LoginAttemptService;
+import com.scorestv.storage.MinioStorageService;
 import com.scorestv.user.dto.AppleLoginRequest;
 import com.scorestv.user.dto.AuthResponse;
 import com.scorestv.user.dto.ChangePasswordRequest;
@@ -36,6 +37,7 @@ public class AuthService {
     private final AppleTokenVerifier appleTokenVerifier;
     private final Duration refreshTtl;
     private final ApplicationEventPublisher eventPublisher;
+    private final MinioStorageService storage;
 
     public AuthService(UserRepository userRepository,
                        RefreshTokenRepository refreshTokenRepository,
@@ -45,7 +47,8 @@ public class AuthService {
                        GoogleTokenVerifier googleTokenVerifier,
                        AppleTokenVerifier appleTokenVerifier,
                        ScorestvProperties props,
-                       ApplicationEventPublisher eventPublisher) {
+                       ApplicationEventPublisher eventPublisher,
+                       MinioStorageService storage) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
@@ -55,6 +58,13 @@ public class AuthService {
         this.appleTokenVerifier = appleTokenVerifier;
         this.refreshTtl = props.security().jwt().refreshTokenTtl();
         this.eventPublisher = eventPublisher;
+        this.storage = storage;
+    }
+
+    /** Kullanicinin avatar herkese acik URL'i; avatar yoksa null. */
+    private String avatarUrl(User user) {
+        String key = user.getAvatarKey();
+        return (key != null && !key.isBlank()) ? storage.publicUrl(key) : null;
     }
 
     /** Herkese acik kayit. Yeni kullanici her zaman USER rolu ile olusur. */
@@ -267,7 +277,7 @@ public class AuthService {
     @Transactional(readOnly = true)
     public UserResponse currentUser(Long userId) {
         return userRepository.findById(userId)
-                .map(UserResponse::from)
+                .map(u -> UserResponse.from(u, avatarUrl(u)))
                 .orElseThrow(() -> ApiException.unauthorized("Kullanıcı bulunamadı!"));
     }
 
@@ -279,7 +289,8 @@ public class AuthService {
         user.setDisplayName(req.displayName().trim());
         user.setBirthDate(req.birthDate());
         user.setCountry(req.country().trim());
-        return UserResponse.from(userRepository.save(user));
+        User saved = userRepository.save(user);
+        return UserResponse.from(saved, avatarUrl(saved));
     }
 
     /**
@@ -356,6 +367,6 @@ public class AuthService {
                 accessToken,
                 refreshToken.getToken(),
                 jwtService.getAccessTtlSeconds(),
-                UserResponse.from(user));
+                UserResponse.from(user, avatarUrl(user)));
     }
 }

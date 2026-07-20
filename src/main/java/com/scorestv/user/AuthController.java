@@ -24,8 +24,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -33,11 +35,14 @@ public class AuthController {
 
     private final AuthService authService;
     private final PasswordResetService passwordResetService;
+    private final AvatarService avatarService;
 
     public AuthController(AuthService authService,
-                          PasswordResetService passwordResetService) {
+                          PasswordResetService passwordResetService,
+                          AvatarService avatarService) {
         this.authService = authService;
         this.passwordResetService = passwordResetService;
+        this.avatarService = avatarService;
     }
 
     @PostMapping("/register")
@@ -98,6 +103,23 @@ public class AuthController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteMe(@AuthenticationPrincipal CurrentUser currentUser) {
         authService.deleteAccount(currentUser.id());
+    }
+
+    /**
+     * Giris yapmis kullanicinin profil resmini (avatar) yukler/gunceller.
+     * multipart/form-data — {@code file} alani. Sunucu gorseli merkezden kare
+     * kirpip 256px JPEG'e cevirip depolar. Guncel kullanici (avatarUrl dolu) doner.
+     */
+    @PostMapping(value = "/me/avatar", consumes = "multipart/form-data")
+    public UserResponse uploadAvatar(@AuthenticationPrincipal CurrentUser currentUser,
+                                     @RequestParam("file") MultipartFile file) {
+        return avatarService.upload(currentUser.id(), file);
+    }
+
+    /** Profil resmini kaldirir; avatarUrl null olan guncel kullanici doner. */
+    @DeleteMapping("/me/avatar")
+    public UserResponse removeAvatar(@AuthenticationPrincipal CurrentUser currentUser) {
+        return avatarService.remove(currentUser.id());
     }
 
     @PostMapping("/forgot-password")

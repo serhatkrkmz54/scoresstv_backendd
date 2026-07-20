@@ -4,6 +4,7 @@ import com.scorestv.comments.dto.CommentCreateRequest;
 import com.scorestv.comments.dto.CommentPageResponse;
 import com.scorestv.comments.dto.CommentView;
 import com.scorestv.common.ApiException;
+import com.scorestv.storage.MinioStorageService;
 import com.scorestv.user.Role;
 import com.scorestv.user.User;
 import com.scorestv.user.UserRepository;
@@ -45,15 +46,24 @@ public class CommentService {
     private final FixtureCommentLikeRepository likeRepository;
     private final UserRepository userRepository;
     private final CommentWordFilter wordFilter;
+    private final MinioStorageService storage;
 
     public CommentService(FixtureCommentRepository commentRepository,
                           FixtureCommentLikeRepository likeRepository,
                           UserRepository userRepository,
-                          CommentWordFilter wordFilter) {
+                          CommentWordFilter wordFilter,
+                          MinioStorageService storage) {
         this.commentRepository = commentRepository;
         this.likeRepository = likeRepository;
         this.userRepository = userRepository;
         this.wordFilter = wordFilter;
+        this.storage = storage;
+    }
+
+    /** Yorum sahibinin avatar herkese acik URL'i; avatar yoksa null. */
+    private String avatarUrl(User u) {
+        String key = u.getAvatarKey();
+        return (key != null && !key.isBlank()) ? storage.publicUrl(key) : null;
     }
 
     public enum SortMode { NEWEST, POPULAR }
@@ -129,7 +139,7 @@ public class CommentService {
                 new CommentView.UserRef(
                         u.getId(),
                         u.getDisplayName(),
-                        null,  // profile photo henuz desteklenmiyor
+                        avatarUrl(u),  // profil resmi (avatar) — yoksa null
                         u.getCountry()),
                 c.getCreatedAt(),
                 likeCounts.getOrDefault(c.getId(), 0L),
@@ -181,7 +191,7 @@ public class CommentService {
                 c.getId(),
                 c.getContent(),
                 new CommentView.UserRef(user.getId(), user.getDisplayName(),
-                        null, user.getCountry()),
+                        avatarUrl(user), user.getCountry()),
                 c.getCreatedAt(),
                 0L,
                 false,

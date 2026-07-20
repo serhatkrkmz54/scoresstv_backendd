@@ -17,6 +17,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Oyuncu detay sayfasi icin tam SEO paketi ({@link PlayerSeoResponse}).
@@ -77,10 +79,15 @@ public class PlayerDetailSeoBuilder {
         PlayerSeoResponse.TwitterCard twitter = new PlayerSeoResponse.TwitterCard(
                 "summary_large_image", title, description, image);
 
-        String jsonLd = buildJsonLd(player, displayName, canonicalUrl, image);
-
         List<PlayerSeoResponse.Breadcrumb> breadcrumbs = buildBreadcrumbs(
                 displayName, currentTeam, canonicalUrl, baseUrl, turkish);
+
+        String fullName = fullName(player);
+        String teamUrl = currentTeam != null
+                ? baseUrl + (turkish ? "/takim/" : "/team/") + currentTeam.slug()
+                : null;
+        String jsonLd = buildJsonLd(player, displayName, fullName, currentTeam,
+                teamUrl, canonicalUrl, image, breadcrumbs);
 
         List<PlayerSeoResponse.Hreflang> hreflang = List.of(
                 new PlayerSeoResponse.Hreflang("tr", baseUrl + "/oyuncu/" + slug),
@@ -92,33 +99,135 @@ public class PlayerDetailSeoBuilder {
                 og, twitter, jsonLd, breadcrumbs, hreflang);
     }
 
-    /** Schema.org Person JSON-LD. */
-    private String buildJsonLd(Player player, String displayName,
-                                String canonicalUrl, String image) {
-        Map<String, Object> root = new LinkedHashMap<>();
-        root.put("@context", "https://schema.org");
-        root.put("@type", "Person");
-        root.put("name", displayName);
-        root.put("url", canonicalUrl);
+    /**
+     * Oyuncu detay sayfasi JSON-LD'si — {@code [Person, BreadcrumbList]} dizisi.
+     *
+     * <p>NOT: schema.org'da resmi bir "SportsPlayer" tipi YOKTUR; sporcular icin
+     * gecerli ve Google'in tanidigi tip {@code Person}'dir. Bu yuzden zengin
+     * alanlar (tam ad, kisa ad, dogum tarihi/yeri, milliyet, boy, kilo, mevcut
+     * takim) gecerli Person semasi altinda verilir. BreadcrumbList ayni dizide
+     * ikinci nesne olarak gomulur (tek {@code <script type=ld+json>}).
+     */
+    private String buildJsonLd(Player player, String displayName, String fullName,
+                                PlayerDetailResponse.TeamRef currentTeam, String teamUrl,
+                                String canonicalUrl, String image,
+                                List<PlayerSeoResponse.Breadcrumb> crumbs) {
+        Map<String, Object> person = new LinkedHashMap<>();
+        person.put("@context", "https://schema.org");
+        person.put("@type", "Person");
+        // Ad: sayfadaki H1 ile ayni (kisa/yaygin ad). Tam ad varsa alternateName.
+        person.put("name", displayName);
+        if (fullName != null && !fullName.isBlank()
+                && !fullName.equalsIgnoreCase(displayName)) {
+            person.put("alternateName", fullName);
+        }
+        person.put("url", canonicalUrl);
         if (image != null) {
-            root.put("image", image);
+            person.put("image", image);
         }
         if (player.getBirthDate() != null) {
-            root.put("birthDate", player.getBirthDate().toString());
+            person.put("birthDate", player.getBirthDate().toString());
+        }
+        // Dogum yeri — Place (ulke varsa PostalAddress ile).
+        if (player.getBirthPlace() != null && !player.getBirthPlace().isBlank()) {
+            Map<String, Object> place = new LinkedHashMap<>();
+            place.put("@type", "Place");
+            place.put("name", player.getBirthPlace());
+            if (player.getBirthCountry() != null && !player.getBirthCountry().isBlank()) {
+                Map<String, Object> addr = new LinkedHashMap<>();
+                addr.put("@type", "PostalAddress");
+                addr.put("addressCountry", player.getBirthCountry());
+                place.put("address", addr);
+            }
+            person.put("birthPlace", place);
         }
         if (player.getNationality() != null && !player.getNationality().isBlank()) {
-            root.put("nationality", player.getNationality());
+            Map<String, Object> nationality = new LinkedHashMap<>();
+            nationality.put("@type", "Country");
+            nationality.put("name", player.getNationality());
+            person.put("nationality", nationality);
         }
-        if (player.getHeight() != null && !player.getHeight().isBlank()) {
-            root.put("height", player.getHeight());
+        Map<String, Object> height = quantitative(player.getHeight());
+        if (height != null) {
+            person.put("height", height);
         }
+        Map<String, Object> weight = quantitative(player.getWeight());
+        if (weight != null) {
+            person.put("weight", weight);
+        }
+        // Mevcut takim — SportsTeam (Person.memberOf).
+        if (currentTeam != null && currentTeam.name() != null
+                && !currentTeam.name().isBlank()) {
+            Map<String, Object> team = new LinkedHashMap<>();
+            team.put("@type", "SportsTeam");
+            team.put("name", currentTeam.name());
+            if (teamUrl != null) {
+                team.put("url", teamUrl);
+            }
+            if (currentTeam.logo() != null && !currentTeam.logo().isBlank()) {
+                team.put("logo", currentTeam.logo());
+            }
+            person.put("memberOf", team);
+        }
+
+        Map<String, Object> breadcrumbList = breadcrumbListMap(crumbs);
+
         try {
-            return JSON_LD_MAPPER.writeValueAsString(root);
+            return JSON_LD_MAPPER.writeValueAsString(List.of(person, breadcrumbList));
         } catch (JsonProcessingException ex) {
             log.warn("Player JSON-LD serilesirilemedi: playerId={} — {}",
                     player.getId(), ex.getMessage());
             return "{}";
         }
+    }
+
+    /** "Firstname Lastname" tam adi; ikisi de bossa null. */
+    private static String fullName(Player player) {
+        String f = player.getFirstname() == null ? "" : player.getFirstname();
+        String l = player.getLastname() == null ? "" : player.getLastname();
+        String full = (f + " " + l).trim();
+        return full.isBlank() ? null : full;
+    }
+
+    /** Sayi + birim iceren string ("188 cm", "1,88 m", "75 kg") → QuantitativeValue. */
+    private static final Pattern QUANTITY =
+            Pattern.compile("([0-9]+(?:[.,][0-9]+)?)\\s*([a-zA-Z]+)?");
+
+    private static Map<String, Object> quantitative(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        Matcher m = QUANTITY.matcher(raw.trim());
+        if (!m.find()) {
+            return null;
+        }
+        Map<String, Object> q = new LinkedHashMap<>();
+        q.put("@type", "QuantitativeValue");
+        q.put("value", m.group(1).replace(',', '.'));
+        String unit = m.group(2);
+        if (unit != null && !unit.isBlank()) {
+            q.put("unitText", unit);
+        }
+        return q;
+    }
+
+    /** Breadcrumb listesinden Schema.org BreadcrumbList map'i uretir. */
+    private static Map<String, Object> breadcrumbListMap(
+            List<PlayerSeoResponse.Breadcrumb> crumbs) {
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("@context", "https://schema.org");
+        root.put("@type", "BreadcrumbList");
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (PlayerSeoResponse.Breadcrumb b : crumbs) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("@type", "ListItem");
+            item.put("position", b.position());
+            item.put("name", b.name());
+            item.put("item", b.url());
+            items.add(item);
+        }
+        root.put("itemListElement", items);
+        return root;
     }
 
     /** Breadcrumb zinciri: Ana Sayfa › (Mevcut Takim) › Oyuncu. */

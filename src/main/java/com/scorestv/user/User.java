@@ -61,4 +61,12 @@ public class User extends BaseEntity {
      */
     @Column(name = "referral_code", length = 12, unique = true)
     private String referralCode;
+
+    /**
+     * Kullanicinin yukledigi profil resminin (avatar) MinIO nesne anahtari.
+     * Herkese acik URL {@code MinioStorageService.publicUrl(avatarKey)} ile
+     * turetilir. null ise avatar yok — istemci ad bas harflerini gosterir.
+     */
+    @Column(name = "avatar_key", length = 255)
+    private String avatarKey;
 }

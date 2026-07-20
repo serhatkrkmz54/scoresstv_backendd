@@ -16,9 +16,18 @@ public record UserResponse(
         String country,
         // Yerel sifresi var mi? Google ile olusturulan hesaplarda password null
         // olur; istemci "Sifre Degistir" bolumunu buna gore gosterir/gizler.
-        boolean hasPassword
+        boolean hasPassword,
+        // Profil resmi (avatar) herkese acik URL'i; yoksa null (istemci ad bas
+        // harflerini gosterir). URL, avatar_key'den runtime'da turetilir.
+        String avatarUrl
 ) {
+    /** Avatar URL'i bilinmeden — avatarUrl null gecer (or. admin listeleri). */
     public static UserResponse from(User user) {
+        return from(user, null);
+    }
+
+    /** Avatar URL'i cagiran tarafindan (storage.publicUrl(key)) hesaplanir. */
+    public static UserResponse from(User user, String avatarUrl) {
         Integer age = user.getBirthDate() != null
                 ? Period.between(user.getBirthDate(), LocalDate.now()).getYears()
                 : null;
@@ -31,7 +40,8 @@ public record UserResponse(
                 user.getBirthDate(),
                 age,
                 user.getCountry(),
-                hasPassword
+                hasPassword,
+                avatarUrl
         );
     }
 }
