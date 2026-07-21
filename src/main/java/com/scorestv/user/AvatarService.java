@@ -76,7 +76,12 @@ public class AvatarService {
 
         String oldKey = user.getAvatarKey();
         String key = "avatars/" + userId + "-" + UUID.randomUUID() + ".jpg";
-        String url = storage.upload(key, jpeg, "image/jpeg");
+        // Anahtar UUID ile benzersiz (her yuklemede yeni) → kalici onbellek
+        // guvenli. Cache-Control ile tarayici/CDN avatari bir daha indirmez;
+        // gorüntüleme aninda gelir. Yeni yukleme yeni anahtar urettiginden
+        // eski onbellek asla eski resmi gostermez.
+        String url = storage.upload(key, jpeg, "image/jpeg",
+                "public, max-age=31536000, immutable");
 
         user.setAvatarKey(key);
         userRepository.save(user);

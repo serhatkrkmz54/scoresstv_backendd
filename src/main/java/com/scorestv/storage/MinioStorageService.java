@@ -20,6 +20,7 @@ import java.io.InputStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * MinIO (S3 uyumlu) nesne depolama servisi.
@@ -81,13 +82,35 @@ public class MinioStorageService {
      * @throws StorageException yükleme başarısız olursa
      */
     public String upload(String objectKey, byte[] data, String contentType) {
+        return upload(objectKey, data, contentType, null);
+    }
+
+    /**
+     * {@link #upload(String, byte[], String)} ile ayni; ek olarak nesneye bir
+     * {@code Cache-Control} header'i yazar. MinIO bu header'i saklar ve GET'te
+     * geri doner — boylece tarayici/CDN nesneyi onbellege alir.
+     *
+     * <p><b>DIKKAT:</b> {@code immutable} + uzun {@code max-age} yalnizca
+     * ANAHTARI HER YUKLEMEDE BENZERSIZ olan nesneler icin guvenlidir (orn.
+     * avatarlar: {@code avatars/{userId}-{uuid}.jpg}). Ayni anahtara tekrar
+     * yazilan (mutable) nesnelerde (orn. {@code teams/33.png}) kullanilmamali;
+     * aksi halde istemciler eski gorseli uzun sure onbellekte tutar. Bu yuzden
+     * varsayilan 3-argumanli {@link #upload(String, byte[], String)} header
+     * YAZMAZ (mevcut davranis korunur).
+     *
+     * @param cacheControl header degeri; {@code null}/bos ise header yazilmaz
+     */
+    public String upload(String objectKey, byte[] data, String contentType, String cacheControl) {
         try (ByteArrayInputStream stream = new ByteArrayInputStream(data)) {
-            minioClient.putObject(PutObjectArgs.builder()
+            PutObjectArgs.Builder builder = PutObjectArgs.builder()
                     .bucket(properties.bucket())
                     .object(objectKey)
                     .stream(stream, data.length, -1)
-                    .contentType(contentType)
-                    .build());
+                    .contentType(contentType);
+            if (cacheControl != null && !cacheControl.isBlank()) {
+                builder.headers(Map.of("Cache-Control", cacheControl));
+            }
+            minioClient.putObject(builder.build());
             return publicUrl(objectKey);
         } catch (Exception ex) {
             throw new StorageException("Nesne yüklenemedi: " + objectKey, ex);

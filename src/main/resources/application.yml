@@ -466,8 +466,16 @@ scorestv:
     public-url: ${STORAGE_PUBLIC_URL:http://localhost:9000/scorestv-media}
   security:
     jwt:
-      access-token-ttl: PT15M     # 15 dakika
-      refresh-token-ttl: P14D     # 14 gun
+      # GECICI: markette olan mobil sürüm token yenilemedigi icin oturumu
+      # ACCESS token'in omru kadar tutabiliyor. Access'i uzun tutup uyeligi
+      # ~30 gun acik biraktik. Bu BASE deger — hangi profil aktif olursa olsun
+      # (local/prod fark etmez) gecerli; env ile de ayarlanabilir. refresh
+      # MUTLAKA access'ten UZUN (90 > 30) — yoksa yeni sürumun refresh'i calismaz.
+      # Yeni sürum yayilinca JWT_ACCESS_TTL=PT15M ile kisaltilabilir (kod/redeploy
+      # gerekmez). NOT: access token stateless JWT; suresi dolana kadar iptal
+      # edilemez, uzun TTL sizinti riskini uzatir (spor app icin kabul, gecici).
+      access-token-ttl: ${JWT_ACCESS_TTL:P30D}
+      refresh-token-ttl: ${JWT_REFRESH_TTL:P90D}
     google:
       # Google Cloud'daki OAuth client ID'leri (web/android/ios).
       # NOT: ${VAR:default} placeholder icinde virgul "default value separator"

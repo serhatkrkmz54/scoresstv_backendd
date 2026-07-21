@@ -220,8 +220,14 @@ scorestv:
   security:
     jwt:
       secret: ${JWT_SECRET}
-      access-token-ttl: PT1H
-      refresh-token-ttl: P30D
+      # GECICI (markette olan sürüm token yenilemiyor): access token'i uzun tutup
+      # canli app'te oturumu ~30 gun acik tutuyoruz. refresh MUTLAKA access'ten
+      # UZUN (90 > 30) — yoksa yeni sürumdeki refresh mekanizmasi yenileyemez.
+      # Yeni sürum yayilinca access tekrar kisaltilabilir (PT1H/PT15M) — yeni app
+      # sessizce yeniler. NOT: access token stateless JWT; suresi dolana kadar
+      # iptal edilemez, uzun TTL sizinti riskini uzatir (spor app icin kabul).
+      access-token-ttl: ${JWT_ACCESS_TTL:P30D}
+      refresh-token-ttl: ${JWT_REFRESH_TTL:P90D}
     google:
       client-ids: ${GOOGLE_CLIENT_IDS}
 
