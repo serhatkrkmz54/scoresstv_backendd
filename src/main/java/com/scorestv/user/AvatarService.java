@@ -6,7 +6,6 @@ import com.scorestv.user.dto.UserResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
@@ -52,7 +51,12 @@ public class AvatarService {
      * Kullanicinin avatarini gunceller. Gorsel karelestirilir + boyutlandirilir,
      * MinIO'ya yuklenir, eski avatar (varsa) silinir ve guncel kullanici doner.
      */
-    @Transactional
+    // NOT: BİLEREK @Transactional YOK. Bu metot yavaş bir ağ I/O'su
+    // (storage.upload → MinIO PUT) içeriyor; @Transactional olsaydı DB
+    // bağlantısı bu PUT boyunca havuzda TUTULURDU. Eşzamanlı/yavaş
+    // yüklemelerde havuz tükenip yeni istekler ilk DB erişiminde (findById)
+    // bloklanır ve zaman aşımına uğrardı. Burada findById ve save kendi kısa
+    // transaction'larını alır; MinIO PUT sırasında hiçbir bağlantı tutulmaz.
     public UserResponse upload(Long userId, MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw ApiException.badRequest("Dosya boş olamaz.");
@@ -83,8 +87,8 @@ public class AvatarService {
         return UserResponse.from(user, url);
     }
 
-    /** Avatari kaldirir — DB anahtarini temizler ve MinIO nesnesini siler. */
-    @Transactional
+    /** Avatari kaldirir — DB anahtarini temizler ve MinIO nesnesini siler.
+     *  @Transactional yok — deleteQuietly (MinIO) bağlantıyı tutmasın diye. */
     public UserResponse remove(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ApiException.unauthorized("Kullanıcı bulunamadı."));
