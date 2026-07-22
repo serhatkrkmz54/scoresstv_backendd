@@ -167,16 +167,19 @@ public class TeamDetailService {
         // Takimin GERCEK current sezonu — kullanicinin sectigi ile karistirma.
         // Once DB'de fixtures'i bulunan en son sezon, yoksa /leagues?team=X
         // sonucu (cache + opsiyonel API call).
-        Integer teamCurrentSeason = resolveTeamCurrentSeason(teamId);
-        // Veri ZATEN dolu (fikstur var) → tazelemeyi arka planda yap, response'u
-        // BEKLETME. Ince/eksik (fikstur yok) veya yepyeni ise yine senkron blokla
-        // — boylece kullaniciya hicbir zaman eksik sayfa gitmez.
-        boolean rich = teamRepository.existsById(teamId)
-                && !fixtureRepository.findSeasonYearsByTeam(teamId).isEmpty();
-        if (rich) {
-            lazySync.ensureForAsync(teamId, requestedSeason, teamCurrentSeason);
+        // Request thread'i ASLA ağır backfill / API ile bloklama (bot seli yığılmasın):
+        if (!teamRepository.existsById(teamId)) {
+            // YEPYENİ → yalnız team-info (1 çağrı) SINIRLI senkron (kapı doluysa/
+            // cooldown'da atlanır → hızlı thin/404); ağır modüller + sezon keşfi
+            // arka planda. Request thread'de API çağrısı yok.
+            lazySync.ensureNewTeam(teamId, requestedSeason);
         } else {
-            lazySync.ensureFor(teamId, requestedSeason, teamCurrentSeason);
+            // VAR → arka planda tazele. currentSeason'ı yalnız DB'de fikstür varken
+            // (ucuz) çöz; yoksa null geç → sezon keşfi arka planda, request thread
+            // bloklanmaz.
+            boolean hasFixtures = !fixtureRepository.findSeasonYearsByTeam(teamId).isEmpty();
+            Integer teamCurrentSeason = hasFixtures ? resolveTeamCurrentSeason(teamId) : null;
+            lazySync.ensureForAsync(teamId, requestedSeason, teamCurrentSeason);
         }
         return self.loadCachedResponse(teamId, requestedSeason, turkish);
     }

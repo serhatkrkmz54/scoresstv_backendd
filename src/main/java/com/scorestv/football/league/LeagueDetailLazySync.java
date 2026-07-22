@@ -1,6 +1,7 @@
 package com.scorestv.football.league;
 
 import com.scorestv.common.ApiException;
+import com.scorestv.football.ApiQuotaTracker;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.football.domain.League;
 import com.scorestv.football.domain.LeagueRepository;
@@ -13,6 +14,7 @@ import com.scorestv.football.sync.FixtureSyncService;
 import com.scorestv.football.sync.ReferenceSyncService;
 import com.scorestv.football.sync.StandingsSyncService;
 import com.scorestv.football.sync.TopPlayersSyncService;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
@@ -26,6 +28,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -51,6 +59,9 @@ public class LeagueDetailLazySync {
 
     /** Empty-debounce: API bos donduyse veya istek hatasi alindiysa tekrar penceresi. */
     private static final Duration EMPTY_RETRY = Duration.ofMinutes(10);
+
+    /** Aynı lig bu pencerede tetiklendiyse yeniden backfill açılmaz (bot guard). */
+    private static final Duration RECENT_ENSURE_GUARD = Duration.ofSeconds(30);
 
     /** Lig info (countries/coverage) tazeleme: API gunde birkac kez guncellenir. */
     private static final Duration FRESH_LEAGUE_INFO = Duration.ofHours(24);
@@ -109,6 +120,36 @@ public class LeagueDetailLazySync {
     private final java.util.Set<Long> knownCoveredLeagues =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    /** 429 cooldown durumu — cooldown aktifken hiç backfill başlatma. */
+    private final ApiQuotaTracker quotaTracker;
+    /** Lig-bazlı son tetik zamanı — {@link #RECENT_ENSURE_GUARD} için. */
+    private final Map<Long, Instant> recentlyEnsured = new ConcurrentHashMap<>();
+
+    /**
+     * Ağır backfill (standings/fixtures/top players + sezon prefetch) için ÖZEL
+     * sınırlı havuz. Eskiden request thread'i (senkron ensureFor) / stv-async
+     * kullanılıyordu; bot seli altında bunlar dolup 504'e yol açabiliyordu. İzole;
+     * kuyruk dolunca {@link ThreadPoolExecutor.DiscardPolicy} ile fazlası düşürülür.
+     * Daemon.
+     */
+    private final ExecutorService lazyExecutor = new ThreadPoolExecutor(
+            2, 6, 60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(200),
+            new ThreadFactory() {
+                private final AtomicInteger n = new AtomicInteger();
+                @Override public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "stv-league-lazy-" + n.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                }
+            },
+            new ThreadPoolExecutor.DiscardPolicy());
+
+    @PreDestroy
+    void shutdownLazyExecutor() {
+        lazyExecutor.shutdown();
+    }
+
     public LeagueDetailLazySync(LeagueRepository leagueRepository,
                                 SeasonRepository seasonRepository,
                                 StandingRepository standingRepository,
@@ -118,6 +159,7 @@ public class LeagueDetailLazySync {
                                 StandingsSyncService standingsSyncService,
                                 FixtureSyncService fixtureSyncService,
                                 TopPlayersSyncService topPlayersSyncService,
+                                ApiQuotaTracker quotaTracker,
                                 @Lazy LeagueDetailLazySync self) {
         this.leagueRepository = leagueRepository;
         this.seasonRepository = seasonRepository;
@@ -128,6 +170,7 @@ public class LeagueDetailLazySync {
         this.standingsSyncService = standingsSyncService;
         this.fixtureSyncService = fixtureSyncService;
         this.topPlayersSyncService = topPlayersSyncService;
+        this.quotaTracker = quotaTracker;
         this.self = self;
     }
 
@@ -209,14 +252,26 @@ public class LeagueDetailLazySync {
      * <p>Spring AOP gerekligi: self proxy uzerinden cagri zorunlu (aksi
      * halde @Async bypass olur, metod senkron calisir).
      */
-    @Async
     public void ensureForAsync(Long leagueId, Integer requestedSeason) {
-        try {
-            ensureFor(leagueId, requestedSeason);
-        } catch (RuntimeException ex) {
-            log.warn("Async lig ensure hatasi: leagueId={} season={} — {}",
-                    leagueId, requestedSeason, ex.getMessage());
+        if (quotaTracker.cooldownRemainingMillis() > 0) {
+            return; // cooldown → tazeleme atla (DB'de zaten veri var)
         }
+        final Instant now = Instant.now();
+        final Instant last = recentlyEnsured.get(leagueId);
+        if (last != null && last.isAfter(now.minus(RECENT_ENSURE_GUARD))) {
+            return; // yakında zaten tazeledik (bot aynı sayfayı döngüde tarar)
+        }
+        if (recentlyEnsured.size() > 20_000) recentlyEnsured.clear();
+        recentlyEnsured.put(leagueId, now);
+        // ÖZEL sınırlı havuz (stv-async/request thread değil); dolunca DiscardPolicy.
+        lazyExecutor.execute(() -> {
+            try {
+                ensureFor(leagueId, requestedSeason);
+            } catch (RuntimeException ex) {
+                log.warn("Async lig ensure hatasi: leagueId={} season={} — {}",
+                        leagueId, requestedSeason, ex.getMessage());
+            }
+        });
     }
 
     /**

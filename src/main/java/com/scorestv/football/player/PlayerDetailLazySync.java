@@ -1,6 +1,7 @@
 package com.scorestv.football.player;
 
 import com.scorestv.common.ApiException;
+import com.scorestv.football.ApiQuotaTracker;
 import com.scorestv.football.FootballCacheNames;
 import com.scorestv.football.domain.Player;
 import com.scorestv.football.domain.PlayerCareerTeamRepository;
@@ -14,6 +15,7 @@ import com.scorestv.football.sync.PlayerProfileSyncService;
 import com.scorestv.football.sync.PlayerTrophiesSyncService;
 import com.scorestv.football.sync.SidelinedSyncService;
 import com.scorestv.football.sync.TransfersSyncService;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;
@@ -28,6 +30,13 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -53,6 +62,14 @@ public class PlayerDetailLazySync {
     private static final Logger log = LoggerFactory.getLogger(PlayerDetailLazySync.class);
 
     private static final Duration EMPTY_RETRY = Duration.ofMinutes(10);
+
+    /** Aynı oyuncu bu pencerede zaten tetiklendiyse yeniden backfill açılmaz —
+     *  bot/crawler aynı sayfaları döngüde tarayınca API + thread selini keser. */
+    private static final Duration RECENT_ENSURE_GUARD = Duration.ofSeconds(30);
+    /** Aynı anda kaç YENİ oyuncu için SENKRON profil çekimine izin var. Bot seli
+     *  request thread'lerini doldurmasın: tavan dolunca senkron atlanır (thin/404
+     *  hızlı döner, arka plan + sonraki ziyaret toparlar) → 504 yığılması biter. */
+    private static final int SYNC_PROFILE_PERMITS = 6;
 
     private static final Duration FRESH_PROFILE = Duration.ofHours(24);
     private static final Duration FRESH_CAREER_TEAMS = Duration.ofHours(24);
@@ -83,6 +100,39 @@ public class PlayerDetailLazySync {
     private final java.util.Set<Long> knownCoveredPlayers =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    /** 429 cooldown durumu — cooldown aktifken hiç backfill başlatma. */
+    private final ApiQuotaTracker quotaTracker;
+    /** Oyuncu-bazlı son tetik zamanı — {@link #RECENT_ENSURE_GUARD} için. */
+    private final java.util.Map<Long, Instant> recentlyEnsured = new ConcurrentHashMap<>();
+    /** Eşzamanlı SENKRON profil çekimi tavanı (bot request-thread yığılmasını keser). */
+    private final Semaphore syncProfileGate = new Semaphore(SYNC_PROFILE_PERMITS);
+
+    /**
+     * Ağır backfill (kariyer/kupa/transfer/sakatlık/stat) için ÖZEL sınırlı havuz.
+     * Eskiden {@code @Async} (stv-async) veya request thread'i kullanılıyordu; bot
+     * seli altında bunlar dolup 504'e yol açıyordu. Bu havuz izole; kuyruk dolunca
+     * {@link ThreadPoolExecutor.DiscardPolicy} ile fazlası SESSİZCE düşürülür —
+     * zenginleştirme best-effort'tur, DailyPlayerRefreshJob + sonraki ziyaret
+     * toparlar. Daemon thread'ler.
+     */
+    private final ExecutorService lazyExecutor = new ThreadPoolExecutor(
+            4, 8, 60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(200),
+            new ThreadFactory() {
+                private final AtomicInteger n = new AtomicInteger();
+                @Override public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "stv-player-lazy-" + n.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                }
+            },
+            new ThreadPoolExecutor.DiscardPolicy());
+
+    @PreDestroy
+    void shutdownLazyExecutor() {
+        lazyExecutor.shutdown();
+    }
+
     public PlayerDetailLazySync(PlayerRepository playerRepository,
                                 PlayerCareerTeamRepository careerTeamRepository,
                                 PlayerTrophyRepository trophyRepository,
@@ -95,6 +145,7 @@ public class PlayerDetailLazySync {
                                 TransfersSyncService transfersSyncService,
                                 SidelinedSyncService sidelinedSyncService,
                                 CacheManager cacheManager,
+                                ApiQuotaTracker quotaTracker,
                                 @Lazy PlayerDetailLazySync self) {
         this.playerRepository = playerRepository;
         this.careerTeamRepository = careerTeamRepository;
@@ -108,6 +159,7 @@ public class PlayerDetailLazySync {
         this.transfersSyncService = transfersSyncService;
         this.sidelinedSyncService = sidelinedSyncService;
         this.cacheManager = cacheManager;
+        this.quotaTracker = quotaTracker;
         this.self = self;
     }
 
@@ -138,6 +190,16 @@ public class PlayerDetailLazySync {
         // 2) Auto-cover
         markCoveredIfNeeded(player);
 
+        // 3-7) Ağır modüller.
+        ensureRest(playerId, requestedSeason, currentSeason);
+    }
+
+    /**
+     * Ağır modüller: kariyer takımları, kupalar, sakatlık, transferler, sezon
+     * stats. {@link #ensureFor} (var-olan oyuncu) içinden VE {@link #ensureNewPlayer}
+     * (yeni oyuncu) akışında ARKA PLANDA çağrılır — request thread'ini bloklamaz.
+     */
+    private void ensureRest(Long playerId, Integer requestedSeason, Integer currentSeason) {
         // 3) Career teams
         runIfNeeded("player-career:" + playerId, FRESH_CAREER_TEAMS,
                 () -> careerTeamRepository.countByPlayerId(playerId) == 0,
@@ -180,18 +242,86 @@ public class PlayerDetailLazySync {
     }
 
     /**
+     * YENİ oyuncu (DB'de HİÇ yok) akışı — {@link PlayerDetailService#getById}
+     * çağırır. Bot/crawler yeni ID'leri gezerken request thread'lerini
+     * doldurmasın diye:
+     * <ul>
+     *   <li>429 cooldown aktifse hiç başlama (thin/404 döner);</li>
+     *   <li>aynı oyuncu yakında denendiyse atla ({@link #RECENT_ENSURE_GUARD});</li>
+     *   <li>{@link #syncProfileGate} ({@value #SYNC_PROFILE_PERMITS} izin) dolu ise
+     *       SENKRON atla → yığılma yerine hızlı thin/404;</li>
+     *   <li>izin alınırsa YALNIZ profil (1 API çağrısı) senkron çekilir ki sayfa
+     *       boş gitmesin; kariyer/kupa/transfer/stat ARKA PLANDA sınırlı havuzda.</li>
+     * </ul>
+     */
+    public void ensureNewPlayer(Long playerId, Integer requestedSeason, Integer currentSeason) {
+        if (quotaTracker.cooldownRemainingMillis() > 0) {
+            return; // cooldown → boşuna deneme; DB'de yoksa 404, sonraki ziyaret toparlar
+        }
+        final Instant now = Instant.now();
+        final Instant last = recentlyEnsured.get(playerId);
+        if (last != null && last.isAfter(now.minus(RECENT_ENSURE_GUARD))) {
+            return;
+        }
+        if (!syncProfileGate.tryAcquire()) {
+            return; // eşzamanlı senkron tavan dolu → request thread'i kilitleme
+        }
+        try {
+            recentlyEnsured.put(playerId, now);
+            if (recentlyEnsured.size() > 20_000) recentlyEnsured.clear();
+            // PROFİL (1 çağrı) SENKRON — sayfa boş gitmesin.
+            runIfNeeded("player-profile:" + playerId, FRESH_PROFILE,
+                    () -> !playerRepository.existsById(playerId),
+                    () -> {
+                        if (currentSeason != null) {
+                            profileSyncService.sync(playerId, currentSeason);
+                        }
+                    });
+            Player p = playerRepository.findById(playerId).orElse(null);
+            if (p != null) markCoveredIfNeeded(p);
+        } finally {
+            syncProfileGate.release();
+        }
+        // Gerisini ARKA PLANDA (sınırlı havuz; sel altında DiscardPolicy ile düşer).
+        lazyExecutor.execute(() -> {
+            try {
+                ensureRest(playerId, requestedSeason, currentSeason);
+                evictPlayerCache(playerId);
+            } catch (RuntimeException ex) {
+                log.warn("Player rest arka plan hata playerId={}: {}", playerId, ex.getMessage());
+            }
+        });
+    }
+
+    /**
      * Fire-and-forget — veri DB'de zaten varken response'u BEKLETMEDEN arka
      * planda tazeler. Sync sonrasi cache evict → bir sonraki istek taze gorur.
+     *
+     * <p>Artık {@code @Async} DEĞİL: cooldown + recent-guard geçtikten sonra işi
+     * ÖZEL sınırlı {@link #lazyExecutor}'a atar (stv-async'i bot seliyle
+     * doldurmaz; kuyruk dolarsa DiscardPolicy ile fazlası düşer).
      */
-    @Async
     public void ensureForAsync(Long playerId, Integer requestedSeason, Integer currentSeason) {
-        try {
-            ensureFor(playerId, requestedSeason, currentSeason);
-            evictPlayerCache(playerId);
-        } catch (RuntimeException ex) {
-            log.warn("Async oyuncu ensure hatasi: playerId={} season={} — {}",
-                    playerId, requestedSeason, ex.getMessage());
+        if (quotaTracker.cooldownRemainingMillis() > 0) {
+            return; // cooldown → tazeleme atla (DB'de zaten veri var, sonra tazelenir)
         }
+        final Instant now = Instant.now();
+        final Instant last = recentlyEnsured.get(playerId);
+        if (last != null && last.isAfter(now.minus(RECENT_ENSURE_GUARD))) {
+            return; // yakında zaten tazeledik (bot aynı sayfayı döngüde tarar)
+        }
+        if (recentlyEnsured.size() > 20_000) recentlyEnsured.clear();
+        recentlyEnsured.put(playerId, now);
+        // ÖZEL sınırlı havuz (stv-async değil); kuyruk dolarsa DiscardPolicy düşürür.
+        lazyExecutor.execute(() -> {
+            try {
+                ensureFor(playerId, requestedSeason, currentSeason);
+                evictPlayerCache(playerId);
+            } catch (RuntimeException ex) {
+                log.warn("Async oyuncu ensure hatasi: playerId={} season={} — {}",
+                        playerId, requestedSeason, ex.getMessage());
+            }
+        });
     }
 
     /** Auto-cover: ilk ziyarette covered=true → DailyPlayerRefreshJob girer. */

@@ -111,15 +111,15 @@ public class PlayerDetailService {
 
     public PlayerDetailResponse getById(Long playerId, Integer requestedSeason, boolean turkish) {
         Integer currentSeason = resolvePlayerCurrentSeason(playerId);
-        // Veri ZATEN dolu (profil + kariyer var) → tazelemeyi arka planda yap,
-        // response'u BEKLETME. Ince/eksik (kariyer yok) veya yepyeni ise yine
-        // senkron blokla — boylece kullaniciya hicbir zaman eksik sayfa gitmez.
-        boolean rich = playerRepository.existsById(playerId)
-                && careerTeamRepository.countByPlayerId(playerId) > 0;
-        if (rich) {
+        // Request thread'i ASLA ağır backfill ile bloklama (bot seli yığılmasın):
+        // - Oyuncu DB'de VARSA (ince olsa bile) → arka planda tazele; sayfa mevcut
+        //   profil/verisiyle anında döner, eksikler arka planda dolar (gated).
+        // - YEPYENİ ise → yalnız profil (1 çağrı) SINIRLI senkron (kapı doluysa/
+        //   cooldown'da atlanır → hızlı thin/404), gerisi arka planda.
+        if (playerRepository.existsById(playerId)) {
             lazySync.ensureForAsync(playerId, requestedSeason, currentSeason);
         } else {
-            lazySync.ensureFor(playerId, requestedSeason, currentSeason);
+            lazySync.ensureNewPlayer(playerId, requestedSeason, currentSeason);
         }
         return self.loadCachedResponse(playerId, requestedSeason, turkish);
     }

@@ -1,6 +1,7 @@
 package com.scorestv.football.team;
 
 import com.scorestv.common.ApiException;
+import com.scorestv.football.ApiQuotaTracker;
 import com.scorestv.football.domain.FixtureRepository;
 import com.scorestv.football.domain.League;
 import com.scorestv.football.domain.LeagueRepository;
@@ -29,6 +30,7 @@ import com.scorestv.football.sync.StandingsSyncService;
 import com.scorestv.football.sync.TeamStatisticsSyncService;
 import com.scorestv.football.sync.TeamSyncService;
 import com.scorestv.football.sync.TransfersSyncService;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;
@@ -46,6 +48,13 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -71,6 +80,12 @@ public class TeamDetailLazySync {
     private static final Logger log = LoggerFactory.getLogger(TeamDetailLazySync.class);
 
     private static final Duration EMPTY_RETRY = Duration.ofMinutes(10);
+
+    /** Aynı takım bu pencerede tetiklendiyse yeniden backfill açılmaz (bot guard). */
+    private static final Duration RECENT_ENSURE_GUARD = Duration.ofSeconds(30);
+    /** Aynı anda kaç YENİ takım için SENKRON team-info çekimine izin var
+     *  (bot request-thread yığılmasını keser). */
+    private static final int SYNC_TEAM_PERMITS = 4;
 
     private static final Duration FRESH_TEAM_INFO = Duration.ofHours(24);
     private static final Duration FRESH_SQUAD = Duration.ofHours(24);
@@ -145,6 +160,38 @@ public class TeamDetailLazySync {
     private final java.util.Set<Long> knownCoveredTeams =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    /** 429 cooldown durumu — cooldown aktifken hiç backfill başlatma. */
+    private final ApiQuotaTracker quotaTracker;
+    /** Takım-bazlı son tetik zamanı — {@link #RECENT_ENSURE_GUARD} için. */
+    private final java.util.Map<Long, Instant> recentlyEnsured = new ConcurrentHashMap<>();
+    /** Eşzamanlı SENKRON team-info çekimi tavanı (bot request-thread yığılmasını keser). */
+    private final Semaphore syncTeamGate = new Semaphore(SYNC_TEAM_PERMITS);
+
+    /**
+     * Ağır backfill (squad/stats/standings/fixtures/coach/transfer/...) için ÖZEL
+     * sınırlı havuz. Eskiden request thread'i (senkron ensureFor) veya stv-async
+     * kullanılıyordu; bot seli altında bunlar dolup 504'e yol açıyordu. İzole;
+     * kuyruk dolunca {@link ThreadPoolExecutor.DiscardPolicy} ile fazlası düşürülür
+     * (best-effort; DailyTeamRefreshJob + sonraki ziyaret toparlar). Daemon.
+     */
+    private final ExecutorService lazyExecutor = new ThreadPoolExecutor(
+            4, 8, 60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(200),
+            new ThreadFactory() {
+                private final AtomicInteger n = new AtomicInteger();
+                @Override public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "stv-team-lazy-" + n.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                }
+            },
+            new ThreadPoolExecutor.DiscardPolicy());
+
+    @PreDestroy
+    void shutdownLazyExecutor() {
+        lazyExecutor.shutdown();
+    }
+
     public TeamDetailLazySync(TeamRepository teamRepository,
                               SeasonRepository seasonRepository,
                               LeagueRepository leagueRepository,
@@ -169,6 +216,7 @@ public class TeamDetailLazySync {
                               CoachTrophiesSyncService coachTrophiesSyncService,
                               ReferenceSyncService referenceSyncService,
                               CacheManager cacheManager,
+                              ApiQuotaTracker quotaTracker,
                               @Lazy TeamDetailLazySync self) {
         this.teamRepository = teamRepository;
         this.seasonRepository = seasonRepository;
@@ -194,6 +242,7 @@ public class TeamDetailLazySync {
         this.coachTrophiesSyncService = coachTrophiesSyncService;
         this.referenceSyncService = referenceSyncService;
         this.cacheManager = cacheManager;
+        this.quotaTracker = quotaTracker;
         this.self = self;
     }
 
@@ -312,14 +361,68 @@ public class TeamDetailLazySync {
      * TeamDetailService.refresh()} bunu cagirir; kullanici bekletmez, arka
      * planda tamamlanir.
      */
-    @Async
     public void ensureForAsync(Long teamId, Integer requestedSeason, Integer currentSeason) {
-        try {
-            ensureFor(teamId, requestedSeason, currentSeason);
-        } catch (RuntimeException ex) {
-            log.warn("Async takim ensure hatasi: teamId={} season={} — {}",
-                    teamId, requestedSeason, ex.getMessage());
+        if (quotaTracker.cooldownRemainingMillis() > 0) {
+            return; // cooldown → tazeleme atla (DB'de zaten veri var)
         }
+        final Instant now = Instant.now();
+        final Instant last = recentlyEnsured.get(teamId);
+        if (last != null && last.isAfter(now.minus(RECENT_ENSURE_GUARD))) {
+            return; // yakında zaten tazeledik (bot aynı sayfayı döngüde tarar)
+        }
+        if (recentlyEnsured.size() > 20_000) recentlyEnsured.clear();
+        recentlyEnsured.put(teamId, now);
+        // ÖZEL sınırlı havuz (stv-async/request thread değil); dolunca DiscardPolicy.
+        lazyExecutor.execute(() -> {
+            try {
+                ensureFor(teamId, requestedSeason, currentSeason);
+            } catch (RuntimeException ex) {
+                log.warn("Async takim ensure hatasi: teamId={} season={} — {}",
+                        teamId, requestedSeason, ex.getMessage());
+            }
+        });
+    }
+
+    /**
+     * YENİ takım (DB'de HİÇ yok) akışı — {@link TeamDetailService#getById}
+     * çağırır. Bot/crawler yeni ID'leri gezerken request thread'lerini
+     * doldurmasın diye: 429 cooldown'da atla; aynı takım yakında denendiyse atla;
+     * {@link #syncTeamGate} dolu ise SENKRON atla (hızlı thin/404). İzin alınırsa
+     * YALNIZ team-info (1 API çağrısı) senkron çekilir (sayfa boş gitmesin); ağır
+     * modüller (squad/stats/standings/fixtures/...) ARKA PLANDA sınırlı havuzda.
+     * Sezon keşfi ({@code /leagues?team=X}) de arka planda — request thread'de değil.
+     */
+    public void ensureNewTeam(Long teamId, Integer requestedSeason) {
+        if (quotaTracker.cooldownRemainingMillis() > 0) {
+            return;
+        }
+        final Instant now = Instant.now();
+        final Instant last = recentlyEnsured.get(teamId);
+        if (last != null && last.isAfter(now.minus(RECENT_ENSURE_GUARD))) {
+            return;
+        }
+        if (!syncTeamGate.tryAcquire()) {
+            return; // eşzamanlı senkron tavan dolu → request thread'i kilitleme
+        }
+        try {
+            recentlyEnsured.put(teamId, now);
+            if (recentlyEnsured.size() > 20_000) recentlyEnsured.clear();
+            // Team info (1 çağrı) SENKRON — sayfa boş gitmesin.
+            runIfNeeded("team-info:" + teamId, FRESH_TEAM_INFO,
+                    () -> !teamRepository.existsById(teamId),
+                    () -> teamSyncService.syncOne(teamId));
+            teamRepository.findById(teamId).ifPresent(this::markCoveredIfNeeded);
+        } finally {
+            syncTeamGate.release();
+        }
+        // Gerisini ARKA PLANDA (sezon keşfi dahil; sel altında DiscardPolicy düşer).
+        lazyExecutor.execute(() -> {
+            try {
+                ensureFor(teamId, requestedSeason, null);
+            } catch (RuntimeException ex) {
+                log.warn("Team rest arka plan hata teamId={}: {}", teamId, ex.getMessage());
+            }
+        });
     }
 
     /** Sezon bazli alt modul senkron: stats + standings + fixtures. */
