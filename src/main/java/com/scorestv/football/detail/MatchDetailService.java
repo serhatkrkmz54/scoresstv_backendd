@@ -785,7 +785,7 @@ public class MatchDetailService {
         return new PredictionView(
                 winner,
                 p.getWinOrDraw(),
-                p.getAdvice(),
+                messages.predictionAdvice(p.getAdvice(), turkish),
                 p.getUnderOver(),
                 new PredictionView.Goals(p.getGoalsHome(), p.getGoalsAway()),
                 new PredictionView.Percent(
@@ -1109,7 +1109,7 @@ public class MatchDetailService {
                 teamId,
                 e.getType(), messages.eventType(e.getType(), turkish),
                 e.getDetail(), messages.eventDetail(e.getDetail(), turkish),
-                e.getComments(),
+                messages.eventComment(e.getComments(), turkish),
                 e.getPlayerId(), e.getPlayerName(),
                 e.getAssistId(), e.getAssistName());
     }

@@ -3,6 +3,7 @@ package com.scorestv.basketball.detail;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.scorestv.basketball.BasketballMessages;
 import com.scorestv.basketball.BasketballSeasonNormalizer;
 import com.scorestv.basketball.domain.BasketballGame;
 import com.scorestv.basketball.domain.BasketballGameRepository;
@@ -89,6 +90,7 @@ public class BasketballTeamDetailService {
     private final BasketballTeamSeasonStatRepository teamStatRepo;
     private final BasketballTeamLeagueSeasonRepository junctionRepo;
     private final BasketballTeamDetailLazySync lazySync;
+    private final BasketballMessages messages;
     private final BasketballTeamDetailService self;
 
     public BasketballTeamDetailService(
@@ -100,6 +102,7 @@ public class BasketballTeamDetailService {
             BasketballTeamSeasonStatRepository teamStatRepo,
             BasketballTeamLeagueSeasonRepository junctionRepo,
             BasketballTeamDetailLazySync lazySync,
+            BasketballMessages messages,
             @Lazy BasketballTeamDetailService self) {
         this.teamRepo = teamRepo;
         this.leagueRepo = leagueRepo;
@@ -109,6 +112,7 @@ public class BasketballTeamDetailService {
         this.teamStatRepo = teamStatRepo;
         this.junctionRepo = junctionRepo;
         this.lazySync = lazySync;
+        this.messages = messages;
         this.self = self;
     }
 
@@ -242,7 +246,7 @@ public class BasketballTeamDetailService {
 
         // Standings position
         StandingPosition standingsPosition = league != null
-                ? mapStandingPosition(team.getId(), league.getId(), season)
+                ? mapStandingPosition(team.getId(), league.getId(), season, turkish)
                 : null;
 
         // Overview
@@ -305,7 +309,7 @@ public class BasketballTeamDetailService {
                 displayName,
                 l.getLogo(),
                 SlugUtil.leagueSlug(displayName, l.getId()),
-                l.getType()
+                messages.leagueType(l.getType(), turkish)
         );
     }
 
@@ -415,18 +419,19 @@ public class BasketballTeamDetailService {
         }
     }
 
-    private StandingPosition mapStandingPosition(Long teamId, Long leagueId, String season) {
+    private StandingPosition mapStandingPosition(Long teamId, Long leagueId, String season,
+                                                 boolean turkish) {
         List<BasketballStanding> rows = standingRepo.findForTeam(leagueId, season, teamId);
         if (rows.isEmpty()) return null;
         BasketballStanding s = rows.get(0);
         return new StandingPosition(
                 s.getPosition(),
-                s.getGroupName(),
+                messages.standingGroupName(s.getGroupName(), turkish),
                 s.getGamesPlayedAll(),
                 s.getWonAll(),
                 s.getLostAll(),
                 asBd(s.getWonPercentage()),
-                s.getDescription()
+                messages.standingDescription(s.getDescription(), turkish)
         );
     }
 

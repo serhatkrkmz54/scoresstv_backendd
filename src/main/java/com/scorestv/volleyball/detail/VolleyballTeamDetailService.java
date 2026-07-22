@@ -3,6 +3,7 @@ package com.scorestv.volleyball.detail;
 import com.scorestv.common.ApiException;
 import com.scorestv.common.SlugUtil;
 import com.scorestv.storage.MinioStorageService;
+import com.scorestv.volleyball.VolleyballMessages;
 import com.scorestv.volleyball.VolleyballTeamProfileSyncService;
 import com.scorestv.volleyball.VolleyballTeamStatisticsSyncService;
 import com.scorestv.volleyball.domain.VolleyballGame;
@@ -43,6 +44,7 @@ public class VolleyballTeamDetailService {
     private final VolleyballTeamProfileSyncService profileSync;
     private final VolleyballTeamStatisticsSyncService statsSync;
     private final MinioStorageService storage;
+    private final VolleyballMessages messages;
 
     public VolleyballTeamDetailService(VolleyballTeamRepository teamRepo,
                                        VolleyballLeagueRepository leagueRepo,
@@ -51,7 +53,8 @@ public class VolleyballTeamDetailService {
                                        VolleyballTeamSeasonStatRepository statRepo,
                                        VolleyballTeamProfileSyncService profileSync,
                                        VolleyballTeamStatisticsSyncService statsSync,
-                                       MinioStorageService storage) {
+                                       MinioStorageService storage,
+                                       VolleyballMessages messages) {
         this.teamRepo = teamRepo;
         this.leagueRepo = leagueRepo;
         this.gameRepo = gameRepo;
@@ -60,6 +63,7 @@ public class VolleyballTeamDetailService {
         this.profileSync = profileSync;
         this.statsSync = statsSync;
         this.storage = storage;
+        this.messages = messages;
     }
 
     @Transactional
@@ -131,7 +135,7 @@ public class VolleyballTeamDetailService {
             for (VolleyballStanding s : standingRepo.findForTeam(leagueId, resolvedSeason, teamId)) {
                 standings.add(new VolleyballTeamDetailResponse.StandingRow(
                         s.getPosition(),
-                        s.getGroupName(),
+                        messages.standingGroupName(s.getGroupName(), turkish),
                         s.getGamesPlayed(),
                         s.getWon(),
                         s.getLost(),

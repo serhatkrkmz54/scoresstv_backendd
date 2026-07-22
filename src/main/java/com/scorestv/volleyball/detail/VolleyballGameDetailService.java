@@ -214,7 +214,7 @@ public class VolleyballGameDetailService {
         return new LeagueRef(
                 league.getId(),
                 league.getName(),
-                league.getType(),
+                messages.leagueType(league.getType(), turkish),
                 slug,
                 league.getLogo(),
                 league.getCountryName(),
@@ -302,13 +302,14 @@ public class VolleyballGameDetailService {
                                     ? (s.getSetsFor() - s.getSetsAgainst()) : null,
                             s.getPoints(),
                             s.getForm(),
-                            s.getDescription()
+                            messages.standingDescription(s.getDescription(), turkish)
                     ));
             stageByGroup.putIfAbsent(gname, s.getStage());
         }
         List<StandingsGroup> out = new ArrayList<>(byGroup.size());
         for (Map.Entry<String, List<StandingRow>> e : byGroup.entrySet()) {
-            out.add(new StandingsGroup(e.getKey(), stageByGroup.get(e.getKey()), e.getValue()));
+            out.add(new StandingsGroup(messages.standingGroupName(e.getKey(), turkish),
+                    stageByGroup.get(e.getKey()), e.getValue()));
         }
         return out;
     }

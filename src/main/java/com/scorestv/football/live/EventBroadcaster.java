@@ -52,7 +52,7 @@ public class EventBroadcaster {
                 teamId,
                 e.getType(), messages.eventType(e.getType(), turkish),
                 e.getDetail(), messages.eventDetail(e.getDetail(), turkish),
-                e.getComments(),
+                messages.eventComment(e.getComments(), turkish),
                 e.getPlayerId(), e.getPlayerName(),
                 e.getAssistId(), e.getAssistName());
     }

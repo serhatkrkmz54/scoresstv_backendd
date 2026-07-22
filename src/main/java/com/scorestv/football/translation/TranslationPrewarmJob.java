@@ -75,6 +75,10 @@ public class TranslationPrewarmJob {
                 "SELECT DISTINCT i.reason FROM Injury i WHERE i.reason IS NOT NULL");
         sweep(AutoTranslateService.CAT_INJURY_TYPE,
                 "SELECT DISTINCT i.type FROM Injury i WHERE i.type IS NOT NULL");
+        // Oyuncu sayfasi sakatlik sekmesi: player_sidelined.type de injuryReason'dan
+        // gecer (ayni CAT_INJURY_REASON kategorisi/cache'i) — onu da on-isit.
+        sweep(AutoTranslateService.CAT_INJURY_REASON,
+                "SELECT DISTINCT ps.type FROM PlayerSidelined ps WHERE ps.type IS NOT NULL");
         sweep(AutoTranslateService.CAT_STATISTIC,
                 "SELECT DISTINCT s.statType FROM FixtureStatistic s WHERE s.statType IS NOT NULL");
         sweep(AutoTranslateService.CAT_STANDING,
@@ -85,6 +89,17 @@ public class TranslationPrewarmJob {
                 "SELECT DISTINCT t.transferType FROM Transfer t WHERE t.transferType IS NOT NULL");
         sweep(AutoTranslateService.CAT_TROPHY,
                 "SELECT DISTINCT c.place FROM CoachTrophy c WHERE c.place IS NOT NULL");
+        sweep(AutoTranslateService.CAT_SURFACE,
+                "SELECT DISTINCT v.surface FROM Venue v WHERE v.surface IS NOT NULL");
+        sweep(AutoTranslateService.CAT_GROUP,
+                "SELECT DISTINCT st.groupName FROM Standing st WHERE st.groupName IS NOT NULL");
+        sweep(AutoTranslateService.CAT_PREDICTION_COMMENT,
+                "SELECT DISTINCT p.winnerComment FROM Prediction p WHERE p.winnerComment IS NOT NULL");
+        sweep(AutoTranslateService.CAT_EVENT_COMMENT,
+                "SELECT DISTINCT e.comments FROM FixtureEvent e WHERE e.comments IS NOT NULL");
+        // NOT: prediction.advice ve player position on-isitilmaz — advice yuksek
+        // cesitlilikte (takim adi+sayi gomulu) oldugu icin kotayi yakabilir; ikisi de
+        // yalniz gorulduce (serve-path) doldurulur.
         log.info("AutoTranslate prewarm sweep tamamlandi");
     }
 

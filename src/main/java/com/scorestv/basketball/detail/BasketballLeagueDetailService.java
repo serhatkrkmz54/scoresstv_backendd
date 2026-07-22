@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.scorestv.basketball.BasketballMessages;
 import com.scorestv.basketball.BkLeagueDto;
 import com.scorestv.basketball.domain.BasketballGame;
 import com.scorestv.basketball.domain.BasketballGameRepository;
@@ -77,6 +78,7 @@ public class BasketballLeagueDetailService {
     private final BasketballLeagueDetailLazySync lazySync;
     private final BasketballLeagueDetailSeoBuilder seoBuilder;
     private final MinioStorageService storage;
+    private final BasketballMessages messages;
 
     /**
      * Lokal ObjectMapper — Spring DI'da custom {@code RedisConfig} mapper'i
@@ -93,7 +95,8 @@ public class BasketballLeagueDetailService {
             BasketballLeagueTopPlayerRepository topPlayerRepo,
             BasketballLeagueDetailLazySync lazySync,
             BasketballLeagueDetailSeoBuilder seoBuilder,
-            MinioStorageService storage) {
+            MinioStorageService storage,
+            BasketballMessages messages) {
         this.leagueRepo = leagueRepo;
         this.standingRepo = standingRepo;
         this.gameRepo = gameRepo;
@@ -101,6 +104,7 @@ public class BasketballLeagueDetailService {
         this.lazySync = lazySync;
         this.seoBuilder = seoBuilder;
         this.storage = storage;
+        this.messages = messages;
     }
 
     /**
@@ -191,7 +195,7 @@ public class BasketballLeagueDetailService {
                 league.getId(),
                 league.getSlug(),
                 displayName,
-                league.getType(),
+                messages.leagueType(league.getType(), turkish),
                 resolveImage(league.getLogoKey(), league.getLogo()),
                 country,
                 league.getCurrentSeason(),
@@ -278,20 +282,20 @@ public class BasketballLeagueDetailService {
         Map<String, String> stageByGroup = new LinkedHashMap<>();
         for (BasketballStanding s : rows) {
             String groupName = s.getGroupName() != null ? s.getGroupName() : "";
-            byGroup.computeIfAbsent(groupName, k -> new ArrayList<>()).add(mapStandingRow(s));
+            byGroup.computeIfAbsent(groupName, k -> new ArrayList<>()).add(mapStandingRow(s, turkish));
             stageByGroup.putIfAbsent(groupName, s.getStage());
         }
         List<StandingsGroup> out = new ArrayList<>(byGroup.size());
         for (var entry : byGroup.entrySet()) {
             out.add(new StandingsGroup(
-                    entry.getKey(),
+                    messages.standingGroupName(entry.getKey(), turkish),
                     stageByGroup.get(entry.getKey()),
                     entry.getValue()));
         }
         return out;
     }
 
-    private StandingRow mapStandingRow(BasketballStanding s) {
+    private StandingRow mapStandingRow(BasketballStanding s, boolean turkish) {
         BasketballTeam t = s.getTeam();
         var teamRef = t == null ? null : new TeamRef(
                 t.getId(), t.getName(), null,
@@ -313,7 +317,7 @@ public class BasketballLeagueDetailService {
                 pointsDiff,
                 s.getForm(),
                 s.getDescription(),
-                s.getDescription());  // descriptionText i18n cagri seviyesinde
+                messages.standingDescription(s.getDescription(), turkish));
     }
 
     /** Recent (FT) veya upcoming (NS) maclari yukler. */

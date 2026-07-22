@@ -65,8 +65,12 @@ public class FootballMessages {
         if (statusShort == null || statusShort.isBlank()) {
             return englishLong;
         }
-        return messageSource.getMessage(
-                "football.status." + statusShort.trim(), null, englishLong, locale(turkish));
+        try {
+            return messageSource.getMessage(
+                    "football.status." + statusShort.trim(), null, locale(turkish));
+        } catch (NoSuchMessageException e) {
+            return autoTr(AutoTranslateService.CAT_STATUS, englishLong, turkish);
+        }
     }
 
     /**
@@ -77,8 +81,12 @@ public class FootballMessages {
         if (type == null || type.isBlank()) {
             return type;
         }
-        return messageSource.getMessage(
-                "football.leagueType." + type.trim(), null, type, locale(turkish));
+        try {
+            return messageSource.getMessage(
+                    "football.leagueType." + type.trim(), null, locale(turkish));
+        } catch (NoSuchMessageException e) {
+            return autoTr(AutoTranslateService.CAT_LEAGUE_TYPE, type, turkish);
+        }
     }
 
     /**
@@ -89,8 +97,12 @@ public class FootballMessages {
         if (surface == null || surface.isBlank()) {
             return surface;
         }
-        return messageSource.getMessage(
-                "football.surface." + slug(surface), null, surface, locale(turkish));
+        try {
+            return messageSource.getMessage(
+                    "football.surface." + slug(surface), null, locale(turkish));
+        } catch (NoSuchMessageException e) {
+            return autoTr(AutoTranslateService.CAT_SURFACE, surface, turkish);
+        }
     }
 
     /**
@@ -239,9 +251,29 @@ public class FootballMessages {
         if (comment == null || comment.isBlank()) {
             return comment;
         }
-        return messageSource.getMessage(
-                "football.prediction.comment." + slug(comment),
-                null, comment, locale(turkish));
+        try {
+            return messageSource.getMessage(
+                    "football.prediction.comment." + slug(comment), null, locale(turkish));
+        } catch (NoSuchMessageException e) {
+            return autoTr(AutoTranslateService.CAT_PREDICTION_COMMENT, comment, turkish);
+        }
+    }
+
+    /**
+     * Tahmin tavsiyesi (API-Football {@code prediction.advice} — serbest metin,
+     * ör. "Combo Double chance : X or draw and -3.5 goals"). Sözlük yok; doğrudan
+     * DeepL fallback (async). DTO değişmez — değer yerinde çevrilir.
+     */
+    public String predictionAdvice(String advice, boolean turkish) {
+        return autoTr(AutoTranslateService.CAT_PREDICTION_ADVICE, advice, turkish);
+    }
+
+    /**
+     * Olay yorumu (API-Football {@code event.comments} — serbest metin, ör. VAR
+     * notu "Goal cancelled - offside"). Sözlük yok; doğrudan DeepL fallback.
+     */
+    public String eventComment(String comment, boolean turkish) {
+        return autoTr(AutoTranslateService.CAT_EVENT_COMMENT, comment, turkish);
     }
 
     /**
@@ -564,7 +596,8 @@ public class FootballMessages {
         if (trimmed.equalsIgnoreCase("normal") || trimmed.equalsIgnoreCase("group")) {
             return "Sıralama";
         }
-        return trimmed;
+        // "Group X" değil serbest grup adı (ör. "Championship Round") → DeepL fallback
+        return autoTr(AutoTranslateService.CAT_GROUP, trimmed, turkish);
     }
 
     /**
@@ -575,11 +608,12 @@ public class FootballMessages {
         if (position == null || position.isBlank()) {
             return position;
         }
-        return messageSource.getMessage(
-                "football.position." + slug(position),
-                null,
-                position,
-                locale(turkish));
+        try {
+            return messageSource.getMessage(
+                    "football.position." + slug(position), null, locale(turkish));
+        } catch (NoSuchMessageException e) {
+            return autoTr(AutoTranslateService.CAT_POSITION, position, turkish);
+        }
     }
 
     /**

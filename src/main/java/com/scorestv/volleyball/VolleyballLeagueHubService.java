@@ -27,13 +27,16 @@ public class VolleyballLeagueHubService {
     private final VolleyballLeagueRepository leagueRepository;
     private final VolleyballCountryRepository countryRepository;
     private final MinioStorageService storage;
+    private final VolleyballMessages messages;
 
     public VolleyballLeagueHubService(VolleyballLeagueRepository leagueRepository,
                                       VolleyballCountryRepository countryRepository,
-                                      MinioStorageService storage) {
+                                      MinioStorageService storage,
+                                      VolleyballMessages messages) {
         this.leagueRepository = leagueRepository;
         this.countryRepository = countryRepository;
         this.storage = storage;
+        this.messages = messages;
     }
 
     @Transactional(readOnly = true)
@@ -90,7 +93,8 @@ public class VolleyballLeagueHubService {
                 String logo = l.getLogoKey() != null ? storage.publicUrl(l.getLogoKey())
                         : l.getLogo();
                 refs.add(new VolleyballLeagueHubResponse.LeagueRef(
-                        l.getId(), name, logo, l.getType(), l.getCurrentSeason()));
+                        l.getId(), name, logo, messages.leagueType(l.getType(), turkish),
+                        l.getCurrentSeason()));
             }
             groups.add(new VolleyballLeagueHubResponse.CountryGroup(
                     displayCountry, code, flag, refs));

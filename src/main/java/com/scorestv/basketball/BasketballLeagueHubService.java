@@ -38,13 +38,16 @@ public class BasketballLeagueHubService {
     private final BasketballLeagueRepository leagueRepository;
     private final BasketballCountryRepository countryRepository;
     private final MinioStorageService storage;
+    private final BasketballMessages messages;
 
     public BasketballLeagueHubService(BasketballLeagueRepository leagueRepository,
                                       BasketballCountryRepository countryRepository,
-                                      MinioStorageService storage) {
+                                      MinioStorageService storage,
+                                      BasketballMessages messages) {
         this.leagueRepository = leagueRepository;
         this.countryRepository = countryRepository;
         this.storage = storage;
+        this.messages = messages;
     }
 
     /**
@@ -116,7 +119,7 @@ public class BasketballLeagueHubService {
                         l.getId(),
                         name,
                         logo,
-                        l.getType(),
+                        messages.leagueType(l.getType(), turkish),
                         l.getCurrentSeason()));
             }
             groups.add(new BasketballLeagueHubResponse.CountryGroup(

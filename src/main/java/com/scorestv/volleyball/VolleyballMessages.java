@@ -1,5 +1,6 @@
 package com.scorestv.volleyball;
 
+import com.scorestv.football.FootballMessages;
 import org.springframework.context.MessageSource;
 import org.springframework.stereotype.Component;
 
@@ -20,13 +21,35 @@ public class VolleyballMessages {
     private static final Locale ENGLISH = Locale.ENGLISH;
 
     private final MessageSource messageSource;
+    /**
+     * Puan durumu açıklaması / grup adı / lig türü çevirileri futbolla ORTAKTIR
+     * (spordan bağımsız). Aynı sözlük + parser + DeepL cache'i paylaşmak için
+     * {@link FootballMessages}'a delege ederiz — tek kaynak, tam parite.
+     */
+    private final FootballMessages footballMessages;
 
-    public VolleyballMessages(MessageSource messageSource) {
+    public VolleyballMessages(MessageSource messageSource, FootballMessages footballMessages) {
         this.messageSource = messageSource;
+        this.footballMessages = footballMessages;
     }
 
     private static Locale locale(boolean turkish) {
         return turkish ? TURKISH : ENGLISH;
+    }
+
+    /** Puan durumu açıklaması — TR sözlük + DeepL (futbolla ortak). */
+    public String standingDescription(String description, boolean turkish) {
+        return footballMessages.standingDescription(description, turkish);
+    }
+
+    /** Grup adı ("Group A"→"Grup A", serbest adlar DeepL) — futbolla ortak. */
+    public String standingGroupName(String groupName, boolean turkish) {
+        return footballMessages.standingGroupName(groupName, turkish);
+    }
+
+    /** Lig türü ("League"→"Lig", "Cup"→"Kupa", diğerleri DeepL) — futbolla ortak. */
+    public String leagueType(String type, boolean turkish) {
+        return footballMessages.leagueType(type, turkish);
     }
 
     /**

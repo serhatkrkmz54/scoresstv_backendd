@@ -270,7 +270,7 @@ public class BasketballGameDetailService {
         return new LeagueRef(
                 league.getId(),
                 league.getName(),
-                league.getType(),
+                messages.leagueType(league.getType(), turkish),
                 slug,
                 league.getLogo(),
                 league.getCountryName(),
@@ -399,13 +399,14 @@ public class BasketballGameDetailService {
                                     ? (s.getPointsFor() - s.getPointsAgainst()) : null,
                             s.getForm(),
                             s.getDescription(),
-                            s.getDescription()   // B-Faz5 BasketballMessages'da cevrilecek
+                            messages.standingDescription(s.getDescription(), turkish)
                     ));
             stageByGroup.putIfAbsent(gname, s.getStage());
         }
         List<StandingsGroup> out = new ArrayList<>(byGroup.size());
         for (Map.Entry<String, List<StandingRow>> e : byGroup.entrySet()) {
-            out.add(new StandingsGroup(e.getKey(), stageByGroup.get(e.getKey()), e.getValue()));
+            out.add(new StandingsGroup(messages.standingGroupName(e.getKey(), turkish),
+                    stageByGroup.get(e.getKey()), e.getValue()));
         }
         return out;
     }

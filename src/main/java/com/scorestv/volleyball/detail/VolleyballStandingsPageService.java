@@ -3,6 +3,7 @@ package com.scorestv.volleyball.detail;
 import com.scorestv.common.ApiException;
 import com.scorestv.common.SlugUtil;
 import com.scorestv.storage.MinioStorageService;
+import com.scorestv.volleyball.VolleyballMessages;
 import com.scorestv.volleyball.VolleyballSeasonNormalizer;
 import com.scorestv.volleyball.VolleyballStandingsSyncService;
 import com.scorestv.volleyball.domain.VolleyballLeague;
@@ -33,15 +34,18 @@ public class VolleyballStandingsPageService {
     private final VolleyballStandingRepository standingRepo;
     private final VolleyballStandingsSyncService standingsSync;
     private final MinioStorageService storage;
+    private final VolleyballMessages messages;
 
     public VolleyballStandingsPageService(VolleyballLeagueRepository leagueRepo,
                                           VolleyballStandingRepository standingRepo,
                                           VolleyballStandingsSyncService standingsSync,
-                                          MinioStorageService storage) {
+                                          MinioStorageService storage,
+                                          VolleyballMessages messages) {
         this.leagueRepo = leagueRepo;
         this.standingRepo = standingRepo;
         this.standingsSync = standingsSync;
         this.storage = storage;
+        this.messages = messages;
     }
 
     @Transactional
@@ -126,14 +130,15 @@ public class VolleyballStandingsPageService {
                                     ? (s.getSetsFor() - s.getSetsAgainst()) : null,
                             s.getPoints(),
                             s.getForm(),
-                            s.getDescription()));
+                            messages.standingDescription(s.getDescription(), turkish)));
             stageByGroup.putIfAbsent(gname, s.getStage());
         }
 
         List<VolleyballStandingsPageResponse.Group> groups = new ArrayList<>(byGroup.size());
         for (Map.Entry<String, List<VolleyballStandingsPageResponse.Row>> e : byGroup.entrySet()) {
             groups.add(new VolleyballStandingsPageResponse.Group(
-                    e.getKey(), stageByGroup.get(e.getKey()), e.getValue()));
+                    messages.standingGroupName(e.getKey(), turkish),
+                    stageByGroup.get(e.getKey()), e.getValue()));
         }
 
         String leagueName = turkish && league.getNameTr() != null

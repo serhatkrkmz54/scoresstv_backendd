@@ -1,5 +1,6 @@
 package com.scorestv.basketball.detail;
 
+import com.scorestv.basketball.BasketballMessages;
 import com.scorestv.basketball.BasketballStandingsSyncService;
 import com.scorestv.basketball.domain.BasketballGameRepository;
 import com.scorestv.basketball.domain.BasketballLeague;
@@ -53,6 +54,7 @@ public class BasketballStandingsPageService {
     private final BasketballSeasonRepository seasonRepo;
     private final BasketballGameRepository gameRepo;
     private final BasketballStandingsSyncService syncService;
+    private final BasketballMessages messages;
     private final BasketballStandingsPageService self;
 
     public BasketballStandingsPageService(BasketballLeagueRepository leagueRepo,
@@ -60,12 +62,14 @@ public class BasketballStandingsPageService {
                                            BasketballSeasonRepository seasonRepo,
                                            BasketballGameRepository gameRepo,
                                            BasketballStandingsSyncService syncService,
+                                           BasketballMessages messages,
                                            @Lazy BasketballStandingsPageService self) {
         this.leagueRepo = leagueRepo;
         this.standingRepo = standingRepo;
         this.seasonRepo = seasonRepo;
         this.gameRepo = gameRepo;
         this.syncService = syncService;
+        this.messages = messages;
         this.self = self;
     }
 
@@ -181,7 +185,7 @@ public class BasketballStandingsPageService {
                 l.getId(),
                 l.getName(),
                 displayName,
-                l.getType(),
+                messages.leagueType(l.getType(), turkish),
                 SlugUtil.leagueSlug(displayName, l.getId()),
                 l.getLogo(),
                 l.getCountryName(),
@@ -227,13 +231,14 @@ public class BasketballStandingsPageService {
                             (s.getPointsFor() != null && s.getPointsAgainst() != null)
                                     ? (s.getPointsFor() - s.getPointsAgainst()) : null,
                             s.getForm(),
-                            s.getDescription()
+                            messages.standingDescription(s.getDescription(), turkish)
                     ));
             stageByGroup.putIfAbsent(gname, s.getStage());
         }
         List<StandingsGroup> out = new ArrayList<>(byGroup.size());
         for (Map.Entry<String, List<StandingRow>> e : byGroup.entrySet()) {
-            out.add(new StandingsGroup(e.getKey(), stageByGroup.get(e.getKey()), e.getValue()));
+            out.add(new StandingsGroup(messages.standingGroupName(e.getKey(), turkish),
+                    stageByGroup.get(e.getKey()), e.getValue()));
         }
         return out;
     }
