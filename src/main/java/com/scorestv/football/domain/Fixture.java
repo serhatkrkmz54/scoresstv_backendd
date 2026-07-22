@@ -53,6 +53,24 @@ public class Fixture {
     @JoinColumn(name = "away_team_id", nullable = false)
     private Team awayTeam;
 
+    /**
+     * FK kolonlarının SALT-OKUNUR eşlemesi (yazma {@link #homeTeam}/{@link #awayTeam}
+     * ilişkisinden gider; bu alanlar insertable/updatable=false).
+     *
+     * <p>NEDEN: Takım sayfası sorgularında filtreyi {@code f.homeTeam.id} ile
+     * yazınca, JOIN FETCH f.homeTeam yüzünden Hibernate koşulu join'lenen teams
+     * alias'ına ({@code ht.id}) bindliyordu; bu da {@code idx_fixtures_home_team_id}
+     * / {@code idx_fixtures_away_team_id} index'lerini devre dışı bırakıp fixtures
+     * FULL-SCAN'e (1-1.7 sn) yol açıyordu. Bu alanlarla ({@code f.homeTeamId})
+     * koşul DOĞRUDAN {@code f.home_team_id} FK kolonuna biner → BitmapOr index →
+     * sadece o takımın maçları okunur (~ms).
+     */
+    @Column(name = "home_team_id", insertable = false, updatable = false)
+    private Long homeTeamId;
+
+    @Column(name = "away_team_id", insertable = false, updatable = false)
+    private Long awayTeamId;
+
     /** Maçın oynandığı stadyum (opsiyonel, FK). */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "venue_id")

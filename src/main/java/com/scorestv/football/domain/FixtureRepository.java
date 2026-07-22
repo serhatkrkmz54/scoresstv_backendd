@@ -270,8 +270,8 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "JOIN FETCH f.league "
             + "JOIN FETCH f.homeTeam "
             + "JOIN FETCH f.awayTeam "
-            + "WHERE ((f.homeTeam.id = :teamA AND f.awayTeam.id = :teamB) "
-            + "    OR (f.homeTeam.id = :teamB AND f.awayTeam.id = :teamA)) "
+            + "WHERE ((f.homeTeamId = :teamA AND f.awayTeamId = :teamB) "
+            + "    OR (f.homeTeamId = :teamB AND f.awayTeamId = :teamA)) "
             + "  AND f.statusShort IN ('FT', 'AET', 'PEN', 'ABD', 'AWD', 'WO') "
             + "ORDER BY f.kickoffAt DESC")
     List<Fixture> findRecentMeetings(@Param("teamA") Long teamA,
@@ -290,8 +290,8 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "JOIN FETCH f.league "
             + "JOIN FETCH f.homeTeam "
             + "JOIN FETCH f.awayTeam "
-            + "WHERE ((f.homeTeam.id = :teamA AND f.awayTeam.id = :teamB) "
-            + "    OR (f.homeTeam.id = :teamB AND f.awayTeam.id = :teamA)) "
+            + "WHERE ((f.homeTeamId = :teamA AND f.awayTeamId = :teamB) "
+            + "    OR (f.homeTeamId = :teamB AND f.awayTeamId = :teamA)) "
             + "ORDER BY f.kickoffAt DESC")
     List<Fixture> findMeetings(@Param("teamA") Long teamA,
                                @Param("teamB") Long teamB,
@@ -375,7 +375,7 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "JOIN FETCH f.league "
             + "JOIN FETCH f.homeTeam "
             + "JOIN FETCH f.awayTeam "
-            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "WHERE (f.homeTeamId = :teamId OR f.awayTeamId = :teamId) "
             + "  AND f.statusShort IN ('FT','AET','PEN','ABD','AWD','WO') "
             + "ORDER BY f.kickoffAt DESC")
     List<Fixture> findRecentByTeam(@Param("teamId") Long teamId,
@@ -389,7 +389,7 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "JOIN FETCH f.league "
             + "JOIN FETCH f.homeTeam "
             + "JOIN FETCH f.awayTeam "
-            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "WHERE (f.homeTeamId = :teamId OR f.awayTeamId = :teamId) "
             + "  AND f.statusShort IN ('NS','TBD','PST') "
             + "ORDER BY f.kickoffAt ASC")
     List<Fixture> findUpcomingByTeam(@Param("teamId") Long teamId,
@@ -400,7 +400,7 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
      * Takim sayfasi statistics ve standings position icin "hangi ligler" listesi.
      */
     @Query("SELECT DISTINCT f.league.id FROM Fixture f "
-            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "WHERE (f.homeTeamId = :teamId OR f.awayTeamId = :teamId) "
             + "  AND f.season = :season")
     List<Long> findLeagueIdsByTeamAndSeason(@Param("teamId") Long teamId,
                                             @Param("season") Integer season);
@@ -410,7 +410,7 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
      * sayfasi sezon dropdown'unu doldurur.
      */
     @Query("SELECT DISTINCT f.season FROM Fixture f "
-            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "WHERE (f.homeTeamId = :teamId OR f.awayTeamId = :teamId) "
             + "ORDER BY f.season DESC")
     List<Integer> findSeasonYearsByTeam(@Param("teamId") Long teamId);
 
@@ -428,7 +428,7 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "JOIN FETCH f.homeTeam "
             + "JOIN FETCH f.awayTeam "
             + "LEFT JOIN FETCH f.venue "
-            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "WHERE (f.homeTeamId = :teamId OR f.awayTeamId = :teamId) "
             + "  AND f.kickoffAt >= :ref "
             + "ORDER BY f.kickoffAt ASC")
     List<Fixture> findNextByTeamAfter(@Param("teamId") Long teamId,
@@ -448,7 +448,7 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "JOIN FETCH f.homeTeam "
             + "JOIN FETCH f.awayTeam "
             + "LEFT JOIN FETCH f.venue "
-            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "WHERE (f.homeTeamId = :teamId OR f.awayTeamId = :teamId) "
             + "  AND f.kickoffAt < :ref "
             + "ORDER BY f.kickoffAt DESC")
     List<Fixture> findPreviousByTeamBefore(@Param("teamId") Long teamId,
@@ -466,7 +466,7 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "JOIN FETCH f.league "
             + "JOIN FETCH f.homeTeam "
             + "JOIN FETCH f.awayTeam "
-            + "WHERE (f.homeTeam.id = :teamId OR f.awayTeam.id = :teamId) "
+            + "WHERE (f.homeTeamId = :teamId OR f.awayTeamId = :teamId) "
             + "  AND f.statusShort IN ('FT','AET','PEN','ABD','AWD','WO') "
             + "  AND f.kickoffAt < :ref "
             + "ORDER BY f.kickoffAt DESC")
