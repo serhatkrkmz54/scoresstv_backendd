@@ -87,6 +87,18 @@ news:
       # Ucretsiz plan: https://api-free.deepl.com | Pro plan: https://api.deepl.com
       base-url: ${DEEPL_BASE_URL:https://api-free.deepl.com}
 
+# --- API'den gelen Ingilizce sabit metinlerin (sakatlik sebebi, puan durumu
+#     aciklamasi, istatistik adi, round, transfer turu...) DeepL ile TR'ye
+#     OTOMATIK cevrilmesi. FootballMessages'in 3. katmani: sozluk+parser tutmazsa
+#     DeepL'e sorulur, sonuc translation_cache'e yazilir, bir daha cevrilmez.
+#     Ayni DeepL anahtarini (news.translate.deepl.*) kullanir; yeni sir gerekmez.
+translate:
+  auto:
+    # Otomatik ceviri fallback'i acik mi (DeepL anahtari da gerekli).
+    enabled: ${AUTO_TRANSLATE_ENABLED:true}
+    # Acilista mevcut bosluklari toplu doldurma taramasi (tek seferlik, arka plan).
+    prewarm: ${AUTO_TRANSLATE_PREWARM:true}
+
 # --- Uygulamaya ozel ayarlar ---
 scorestv:
   # ============================================================

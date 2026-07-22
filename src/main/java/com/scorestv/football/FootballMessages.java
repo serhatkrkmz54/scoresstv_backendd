@@ -1,5 +1,6 @@
 package com.scorestv.football;
 
+import com.scorestv.football.translation.AutoTranslateService;
 import org.springframework.context.MessageSource;
 import org.springframework.context.NoSuchMessageException;
 import org.springframework.stereotype.Component;
@@ -24,14 +25,31 @@ public class FootballMessages {
     private static final Locale ENGLISH = Locale.ENGLISH;
 
     private final MessageSource messageSource;
+    private final AutoTranslateService autoTranslate;
 
-    public FootballMessages(MessageSource messageSource) {
+    public FootballMessages(MessageSource messageSource, AutoTranslateService autoTranslate) {
         this.messageSource = messageSource;
+        this.autoTranslate = autoTranslate;
     }
 
     /** Locale seçimi: turkish=true → TR; aksi halde EN. */
     private static Locale locale(boolean turkish) {
         return turkish ? TURKISH : ENGLISH;
+    }
+
+    /**
+     * Çeviri 3. katmanı: sözlük ({@code messages_tr.properties}) ve akıllı parser
+     * TUTMADIYSA, ham İngilizce yerine {@link AutoTranslateService} cache'inden
+     * TR karşılığı dener. İlk gören İngilizce görür; DeepL arka planda çevirir,
+     * cache'e yazar; sonraki herkes TR görür. EN hedefinde kaynak aynen döner
+     * (zaten İngilizce). Böylece yeni/az bilinen API metinleri de zamanla
+     * Türkçeleşir — web ve mobil hiç değişmeden.
+     */
+    private String autoTr(String category, String source, boolean turkish) {
+        if (!turkish || source == null || source.isBlank()) {
+            return source;
+        }
+        return autoTranslate.toTurkish(category, source);
     }
 
     /**
@@ -140,8 +158,8 @@ public class FootballMessages {
             }
         }
 
-        // 3) Bilinmeyen — API kaynak metnine düş.
-        return round;
+        // 3) Bilinmeyen — DeepL cache fallback'i (async); yoksa kaynak metin.
+        return autoTr(AutoTranslateService.CAT_ROUND, round, turkish);
     }
 
     /**
@@ -182,7 +200,7 @@ public class FootballMessages {
                     // fall through
                 }
             }
-            return detail;
+            return autoTr(AutoTranslateService.CAT_EVENT_DETAIL, detail, turkish);
         }
     }
 
@@ -205,8 +223,12 @@ public class FootballMessages {
         // bulunamayip ham "Passes %" donuyordu (TR'de cevrilmiyordu). Once
         // metinde % -> " percent", sonra slug.
         String key = slug(type.replace("%", " percent"));
-        return messageSource.getMessage(
-                "football.statistic.type." + key, null, type, locale(turkish));
+        try {
+            return messageSource.getMessage(
+                    "football.statistic.type." + key, null, locale(turkish));
+        } catch (NoSuchMessageException e) {
+            return autoTr(AutoTranslateService.CAT_STATISTIC, type, turkish);
+        }
     }
 
     /**
@@ -266,7 +288,8 @@ public class FootballMessages {
 
         // 3) Akıllı parser — TR için
         String parsed = parseStandingDescriptionTr(trimmed);
-        return parsed != null ? parsed : description;
+        // 4) Parser da tutmadıysa DeepL cache fallback'i (async doldurulur)
+        return parsed != null ? parsed : autoTr(AutoTranslateService.CAT_STANDING, description, true);
     }
 
     /**
@@ -389,8 +412,12 @@ public class FootballMessages {
         if (type == null || type.isBlank()) {
             return type;
         }
-        return messageSource.getMessage(
-                "football.injury.type." + slug(type), null, type, locale(turkish));
+        try {
+            return messageSource.getMessage(
+                    "football.injury.type." + slug(type), null, locale(turkish));
+        } catch (NoSuchMessageException e) {
+            return autoTr(AutoTranslateService.CAT_INJURY_TYPE, type, turkish);
+        }
     }
 
     /**
@@ -429,7 +456,8 @@ public class FootballMessages {
         }
         // 3) TR için akıllı parser
         String parsed = parseInjuryReasonTr(trimmed);
-        return parsed != null ? parsed : reason;
+        // 4) Parser da tutmadıysa DeepL cache fallback'i (async doldurulur)
+        return parsed != null ? parsed : autoTr(AutoTranslateService.CAT_INJURY_REASON, reason, true);
     }
 
     /**
@@ -571,11 +599,12 @@ public class FootballMessages {
                 return trimmed;
             }
         }
-        return messageSource.getMessage(
-                "football.transfer.type." + slug(trimmed),
-                null,
-                trimmed,
-                locale(turkish));
+        try {
+            return messageSource.getMessage(
+                    "football.transfer.type." + slug(trimmed), null, locale(turkish));
+        } catch (NoSuchMessageException e) {
+            return autoTr(AutoTranslateService.CAT_TRANSFER, trimmed, turkish);
+        }
     }
 
     /**
@@ -586,11 +615,12 @@ public class FootballMessages {
         if (place == null || place.isBlank()) {
             return place;
         }
-        return messageSource.getMessage(
-                "football.trophy.place." + slug(place),
-                null,
-                place,
-                locale(turkish));
+        try {
+            return messageSource.getMessage(
+                    "football.trophy.place." + slug(place), null, locale(turkish));
+        } catch (NoSuchMessageException e) {
+            return autoTr(AutoTranslateService.CAT_TROPHY, place, turkish);
+        }
     }
 
     /** Metni anahtara çevirir: küçük harf, alfasayısal olmayan → tire. */

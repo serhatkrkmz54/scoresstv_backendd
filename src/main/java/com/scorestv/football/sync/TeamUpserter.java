@@ -110,7 +110,13 @@ public class TeamUpserter {
 
     /** Stadyumu tam detayıyla upsert eder; id veya ad eksikse null döner. */
     private Venue upsertVenue(TeamApiDto.Venue incoming) {
-        if (incoming == null || incoming.id() == null || incoming.name() == null) {
+        // API-Football alt lig stadyumlarına venue.id=0 (bazen ≤0) verir — GEÇERLİ
+        // bir kimlik DEĞİL. id=0'ı saklarsak dünyadaki TÜM "id'siz" stadyumlar tek
+        // Venue(0) satırına çöker ve birbirini ezer (FixtureUpserter'daki aynı hata).
+        // Burada daha da kötü: tam detay (adres/kapasite/zemin/görsel) tek satıra
+        // yazılıp o satırı kirletir. Bu durumda takıma stadyum BAĞLAMAYIZ.
+        if (incoming == null || incoming.id() == null || incoming.id() <= 0
+                || incoming.name() == null) {
             return null;
         }
         Venue venue = venueRepository.findById(incoming.id()).orElseGet(Venue::new);

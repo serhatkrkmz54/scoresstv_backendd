@@ -181,7 +181,13 @@ public class FixtureUpserter {
 
     /** Stadyumu upsert eder. id veya ad eksikse null döner (venue opsiyoneldir). */
     private Venue upsertVenue(FixtureApiDto.Venue v, Map<Long, Venue> cache) {
-        if (v == null || v.id() == null || v.name() == null) {
+        // API-Football alt lig stadyumlarına venue.id=0 (bazen ≤0) verir — bu
+        // GEÇERLİ bir kimlik DEĞİL. id=0'ı saklarsak dünyadaki TÜM "id'siz"
+        // stadyumlar tek Venue(0) satırına çöker ve birbirini ezer (bir maça
+        // başka ülkenin stadyumu görünür). Bu durumda Venue entity BAĞLAMAYIZ;
+        // ekran fixture'ın kendi venueName/venueCity (per-fixture, doğru)
+        // fallback'ini kullanır (bkz. MatchDetailService.toVenue).
+        if (v == null || v.id() == null || v.id() <= 0 || v.name() == null) {
             return null;
         }
         return cache.computeIfAbsent(v.id(), id -> {
