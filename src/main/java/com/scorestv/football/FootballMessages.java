@@ -335,7 +335,7 @@ public class FootballMessages {
      * Desteklenen aşamalar: Group Stage, Qualifying, Play-offs, Play Offs:
      * 1/16-finals, Knockout Stage, vb.
      */
-    private static String parseStandingDescriptionTr(String desc) {
+    private String parseStandingDescriptionTr(String desc) {
         String prefix = null;
         String rest = desc;
 
@@ -367,13 +367,33 @@ public class FootballMessages {
             phase = rest.substring(parenStart + 1, parenEnd).trim();
         }
 
-        String competitionTr = translateCompetition(competition);
-        String phaseTr = phase != null ? translatePhase(phase) : null;
+        // Statik sözlük denemesi (curated TR — "Champions League"→"Şampiyonlar Ligi").
+        String competitionStatic = translateCompetition(competition);
+        String phaseStatic = phase != null ? translatePhase(phase) : null;
 
-        // Hiç önek + parça çevirisi olmadıysa null
-        if (prefix == null && competitionTr == null && phaseTr == null) {
+        // Hiçbir parça (önek/yarışma/aşama) sözlükte tutmadıysa null dön → çağıran
+        // TÜM metni DeepL'e verir (parça parça değil, bütün cümleyi çevirir).
+        if (prefix == null && competitionStatic == null && phaseStatic == null) {
             return null;
         }
+
+        // En az bir parça tanındı. Bilinen parçalar curated çeviriyle; SÖZLÜKTE
+        // OLMAYAN parçalar (ör. "Reserve League", "Apertura - Play Offs:
+        // Quarter-finals") DeepL'e (async) yönlendirilir — HAM İNGİLİZCE
+        // BIRAKILMAZ. DeepL ilk görüşte İngilizce döner + arka planda çevirir;
+        // sonraki görüşlerde Türkçe gelir. (ÖNCEKİ HATA: önek tanınınca metod
+        // "başarılı" sayılıp bu parçalar DeepL'e HİÇ gitmiyor, kalıcı İngilizce
+        // kalıyordu.)
+        String competitionTr = competitionStatic != null
+                ? competitionStatic
+                : (competition != null && !competition.isBlank()
+                    ? autoTr(AutoTranslateService.CAT_STANDING, competition, true)
+                    : competition);
+        String phaseTr = phaseStatic != null
+                ? phaseStatic
+                : (phase != null && !phase.isBlank()
+                    ? autoTr(AutoTranslateService.CAT_STANDING, phase, true)
+                    : null);
 
         StringBuilder out = new StringBuilder();
         if (prefix != null) {
