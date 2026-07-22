@@ -40,8 +40,29 @@ public record FixtureSummary(
          * Eski cache'lerden migrasyon için null gelebilir (frontend 0 sayar).
          */
         Integer homeRedCards,
-        Integer awayRedCards
+        Integer awayRedCards,
+        /**
+         * Bu maç için "AI Analiz" mevcut mu (lig+sezon reytingi + iki takımın
+         * yeterli maçı var mı). Liste satırında favori yıldızının solunda küçük
+         * bir ikon göstermek için. Eski cache'lerden null gelebilir (frontend
+         * false sayar).
+         */
+        Boolean aiInsight
 ) implements Serializable {
+
+    /**
+     * Eski 13-argümanlı imza (aiInsight yok) — mevcut kurucular derlenmeye devam
+     * etsin diye; {@code aiInsight=false} varsayar. Yalnız liste kurucusu
+     * ({@code FixtureQueryService.toSummary}) 14-arg kanonik kurucuyu çağırıp
+     * gerçek değeri geçer.
+     */
+    public FixtureSummary(Long id, String slug, LeagueRef leagueRef, String round,
+                          Instant kickoff, Instant lastSyncedAt, Status status,
+                          Team homeTeam, Team awayTeam, Score score, Venue venue,
+                          Integer homeRedCards, Integer awayRedCards) {
+        this(id, slug, leagueRef, round, kickoff, lastSyncedAt, status, homeTeam,
+                awayTeam, score, venue, homeRedCards, awayRedCards, Boolean.FALSE);
+    }
 
     /**
      * Maca ait turnuva ozeti — frontend'in hangi yarismanin maci oldugunu

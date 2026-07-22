@@ -71,6 +71,7 @@ public class FixtureQueryService {
     private final MinioStorageService storage;
     private final FootballMessages messages;
     private final LiveFixtureMapper liveFixtureMapper;
+    private final com.scorestv.football.insight.MatchInsightService insightService;
 
     public FixtureQueryService(FixtureRepository fixtureRepository,
                                FixtureEventRepository fixtureEventRepository,
@@ -78,7 +79,8 @@ public class FixtureQueryService {
                                FootballProperties footballProperties,
                                MinioStorageService storage,
                                FootballMessages messages,
-                               LiveFixtureMapper liveFixtureMapper) {
+                               LiveFixtureMapper liveFixtureMapper,
+                               com.scorestv.football.insight.MatchInsightService insightService) {
         this.fixtureRepository = fixtureRepository;
         this.fixtureEventRepository = fixtureEventRepository;
         this.countryRepository = countryRepository;
@@ -86,6 +88,7 @@ public class FixtureQueryService {
         this.storage = storage;
         this.messages = messages;
         this.liveFixtureMapper = liveFixtureMapper;
+        this.insightService = insightService;
     }
 
     /** Site saat dilimine göre bugünün tarihi. */
@@ -318,7 +321,10 @@ public class FixtureQueryService {
                         period(fixture.getScorePenHome(), fixture.getScorePenAway())),
                 toVenue(fixture.getVenue(), turkish),
                 homeRed,
-                awayRed);
+                awayRed,
+                // AI Analiz mevcut mu (lig+sezon reyting cache'li → ucuz). Liste
+                // satırında favori yıldızının solunda ikon için.
+                insightService.isAvailable(fixture));
     }
 
     /**

@@ -42,6 +42,43 @@ public class MatchInsightService {
         this.ratingService = ratingService;
     }
 
+    /**
+     * Bu maç için AI Analiz ÜRETİLEBİLİR mi — {@link #forFixture} ile AYNI
+     * uygunluk koşulları, ama olasılık hesaplamadan (hafif). Liste satırında
+     * "AI var" ikonu için kullanılır. Reyting cache'li ({@link RatingService});
+     * hata/eksik veri → false (ikon gösterilmez).
+     */
+    public boolean isAvailable(Fixture fixture) {
+        if (fixture == null) {
+            return false;
+        }
+        String status = fixture.getStatusShort();
+        if (status != null && VOID_STATUSES.contains(status)) {
+            return false;
+        }
+        Long leagueId = fixture.getLeague() != null ? fixture.getLeague().getId() : null;
+        Integer season = fixture.getSeason();
+        Long homeId = fixture.getHomeTeam() != null ? fixture.getHomeTeam().getId() : null;
+        Long awayId = fixture.getAwayTeam() != null ? fixture.getAwayTeam().getId() : null;
+        if (leagueId == null || season == null || homeId == null || awayId == null) {
+            return false;
+        }
+        try {
+            RatingEngine.Ratings ratings = ratingService.ratingsFor(leagueId, season);
+            if (ratings.matches() < MIN_LEAGUE_MATCHES) {
+                return false;
+            }
+            int homeSeen = ratings.appearances().getOrDefault(homeId, 0);
+            int awaySeen = ratings.appearances().getOrDefault(awayId, 0);
+            return ratings.map().get(homeId) != null
+                    && ratings.map().get(awayId) != null
+                    && homeSeen >= MIN_APPEARANCES
+                    && awaySeen >= MIN_APPEARANCES;
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
     public MatchInsightResponse forFixture(Fixture fixture, boolean turkish) {
         String note = turkish
                 ? "İstatistiksel analiz — bahis tavsiyesi değildir."
