@@ -64,7 +64,9 @@ spring:
     redis:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
+      # Zorunlu — bos default YOK. Redis 0.0.0.0'a bagliysa (bkz. docker ps)
+      # sifresiz Redis ic agdan/dis dunyadan ele gecirilebilir. requirepass sart.
+      password: ${REDIS_PASSWORD}
       timeout: 3000ms
       connect-timeout: 3000ms
       lettuce:
@@ -165,6 +167,15 @@ logging:
     org.springframework.security: WARN
   pattern:
     console: '{"time":"%d{ISO8601}","level":"%level","thread":"%thread","logger":"%logger{36}","msg":"%replace(%message){''[\r\n]+'',''\\\\n''}","trace_id":"%X{traceId:-}","span_id":"%X{spanId:-}"}%n'
+
+# --- Swagger / OpenAPI: PROD'DA KAPALI ---
+# permitAll oldugu icin acik kalirsa api.scorestv.com/swagger-ui.html'den tum
+# API yuzeyi (admin uclari dahil) enumerate edilebilirdi. Prod'da tamamen kapat.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
 
 # =============================================================================
 # Uygulama-spesifik ayarlar
