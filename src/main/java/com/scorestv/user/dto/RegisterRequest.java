@@ -14,7 +14,7 @@ public record RegisterRequest(
         String email,
 
         @NotBlank
-        @Size(min = 3, max = 72, message = "Şifre 3-72 karakter olmalı")
+        @Size(min = 8, max = 72, message = "Şifre 8-72 karakter olmalı")
         String password,
 
         @NotBlank

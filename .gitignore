@@ -11,6 +11,21 @@ firebase-service-account.json
 *.keystore
 *.jks
 conf/secrets/
+# TLS private key + sertifikalar (Cloudflare origin key) — ASLA commit'lenmez
+conf/nginx/certs/
+*.key
+*.pem
+# docker-compose: PANEL_GATE_TOKEN vb. acik sirlar iceriyor — commit'lenmez
+docker-compose.yml
+docker-compose.*.yml
+compose.yml
+compose.*.yml
+# Indirilen sunucu backup/yedek config'leri
+conf/nginx/*.bak.*
+conf/nginx/*.before-*
+conf/nginx/*.yedek*
+conf/nginx/*.live.*
+conf/nginx/*.maintenance.*
 # application-prod.yml: yalnizca ${ENV} placeholder icerir (gercek sirlar .env'de),
 # o yuzden commit'lenir — deploy'da prod datasource/profil config'i gelsin.
 application-secrets.yml
