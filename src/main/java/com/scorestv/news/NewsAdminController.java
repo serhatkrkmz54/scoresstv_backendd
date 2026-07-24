@@ -14,6 +14,7 @@ import com.scorestv.news.dto.RescheduleRequest;
 import com.scorestv.news.dto.SaveSliderRequest;
 import com.scorestv.news.dto.UpdateFlagsRequest;
 import com.scorestv.indexnow.IndexNowService;
+import com.scorestv.news.ingest.NewsIngestService;
 import com.scorestv.football.seo.SeoProperties;
 import org.springframework.web.bind.annotation.PatchMapping;
 import com.scorestv.news.dto.TranslateNewsRequest;
@@ -69,18 +70,33 @@ public class NewsAdminController {
     private final ObjectProvider<NewsIndexer> newsIndexer;
     private final IndexNowService indexNowService;
     private final SeoProperties seoProperties;
+    private final NewsIngestService ingestService;
 
     public NewsAdminController(NewsService service, MinioStorageService storage,
                                NewsTranslationService translationService,
                                ObjectProvider<NewsIndexer> newsIndexer,
                                IndexNowService indexNowService,
-                               SeoProperties seoProperties) {
+                               SeoProperties seoProperties,
+                               NewsIngestService ingestService) {
         this.service = service;
         this.storage = storage;
         this.translationService = translationService;
         this.newsIndexer = newsIndexer;
         this.indexNowService = indexNowService;
         this.seoProperties = seoProperties;
+        this.ingestService = ingestService;
+    }
+
+    /**
+     * Haber içe aktarmayı ELLE tetikle (ADMIN) — zamanlanmış job'u beklemeden
+     * kaynaktan çeker, yeni haberleri DRAFT olarak açar. Açılan sayıyı döner.
+     * DRAFT'lar normal admin listesinde (status=DRAFT) görünür, editör onaylar.
+     */
+    @PostMapping("/ingest/run")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Map<String, Object> ingestRun() {
+        int created = ingestService.runOnce();
+        return Map.of("created", created);
     }
 
     /** Admin liste — tum durumlar + filtre + metin aramasi. */

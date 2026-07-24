@@ -87,6 +87,10 @@ public class NewsArticle extends BaseEntity {
     @Column(name = "source_url", length = 1024)
     private String sourceUrl;
 
+    /** Harici kaynak makale kimligi (ice aktarma tekillestirmesi); MANUAL=null. */
+    @Column(name = "external_id", length = 255)
+    private String externalId;
+
     /** Yayin zamani; PUBLISHED oldugunda dolar, unpublish edilince temizlenir. */
     @Column(name = "published_at")
     private Instant publishedAt;

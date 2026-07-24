@@ -468,6 +468,44 @@ scorestv:
     # Gonderim araligi (dakika) — job her bu kadar surede son ~20dk'da degisen
     # (yeni/biten) maclari tarar. Kod: IndexNowSubmitJob.
     submit-interval-minutes: ${INDEXNOW_SUBMIT_INTERVAL:15}
+  # ============================================================
+  # Haber ice aktarma (agregator) — NewsData.io'dan ulusal + Turkce spor
+  # haberleri DRAFT olarak cekilir; editor addnews panelinde onaylayip yayinlar.
+  # Yalniz baslik + ozet + kaynak linki saklanir (tam metin YOK — telif). Her
+  # habere kaynak atfi yapilir.
+  #
+  # Kapali (varsayilan). Devreye almak icin (kod/rebuild gerekmez, sadece .env):
+  #   NEWS_INGEST_ENABLED=true
+  #   NEWSDATA_API_KEY=...            (newsdata.io ucretsiz uyelik)
+  #   NEWS_INGEST_AUTHOR_ID=<id>      (DRAFT'lar bu kullanici adina acilir; author_id
+  #                                    NOT NULL — bir editor/admin ya da "Haber Botu" hesabi)
+  # Elle tetikleme: POST /api/v1/admin/news/ingest/run (ADMIN).
+  # ============================================================
+  news-ingest:
+    enabled: ${NEWS_INGEST_ENABLED:false}
+    # 0 = ayarsiz (bos string Long'a bind hatasini onlemek icin 0 default).
+    author-id: ${NEWS_INGEST_AUTHOR_ID:0}
+    source: ${NEWS_INGEST_SOURCE:NEWSDATA}
+    max-per-run: ${NEWS_INGEST_MAX_PER_RUN:10}
+    # 2 feed (TR+EN) x her 30 dk = ~96 cagri/gun (ucretsiz 200/gun altinda).
+    cron: ${NEWS_INGEST_CRON:0 */30 * * * *}
+    base-url: ${NEWSDATA_BASE_URL:https://newsdata.io/api/1}
+    api-key: ${NEWSDATA_API_KEY:}
+    category: ${NEWS_INGEST_CATEGORY:sports}
+    # Dil feed'leri — her biri kendi diliyle cekilir + o dilde (lang) saklanir.
+    # TR: ulusal (country=tr). EN: uluslararasi (country bos → gonderilmez).
+    feeds:
+      - lang: tr
+        language: ${NEWS_INGEST_TR_LANGUAGE:tr}
+        country: ${NEWS_INGEST_TR_COUNTRY:tr}
+      - lang: en
+        language: ${NEWS_INGEST_EN_LANGUAGE:en}
+        # Belirli ulkeler (virgulle) — bu ulkelerden/hakkinda INGILIZCE spor haberi.
+        # UCRETSIZ PLAN: tek istekte EN FAZLA 5 ulke. Varsayilan = buyuk-5 lig
+        # (Ingiltere, Ispanya, Italya, Almanya, Fransa). Bosaltmak (uluslararasi)
+        # icin: NEWS_INGEST_EN_COUNTRY= (bos deger).
+        country: ${NEWS_INGEST_EN_COUNTRY:gb,es,it,de,fr}
+
   storage:
     # MinIO baglanti adresi (S3 API). Local: localhost; prod'da app icin http://minio:9000.
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

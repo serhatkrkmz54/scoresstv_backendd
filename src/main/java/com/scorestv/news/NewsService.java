@@ -420,6 +420,49 @@ public class NewsService {
     // Mutasyonlar
     // ============================================================
 
+    /**
+     * Harici kaynaktan (agregatör) DRAFT haber olusturur — ice aktarma motoru
+     * ({@code com.scorestv.news.ingest}) cagirir. Elle create() ile ayni merkezi
+     * mantik (sanitize + benzersiz slug + okuma suresi + audit) kullanilir; fark:
+     * her zaman DRAFT (editör onaylar), kategori GENERAL, source/externalId dolu.
+     *
+     * <p>Tekilleştirme: ayni {@code source+externalId} zaten varsa hicbir sey
+     * yapmaz, null döner. body NOT NULL oldugu icin bos gelirse baslik kullanilir.
+     *
+     * @return acilan haberin id'si; zaten varsa null.
+     */
+    @Transactional
+    public Long ingestExternalDraft(String lang, String title, String summary,
+                                    String bodyHtml, String coverImageKey,
+                                    String source, String sourceUrl,
+                                    String externalId, Long authorId) {
+        if (externalId != null
+                && articleRepository.existsBySourceAndExternalId(source, externalId)) {
+            return null;
+        }
+        NewsArticle a = new NewsArticle();
+        a.setLang(lang);
+        a.setTitle(title.trim());
+        a.setSummary(trimOrNull(summary));
+        String sanitized = sanitizer.sanitizeBody(
+                (bodyHtml == null || bodyHtml.isBlank()) ? "<p>" + title.trim() + "</p>" : bodyHtml);
+        a.setBody(sanitized);
+        a.setCoverImageKey(trimOrNull(coverImageKey));
+        a.setCategory(NewsCategory.GENERAL);
+        a.setSport("FOOTBALL");
+        a.setSource(source);
+        a.setSourceUrl(trimOrNull(sourceUrl));
+        a.setExternalId(trimOrNull(externalId));
+        a.setAuthorId(authorId);
+        a.setReadingMinutes(computeReadingMinutes(sanitized));
+        a.setSlug(uniqueSlug(a.getTitle()));
+        a.setStatus(NewsStatus.DRAFT); // published_at null — public gormez
+        a = articleRepository.save(a);
+        audit(a.getId(), authorId, "INGEST", "source=" + source);
+        // DRAFT → ES'e girmez (syncSearchIndex yalniz PUBLISHED upsert eder).
+        return a.getId();
+    }
+
     /** Yeni haber olustur (EDITOR). body sanitize + slug + okuma suresi + linkler. */
     @Transactional
     public NewsDetail create(CreateNewsRequest req, Long authorId) {

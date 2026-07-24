@@ -193,6 +193,9 @@ public interface NewsArticleRepository extends JpaRepository<NewsArticle, Long> 
     /** Slug benzersizlik kontrolu (silinmis kayitlar dahil — slug global unique). */
     boolean existsBySlug(String slug);
 
+    /** Ice aktarma tekillestirmesi — ayni kaynak+harici id daha once alindi mi. */
+    boolean existsBySourceAndExternalId(String source, String externalId);
+
     /** Detayda goruntuleme sayisini atomik artirir. */
     @org.springframework.data.jpa.repository.Modifying
     @Query("UPDATE NewsArticle a SET a.viewCount = a.viewCount + 1 WHERE a.id = :id")
