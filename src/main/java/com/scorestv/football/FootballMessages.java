@@ -248,15 +248,8 @@ public class FootballMessages {
      * serbest metni slug'layıp anahtar olarak arar. Bulunamazsa kaynak metin.
      */
     public String predictionComment(String comment, boolean turkish) {
-        if (comment == null || comment.isBlank()) {
-            return comment;
-        }
-        try {
-            return messageSource.getMessage(
-                    "football.prediction.comment." + slug(comment), null, locale(turkish));
-        } catch (NoSuchMessageException e) {
-            return autoTr(AutoTranslateService.CAT_PREDICTION_COMMENT, comment, turkish);
-        }
+        // Predictions bolumu CEVRILMEZ — API'nin ham (Ingilizce) metni aynen doner.
+        return comment;
     }
 
     /**
@@ -265,7 +258,8 @@ public class FootballMessages {
      * DeepL fallback (async). DTO değişmez — değer yerinde çevrilir.
      */
     public String predictionAdvice(String advice, boolean turkish) {
-        return autoTr(AutoTranslateService.CAT_PREDICTION_ADVICE, advice, turkish);
+        // Predictions bolumu CEVRILMEZ — ham (Ingilizce) metin aynen doner.
+        return advice;
     }
 
     /**

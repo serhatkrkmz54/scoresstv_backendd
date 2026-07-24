@@ -506,6 +506,21 @@ scorestv:
         # icin: NEWS_INGEST_EN_COUNTRY= (bos deger).
         country: ${NEWS_INGEST_EN_COUNTRY:gb,es,it,de,fr}
 
+  # ============================================================
+  # AI haber ozeti (ISTEGE BAGLI, elle) — editor/admin bir DRAFT haberin kaynak
+  # linkini cektirip Claude (Haiku) ile ozgun bir ozet urettirebilir. Otomatik
+  # DEGIL; yalniz POST /api/v1/admin/news/{id}/ai-summarize ile tek haber icin.
+  # Basarisizsa (paywall/JS) haber degismez, editor elle yazar.
+  # Acmak icin: NEWS_AI_ENABLED=true + ANTHROPIC_API_KEY=...
+  # ============================================================
+  news-ai:
+    enabled: ${NEWS_AI_ENABLED:false}
+    api-key: ${ANTHROPIC_API_KEY:}
+    base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+    model: ${NEWS_AI_MODEL:claude-haiku-4-5}
+    max-input-chars: ${NEWS_AI_MAX_INPUT_CHARS:12000}
+    min-extracted-chars: ${NEWS_AI_MIN_EXTRACTED_CHARS:600}
+
   storage:
     # MinIO baglanti adresi (S3 API). Local: localhost; prod'da app icin http://minio:9000.
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

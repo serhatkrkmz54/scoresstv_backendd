@@ -463,6 +463,48 @@ public class NewsService {
         return a.getId();
     }
 
+    /**
+     * AI ozetini bir habere isler (elle tetiklenen zenginlestirme; bkz.
+     * {@code com.scorestv.news.ai}). Ozet {@code summary} alanina (kisaltilarak)
+     * ve {@code body}'ye (paragraflar + kaynaga link) yazilir; sanitize + okuma
+     * suresi + audit merkezi olarak burada yapilir. Slug/durum degismez.
+     */
+    @Transactional
+    public NewsDetail applyAiSummary(Long id, String aiSummary, Long actorId) {
+        NewsArticle a = articleRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> ApiException.notFound("Haber bulunamadi: " + id));
+        String txt = aiSummary == null ? "" : aiSummary.trim();
+        if (txt.isBlank()) {
+            throw ApiException.badRequest("AI ozet bos.");
+        }
+        a.setSummary(txt.length() > 600 ? txt.substring(0, 600) : txt);
+
+        StringBuilder body = new StringBuilder();
+        for (String para : txt.split("\\n{2,}")) {
+            String p = para.trim();
+            if (!p.isEmpty()) {
+                body.append("<p>").append(esc(p)).append("</p>");
+            }
+        }
+        if (a.getSourceUrl() != null && !a.getSourceUrl().isBlank()) {
+            body.append("<p><a href=\"").append(esc(a.getSourceUrl()))
+                    .append("\" target=\"_blank\" rel=\"noopener nofollow\">Haberin kaynağı</a></p>");
+        }
+        String sanitized = sanitizer.sanitizeBody(body.toString());
+        a.setBody(sanitized);
+        a.setReadingMinutes(computeReadingMinutes(sanitized));
+        a = articleRepository.save(a);
+        audit(a.getId(), actorId, "AI_SUMMARY", "source=" + a.getSource());
+        syncSearchIndex(a);
+        return toDetail(a);
+    }
+
+    /** Metni guvenli HTML metnine cevirir (body'ye gomerken). */
+    private static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
     /** Yeni haber olustur (EDITOR). body sanitize + slug + okuma suresi + linkler. */
     @Transactional
     public NewsDetail create(CreateNewsRequest req, Long authorId) {

@@ -93,13 +93,10 @@ public class TranslationPrewarmJob {
                 "SELECT DISTINCT v.surface FROM Venue v WHERE v.surface IS NOT NULL");
         sweep(AutoTranslateService.CAT_GROUP,
                 "SELECT DISTINCT st.groupName FROM Standing st WHERE st.groupName IS NOT NULL");
-        sweep(AutoTranslateService.CAT_PREDICTION_COMMENT,
-                "SELECT DISTINCT p.winnerComment FROM Prediction p WHERE p.winnerComment IS NOT NULL");
+        // NOT: Predictions bolumu (winnerComment + advice) ARTIK CEVRILMIYOR —
+        // ham Ingilizce servis edilir; bu yuzden on-isitma da yapilmaz.
         sweep(AutoTranslateService.CAT_EVENT_COMMENT,
                 "SELECT DISTINCT e.comments FROM FixtureEvent e WHERE e.comments IS NOT NULL");
-        // NOT: prediction.advice ve player position on-isitilmaz — advice yuksek
-        // cesitlilikte (takim adi+sayi gomulu) oldugu icin kotayi yakabilir; ikisi de
-        // yalniz gorulduce (serve-path) doldurulur.
         log.info("AutoTranslate prewarm sweep tamamlandi");
     }
 

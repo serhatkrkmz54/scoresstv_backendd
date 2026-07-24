@@ -15,6 +15,7 @@ import com.scorestv.news.dto.SaveSliderRequest;
 import com.scorestv.news.dto.UpdateFlagsRequest;
 import com.scorestv.indexnow.IndexNowService;
 import com.scorestv.news.ingest.NewsIngestService;
+import com.scorestv.news.ai.NewsAiService;
 import com.scorestv.football.seo.SeoProperties;
 import org.springframework.web.bind.annotation.PatchMapping;
 import com.scorestv.news.dto.TranslateNewsRequest;
@@ -71,13 +72,15 @@ public class NewsAdminController {
     private final IndexNowService indexNowService;
     private final SeoProperties seoProperties;
     private final NewsIngestService ingestService;
+    private final NewsAiService aiService;
 
     public NewsAdminController(NewsService service, MinioStorageService storage,
                                NewsTranslationService translationService,
                                ObjectProvider<NewsIndexer> newsIndexer,
                                IndexNowService indexNowService,
                                SeoProperties seoProperties,
-                               NewsIngestService ingestService) {
+                               NewsIngestService ingestService,
+                               NewsAiService aiService) {
         this.service = service;
         this.storage = storage;
         this.translationService = translationService;
@@ -85,6 +88,19 @@ public class NewsAdminController {
         this.indexNowService = indexNowService;
         this.seoProperties = seoProperties;
         this.ingestService = ingestService;
+        this.aiService = aiService;
+    }
+
+    /**
+     * Bir haberin KAYNAĞINDAN AI özeti üret (EDITOR/ADMIN) — isteğe bağlı, elle.
+     * Kaynağı çeker, ana metni ayıklar, Claude ile özgün özet üretir ve habere
+     * işler; güncel haberi döner. Başarısızlıkta anlaşılır 400 (haber değişmez).
+     */
+    @PostMapping("/{id}/ai-summarize")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public NewsDetail aiSummarize(@PathVariable Long id,
+                                  @AuthenticationPrincipal CurrentUser currentUser) {
+        return aiService.summarize(id, currentUser.id());
     }
 
     /**

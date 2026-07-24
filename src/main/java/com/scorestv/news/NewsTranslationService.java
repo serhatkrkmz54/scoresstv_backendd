@@ -111,14 +111,18 @@ public class NewsTranslationService {
             int code = res.statusCode();
             if (code / 100 != 2) {
                 log.warn("DeepL ceviri hatasi: status={} body={}", code, abbreviate(res.body()));
+                // NOT: upstream() = HTTP 502. Cloudflare tum origin 502'lerini kendi
+                // hata sayfasiyla degistirir; editor gercek mesaji goremez. Bu yuzden
+                // beklenen DeepL hatalarini 4xx/429 ile donuyoruz (Cloudflare bunlari
+                // gizlemez, panel mesaji gorunur).
                 if (code == 456) {
-                    throw ApiException.upstream(
+                    throw ApiException.tooManyRequests(
                             "Ceviri kotasi doldu (DeepL aylik limit). Daha sonra deneyin.");
                 }
                 if (code == 401 || code == 403) {
                     throw ApiException.badRequest("DeepL API anahtari gecersiz.");
                 }
-                throw ApiException.upstream("Ceviri servisi hatasi (" + code + ").");
+                throw ApiException.badRequest("Ceviri servisi hatasi (" + code + ").");
             }
             JsonNode arr = mapper.readTree(res.body()).path("translations");
             if (arr.isArray() && !arr.isEmpty()) {
