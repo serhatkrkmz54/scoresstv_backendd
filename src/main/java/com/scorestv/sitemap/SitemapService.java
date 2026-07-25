@@ -33,9 +33,12 @@ public class SitemapService {
     public Map<String, Long> counts() {
         return Map.of(
                 "teams", count("Team"),
-                "players", count("Player"),
+                "players", indexablePlayerCount(),
                 "leagues", count("League"),
-                "matches", indexableMatchCount());
+                "matches", indexableMatchCount(),
+                "basketballLeagues", count("BasketballLeague"),
+                "basketballTeams", count("BasketballTeam"),
+                "basketballGames", indexableBasketballGameCount());
     }
 
     private long count(String entity) {
@@ -56,6 +59,29 @@ public class SitemapService {
                 .getSingleResult();
     }
 
+    /**
+     * SEO: API-Sports bazı oyuncuları "Data Not Available" yer tutucu adıyla
+     * gönderir — bu kayıtların sayfası içeriksizdir (Google soft-404 sayar,
+     * Search Console'da görüldü). Sitemap'e girmezler; sayfa/sayım filtresi
+     * {@link #PLAYER_PLACEHOLDER_FILTER} ile ortak.
+     */
+    private static final String PLAYER_PLACEHOLDER_FILTER =
+            " where e.name is not null and lower(e.name) <> 'data not available' ";
+
+    private long indexablePlayerCount() {
+        return (Long) em.createQuery(
+                        "select count(e) from Player e" + PLAYER_PLACEHOLDER_FILTER)
+                .getSingleResult();
+    }
+
+    /** Basketbol: futboldaki gibi yalnız skoru gelmiş (oynanmış/canlı) maçlar. */
+    private long indexableBasketballGameCount() {
+        return (Long) em.createQuery(
+                        "select count(g) from BasketballGame g "
+                                + "where g.homeTotal is not null and g.awayTotal is not null")
+                .getSingleResult();
+    }
+
     @Transactional(readOnly = true)
     public List<SitemapEntry> page(String type, int page, int size) {
         return switch (type) {
@@ -63,6 +89,13 @@ public class SitemapService {
             case "leagues" -> namedPage("League", "/league/", "/lig/", true, page, size);
             case "players" -> playerPage(page, size);
             case "matches" -> matchesPage(page, size);
+            // Basketbol — ayni slug kurallari ({ad}-{id} / home-vs-away-{id}),
+            // detay resolver'lar sondaki id'yi cektigi icin isim drift'i sorun degil.
+            case "basketball-teams" -> namedPage("BasketballTeam",
+                    "/basketball/team/", "/basketbol/takim/", false, page, size);
+            case "basketball-leagues" -> namedPage("BasketballLeague",
+                    "/basketball/league/", "/basketbol/lig/", true, page, size);
+            case "basketball-games" -> basketballGamesPage(page, size);
             default -> List.of();
         };
     }
@@ -95,7 +128,8 @@ public class SitemapService {
     /** Oyuncu — nameTr yok; slug ayni, sadece dil oneki farkli. */
     private List<SitemapEntry> playerPage(int page, int size) {
         List<Object[]> rows = em.createQuery(
-                        "select e.id, e.name, e.updatedAt from Player e order by e.id",
+                        "select e.id, e.name, e.updatedAt from Player e"
+                                + PLAYER_PLACEHOLDER_FILTER + "order by e.id",
                         Object[].class)
                 .setFirstResult(Math.max(0, page) * size)
                 .setMaxResults(size)
@@ -139,6 +173,37 @@ public class SitemapService {
                     "/match/" + SlugUtil.fixtureSlug(home, away, id),
                     "/mac/" + SlugUtil.fixtureSlug(hTr, aTr, id),
                     updatedAt));
+        }
+        return out;
+    }
+
+    /** Basketbol maclari — slug home-vs-away-{id}; TR'de Turkce takim adlari. */
+    private List<SitemapEntry> basketballGamesPage(int page, int size) {
+        List<Object[]> rows = em.createQuery(
+                        "select g.id, g.homeTeam.name, g.homeTeam.nameTr, "
+                                + "g.awayTeam.name, g.awayTeam.nameTr, g.lastSyncedAt "
+                                + "from BasketballGame g "
+                                // SEO: skoru gelmemis (iceriksiz) maclar girmez.
+                                + "where g.homeTotal is not null and g.awayTotal is not null "
+                                + "order by g.id", Object[].class)
+                .setFirstResult(Math.max(0, page) * size)
+                .setMaxResults(size)
+                .getResultList();
+        List<SitemapEntry> out = new ArrayList<>(rows.size());
+        for (Object[] r : rows) {
+            Long id = (Long) r[0];
+            String home = (String) r[1];
+            String homeTr = (String) r[2];
+            String away = (String) r[3];
+            String awayTr = (String) r[4];
+            Instant lastmod = (Instant) r[5];
+            if (id == null || home == null || away == null) continue;
+            String hTr = (homeTr != null && !homeTr.isBlank()) ? homeTr : home;
+            String aTr = (awayTr != null && !awayTr.isBlank()) ? awayTr : away;
+            out.add(new SitemapEntry(
+                    "/basketball/match/" + SlugUtil.gameSlug(home, away, id),
+                    "/basketbol/mac/" + SlugUtil.gameSlug(hTr, aTr, id),
+                    lastmod));
         }
         return out;
     }
