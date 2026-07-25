@@ -58,6 +58,10 @@ public class NotificationOutboxWorker {
     private final NotificationOutboxRepository repository;
     private final NotificationDispatcherService dispatcher;
     private final FcmMessagingService fcm;
+    /** sport=basketball|volleyball satırlarının gönderim yolu (lazy — döngüsel
+     * bağımlılık yok ama başlangıç sırası bağımsız kalsın). */
+    private final org.springframework.beans.factory.ObjectProvider<com.scorestv.basketball.notify.BasketballNotificationService> basketball;
+    private final org.springframework.beans.factory.ObjectProvider<com.scorestv.volleyball.notify.VolleyballNotificationService> volleyball;
 
     /**
      * Gönderim havuzu — bir tur içindeki satırları PARALEL işler. Önceden seri
@@ -75,10 +79,14 @@ public class NotificationOutboxWorker {
 
     public NotificationOutboxWorker(NotificationOutboxRepository repository,
                                     NotificationDispatcherService dispatcher,
-                                    FcmMessagingService fcm) {
+                                    FcmMessagingService fcm,
+                                    org.springframework.beans.factory.ObjectProvider<com.scorestv.basketball.notify.BasketballNotificationService> basketball,
+                                    org.springframework.beans.factory.ObjectProvider<com.scorestv.volleyball.notify.VolleyballNotificationService> volleyball) {
         this.repository = repository;
         this.dispatcher = dispatcher;
         this.fcm = fcm;
+        this.basketball = basketball;
+        this.volleyball = volleyball;
     }
 
     @PreDestroy
@@ -130,10 +138,26 @@ public class NotificationOutboxWorker {
             return;
         }
         try {
-            NotificationDispatcherService.SendResult result = dispatcher.sendOutboxRow(
-                    row.getFixtureId(), row.getTeamId(), row.getNotifType(),
-                    row.getTitle(), row.getBody(), row.getTitleEn(), row.getBodyEn(),
-                    parseData(row.getDataJson()), row.getCollapseKey(), row.isSilent());
+            // sport kolonuna göre gönderim yolu: futbol dispatcher'ı zengin
+            // (kanal/ses/collapse), basketbol/voleybol kendi topic/token
+            // mantığını çalıştırır. Hepsi hata FIRLATIR → ortak retry/backoff.
+            final NotificationDispatcherService.SendResult result;
+            if (NotificationOutbox.SPORT_BASKETBALL.equals(row.getSport())) {
+                result = basketball.getObject().sendOutboxRow(
+                        row.getKind(), row.getFixtureId(), row.getTeamId(), row.getTeam2Id(),
+                        row.getTitle(), row.getBody(), row.getTitleEn(), row.getBodyEn(),
+                        parseData(row.getDataJson()));
+            } else if (NotificationOutbox.SPORT_VOLLEYBALL.equals(row.getSport())) {
+                result = volleyball.getObject().sendOutboxRow(
+                        row.getKind(), row.getFixtureId(), row.getTeamId(), row.getTeam2Id(),
+                        row.getTitle(), row.getBody(), row.getTitleEn(), row.getBodyEn(),
+                        parseData(row.getDataJson()));
+            } else {
+                result = dispatcher.sendOutboxRow(
+                        row.getFixtureId(), row.getTeamId(), row.getNotifType(),
+                        row.getTitle(), row.getBody(), row.getTitleEn(), row.getBodyEn(),
+                        parseData(row.getDataJson()), row.getCollapseKey(), row.isSilent());
+            }
             row.setStatus(NotificationOutbox.STATUS_SENT);
             row.setSendMode(result.mode());
             row.setRecipients(result.recipients());

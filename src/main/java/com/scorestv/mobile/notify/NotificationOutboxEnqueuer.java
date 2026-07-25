@@ -57,10 +57,30 @@ public class NotificationOutboxEnqueuer {
     public void enqueue(String kind, String notifType, Long fixtureId, Long teamId,
                         Localized msg, Map<String, String> data, String dedupKey,
                         String collapseKey, boolean silent) {
+        enqueueSport(NotificationOutbox.SPORT_FOOTBALL, kind, notifType, fixtureId,
+                teamId, null, msg, data, dedupKey, collapseKey, silent);
+    }
+
+    /**
+     * Spor ayrımlı kuyruk ekleme — basketbol/voleybol bildirimleri de outbox'tan
+     * geçsin (garantili teslim + backoff'lu retry) diye. Futbol {@link #enqueue}
+     * bu metoda delege eder.
+     *
+     * @param sport   {@code football|basketball|volleyball} — worker gönderim
+     *                yolunu bu kolona göre seçer
+     * @param team2Id basketbol/voleybol deplasman takımı (futbolda null)
+     */
+    @Transactional
+    public void enqueueSport(String sport, String kind, String notifType,
+                             Long fixtureId, Long teamId, Long team2Id,
+                             Localized msg, Map<String, String> data, String dedupKey,
+                             String collapseKey, boolean silent) {
         if (repository.existsByDedupKey(dedupKey)) {
             return; // zaten kuyrukta — tekrar ekleme
         }
         NotificationOutbox row = new NotificationOutbox();
+        row.setSport(sport);
+        row.setTeam2Id(team2Id);
         row.setKind(kind);
         row.setNotifType(notifType);
         row.setFixtureId(fixtureId);

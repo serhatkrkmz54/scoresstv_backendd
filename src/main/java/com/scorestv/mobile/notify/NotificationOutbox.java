@@ -39,6 +39,13 @@ public class NotificationOutbox {
     public static final String KIND_LINEUP = "LINEUP";
     public static final String KIND_HALFTIME = "HALFTIME";
     public static final String KIND_SECONDHALF = "SECONDHALF";
+    /** Basketbol/voleybol ortak kind'ları (sport kolonu ayırır). */
+    public static final String KIND_START = "START";
+    public static final String KIND_PERIOD = "PERIOD";
+
+    public static final String SPORT_FOOTBALL = "football";
+    public static final String SPORT_BASKETBALL = "basketball";
+    public static final String SPORT_VOLLEYBALL = "volleyball";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -54,9 +61,18 @@ public class NotificationOutbox {
     @Column(name = "fixture_id", nullable = false)
     private Long fixtureId;
 
-    /** GOAL/EVENT: ilgili takım; KICKOFF/FINAL: null (iki takım da alıcı). */
+    /** GOAL/EVENT: ilgili takım; KICKOFF/FINAL: null (iki takım da alıcı).
+     * Basketbol/voleybol: ev sahibi takım. */
     @Column(name = "team_id")
     private Long teamId;
+
+    /** Basketbol/voleybol: deplasman takımı (topic hedefi iki takım ister). */
+    @Column(name = "team2_id")
+    private Long team2Id;
+
+    /** Gönderim yolu ayrımı: football | basketball | volleyball. */
+    @Column(nullable = false, length = 12)
+    private String sport = SPORT_FOOTBALL;
 
     /** Render edilmiş mesaj başlığı (enqueue anında dondurulur). */
     @Column(nullable = false, length = 255)
