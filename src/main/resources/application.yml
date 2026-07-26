@@ -307,6 +307,10 @@ scorestv:
       # BOS ya da bugun bu liglerde mac yoksa bugunun TUM voleybolu kullanilir
       # (fallback). 172 = Efeler Ligi (TR erkekler). Daha fazla id ekleyebilirsin.
       popular-league-ids: [172,97,113,174,100,185,223,248,167,251]
+      # Web sol ray "populer takimlar" — sirali id listesi. Bos ise ray gizlenir.
+      # NOT: env placeholder ile virgullu liste KARISTIRILMAZ (Spring listeyi
+      # placeholder cozumunden ONCE virgulden boler → "Cannot convert '...}'").
+      popular-team-ids: [2240,2211,2198,2204,2206,2246,3745,2201,2207,2259]
   # ============================================================
   # Highlightly maç özeti/highlight entegrasyonu (soccer.highlightly.net).
   # Anahtar yalnız sunucuda (x-rapidapi-key). enabled=false iken hiç çağrı yok.

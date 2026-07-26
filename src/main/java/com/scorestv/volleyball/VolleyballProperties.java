@@ -50,9 +50,12 @@ public record VolleyballProperties(
      * @param popularLeagueIds  ana ekran widget'i "gunun maclari" icin populer
      *                          voleybol lig id'leri. Bos ise bugunun TUM voleybol
      *                          maclari kullanilir (fallback).
+     * @param popularTeamIds    web sol ray "populer takimlar" id'leri (sirali).
+     *                          Bos ise ray bolumu gizlenir (fallback YOK).
      */
     public record Serving(
             @DefaultValue List<Long> featuredLeagueIds,
-            @DefaultValue List<Long> popularLeagueIds
+            @DefaultValue List<Long> popularLeagueIds,
+            @DefaultValue List<Long> popularTeamIds
     ) {}
 }

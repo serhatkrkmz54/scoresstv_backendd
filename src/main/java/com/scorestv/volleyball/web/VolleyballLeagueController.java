@@ -5,13 +5,16 @@ import com.scorestv.common.SlugUtil;
 import com.scorestv.volleyball.VolleyballLeagueHubService;
 import com.scorestv.volleyball.VolleyballLeagueTeamsService;
 import com.scorestv.volleyball.VolleyballSeasonNormalizer;
+import com.scorestv.volleyball.detail.VolleyballLeagueDetailService;
 import com.scorestv.volleyball.detail.VolleyballStandingsPageService;
 import com.scorestv.volleyball.domain.VolleyballLeague;
 import com.scorestv.volleyball.domain.VolleyballLeagueRepository;
 import com.scorestv.volleyball.seo.VolleyballLeagueDetailSeoBuilder;
+import com.scorestv.volleyball.web.dto.VolleyballLeagueDetailResponse;
 import com.scorestv.volleyball.web.dto.VolleyballLeagueHubResponse;
 import com.scorestv.volleyball.web.dto.VolleyballLeagueSeoResponse;
 import com.scorestv.volleyball.web.dto.VolleyballLeagueTeamView;
+import com.scorestv.volleyball.web.dto.VolleyballPopularLeagueView;
 import com.scorestv.volleyball.web.dto.VolleyballStandingsPageResponse;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,19 +45,58 @@ public class VolleyballLeagueController {
     private final VolleyballLeagueHubService hubService;
     private final VolleyballLeagueTeamsService teamsService;
     private final VolleyballStandingsPageService standingsPageService;
+    private final VolleyballLeagueDetailService leagueDetailService;
+    private final VolleyballPopularLeaguesService popularLeaguesService;
     private final VolleyballLeagueRepository leagueRepo;
     private final VolleyballLeagueDetailSeoBuilder seoBuilder;
 
     public VolleyballLeagueController(VolleyballLeagueHubService hubService,
                                       VolleyballLeagueTeamsService teamsService,
                                       VolleyballStandingsPageService standingsPageService,
+                                      VolleyballLeagueDetailService leagueDetailService,
+                                      VolleyballPopularLeaguesService popularLeaguesService,
                                       VolleyballLeagueRepository leagueRepo,
                                       VolleyballLeagueDetailSeoBuilder seoBuilder) {
         this.hubService = hubService;
         this.teamsService = teamsService;
         this.standingsPageService = standingsPageService;
+        this.leagueDetailService = leagueDetailService;
+        this.popularLeaguesService = popularLeaguesService;
         this.leagueRepo = leagueRepo;
         this.seoBuilder = seoBuilder;
+    }
+
+    /**
+     * Web sol ray populer ligler — config'teki id sirasiyla, lokalize.
+     * Not: "/popular" literal yolu "/{slug}/..." pattern'larindan once eslesir.
+     */
+    @GetMapping("/popular")
+    public List<VolleyballPopularLeagueView> popular(
+            @RequestParam(required = false, defaultValue = "en") String lang) {
+        return popularLeaguesService.getPopular("tr".equalsIgnoreCase(lang));
+    }
+
+    /**
+     * Lig detay sayfasi aggregate'i — standings + son/yaklasan maclar + meta +
+     * SEO tek istekte. Web SSR bunu kullanir.
+     *
+     * <p>URL: {@code GET /api/v1/volleyball/leagues/{slug}/detail?season=&lang=tr}
+     */
+    @GetMapping("/{slug}/detail")
+    public VolleyballLeagueDetailResponse detail(
+            @PathVariable String slug,
+            @RequestParam(required = false) String season,
+            @RequestParam(required = false, defaultValue = "tr") String lang) {
+        return leagueDetailService.getBySlug(slug, season, "tr".equalsIgnoreCase(lang));
+    }
+
+    /** Lig detay force-refresh (pull-to-refresh / web yenile). */
+    @PostMapping("/{slug}/detail/refresh")
+    public VolleyballLeagueDetailResponse refreshDetail(
+            @PathVariable String slug,
+            @RequestParam(required = false) String season,
+            @RequestParam(required = false, defaultValue = "tr") String lang) {
+        return leagueDetailService.forceRefresh(slug, season, "tr".equalsIgnoreCase(lang));
     }
 
     @GetMapping("/hub")

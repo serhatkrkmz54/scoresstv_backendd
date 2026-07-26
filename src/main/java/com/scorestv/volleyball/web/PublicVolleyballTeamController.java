@@ -2,6 +2,7 @@ package com.scorestv.volleyball.web;
 
 import com.scorestv.volleyball.detail.VolleyballTeamDetailService;
 import com.scorestv.volleyball.seo.VolleyballTeamDetailSeoBuilder;
+import com.scorestv.volleyball.web.dto.VolleyballPopularTeamView;
 import com.scorestv.volleyball.web.dto.VolleyballTeamDetailResponse;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -27,11 +29,24 @@ public class PublicVolleyballTeamController {
 
     private final VolleyballTeamDetailService detailService;
     private final VolleyballTeamDetailSeoBuilder seoBuilder;
+    private final VolleyballPopularTeamsService popularTeamsService;
 
     public PublicVolleyballTeamController(VolleyballTeamDetailService detailService,
-                                            VolleyballTeamDetailSeoBuilder seoBuilder) {
+                                            VolleyballTeamDetailSeoBuilder seoBuilder,
+                                            VolleyballPopularTeamsService popularTeamsService) {
         this.detailService = detailService;
         this.seoBuilder = seoBuilder;
+        this.popularTeamsService = popularTeamsService;
+    }
+
+    /**
+     * Web sol ray populer takimlar — config'teki id sirasiyla, lokalize.
+     * Not: "/popular" literal yolu "/{slug}" pattern'indan ONCE eslesir.
+     */
+    @GetMapping("/popular")
+    public List<VolleyballPopularTeamView> popular(
+            @RequestParam(required = false, defaultValue = "en") String lang) {
+        return popularTeamsService.getPopular("tr".equalsIgnoreCase(lang));
     }
 
     @GetMapping("/{slug}")

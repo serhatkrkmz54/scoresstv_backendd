@@ -31,14 +31,17 @@ public class SitemapService {
 
     @Transactional(readOnly = true)
     public Map<String, Long> counts() {
-        return Map.of(
-                "teams", count("Team"),
-                "players", indexablePlayerCount(),
-                "leagues", count("League"),
-                "matches", indexableMatchCount(),
-                "basketballLeagues", count("BasketballLeague"),
-                "basketballTeams", count("BasketballTeam"),
-                "basketballGames", indexableBasketballGameCount());
+        return Map.ofEntries(
+                Map.entry("teams", count("Team")),
+                Map.entry("players", indexablePlayerCount()),
+                Map.entry("leagues", count("League")),
+                Map.entry("matches", indexableMatchCount()),
+                Map.entry("basketballLeagues", count("BasketballLeague")),
+                Map.entry("basketballTeams", count("BasketballTeam")),
+                Map.entry("basketballGames", indexableBasketballGameCount()),
+                Map.entry("volleyballLeagues", count("VolleyballLeague")),
+                Map.entry("volleyballTeams", count("VolleyballTeam")),
+                Map.entry("volleyballGames", indexableVolleyballGameCount()));
     }
 
     private long count(String entity) {
@@ -82,6 +85,14 @@ public class SitemapService {
                 .getSingleResult();
     }
 
+    /** Voleybol: yalnız set skoru gelmiş (oynanmış/canlı) maçlar. */
+    private long indexableVolleyballGameCount() {
+        return (Long) em.createQuery(
+                        "select count(g) from VolleyballGame g "
+                                + "where g.homeTotal is not null and g.awayTotal is not null")
+                .getSingleResult();
+    }
+
     @Transactional(readOnly = true)
     public List<SitemapEntry> page(String type, int page, int size) {
         return switch (type) {
@@ -96,6 +107,12 @@ public class SitemapService {
             case "basketball-leagues" -> namedPage("BasketballLeague",
                     "/basketball/league/", "/basketbol/lig/", true, page, size);
             case "basketball-games" -> basketballGamesPage(page, size);
+            // Voleybol — ayni slug kurallari; entity'ler name/nameTr/updatedAt tasir.
+            case "volleyball-teams" -> namedPage("VolleyballTeam",
+                    "/volleyball/team/", "/voleybol/takim/", false, page, size);
+            case "volleyball-leagues" -> namedPage("VolleyballLeague",
+                    "/volleyball/league/", "/voleybol/lig/", true, page, size);
+            case "volleyball-games" -> volleyballGamesPage(page, size);
             default -> List.of();
         };
     }
@@ -203,6 +220,37 @@ public class SitemapService {
             out.add(new SitemapEntry(
                     "/basketball/match/" + SlugUtil.gameSlug(home, away, id),
                     "/basketbol/mac/" + SlugUtil.gameSlug(hTr, aTr, id),
+                    lastmod));
+        }
+        return out;
+    }
+
+    /** Voleybol maclari — slug home-vs-away-{id}; TR'de Turkce takim adlari. */
+    private List<SitemapEntry> volleyballGamesPage(int page, int size) {
+        List<Object[]> rows = em.createQuery(
+                        "select g.id, g.homeTeam.name, g.homeTeam.nameTr, "
+                                + "g.awayTeam.name, g.awayTeam.nameTr, g.lastSyncedAt "
+                                + "from VolleyballGame g "
+                                // SEO: set skoru gelmemis (iceriksiz) maclar girmez.
+                                + "where g.homeTotal is not null and g.awayTotal is not null "
+                                + "order by g.id", Object[].class)
+                .setFirstResult(Math.max(0, page) * size)
+                .setMaxResults(size)
+                .getResultList();
+        List<SitemapEntry> out = new ArrayList<>(rows.size());
+        for (Object[] r : rows) {
+            Long id = (Long) r[0];
+            String home = (String) r[1];
+            String homeTr = (String) r[2];
+            String away = (String) r[3];
+            String awayTr = (String) r[4];
+            Instant lastmod = (Instant) r[5];
+            if (id == null || home == null || away == null) continue;
+            String hTr = (homeTr != null && !homeTr.isBlank()) ? homeTr : home;
+            String aTr = (awayTr != null && !awayTr.isBlank()) ? awayTr : away;
+            out.add(new SitemapEntry(
+                    "/volleyball/match/" + SlugUtil.gameSlug(home, away, id),
+                    "/voleybol/mac/" + SlugUtil.gameSlug(hTr, aTr, id),
                     lastmod));
         }
         return out;

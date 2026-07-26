@@ -73,6 +73,36 @@ public interface VolleyballGameRepository extends JpaRepository<VolleyballGame, 
             """)
     List<String> findDistinctSeasonsByLeagueId(@Param("leagueId") Long leagueId);
 
+    /** Lig detay: oynanmis/baslamis maclar (yeni → eski). Basketbol esi. */
+    @Query("""
+            select g from VolleyballGame g
+            join fetch g.league
+            join fetch g.homeTeam
+            join fetch g.awayTeam
+            where g.league.id = :leagueId
+              and g.season = :season
+              and g.startAt < CURRENT_TIMESTAMP
+            order by g.startAt desc
+            """)
+    List<VolleyballGame> findRecentByLeagueSeason(@Param("leagueId") Long leagueId,
+                                                  @Param("season") String season,
+                                                  Pageable pageable);
+
+    /** Lig detay: gelecekteki maclar (yakin → uzak). Basketbol esi. */
+    @Query("""
+            select g from VolleyballGame g
+            join fetch g.league
+            join fetch g.homeTeam
+            join fetch g.awayTeam
+            where g.league.id = :leagueId
+              and g.season = :season
+              and g.startAt >= CURRENT_TIMESTAMP
+            order by g.startAt asc
+            """)
+    List<VolleyballGame> findUpcomingByLeagueSeason(@Param("leagueId") Long leagueId,
+                                                    @Param("season") String season,
+                                                    Pageable pageable);
+
     @Query("""
             select g from VolleyballGame g
             join fetch g.league

@@ -1,15 +1,18 @@
 package com.scorestv.user;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Pageable;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-public interface UserRepository extends JpaRepository<User, Long> {
+public interface UserRepository
+        extends JpaRepository<User, Long>, JpaSpecificationExecutor<User> {
 
     Optional<User> findByEmail(String email);
 
@@ -31,4 +34,21 @@ public interface UserRepository extends JpaRepository<User, Long> {
             + "OR LOWER(u.displayName) LIKE LOWER(CONCAT('%', :q, '%')) "
             + "ORDER BY u.email ASC")
     List<User> searchByEmailOrName(@Param("q") String q, Pageable pageable);
+
+    // ===== Panel "Üyeler" istatistik kartları (AdminUserController /stats) =====
+    long countByEnabledTrue();
+
+    long countByEnabledFalse();
+
+    long countByGoogleIdNotNull();
+
+    long countByAppleIdNotNull();
+
+    /** Yerel (e-posta+şifre) hesap sayısı — sosyal girişli hesaplarda password null. */
+    long countByPasswordNotNull();
+
+    long countByCreatedAtAfter(Instant after);
+
+    @Query("SELECT u.role, COUNT(u) FROM User u GROUP BY u.role")
+    List<Object[]> countGroupByRole();
 }
