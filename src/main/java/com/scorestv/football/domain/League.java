@@ -67,6 +67,11 @@ public class League implements TranslatableName {
     @Column(nullable = false)
     private boolean covered;
 
+    /** Veri kaynağı: api | manual (saha muhabiri). Manuel ligler covered=false
+     * kalır — sync job'ları onları API'den çekmeye çalışmaz. */
+    @Column(nullable = false, length = 10)
+    private String source = "api";
+
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;

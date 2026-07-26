@@ -57,6 +57,10 @@ public class Team implements TranslatableName {
     @Column(nullable = false)
     private boolean covered;
 
+    /** Veri kaynağı: api | manual (saha muhabiri girişi). */
+    @Column(nullable = false, length = 10)
+    private String source = "api";
+
     /**
      * ADMIN manuel bas antrenor override'i. Set ediliyse picker direkt bu
      * coach'u kullanir; lineup/rule kontrolune dusmez. Off-season gibi

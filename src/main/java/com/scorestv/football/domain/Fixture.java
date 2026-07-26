@@ -143,6 +143,14 @@ public class Fixture {
     private Instant lastSyncedAt;
 
     /**
+     * Veri kaynağı: {@code api} (API-Football senkronu) | {@code manual}
+     * (saha muhabiri girişi). Manuel kayıtlar 900M+ id uzayında yaşar; sync
+     * upsert'leri API id'siyle çalıştığından bu kayıtlara hiç dokunmaz.
+     */
+    @Column(nullable = false, length = 10)
+    private String source = "api";
+
+    /**
      * "Başladı" push'unun gönderildiği an (TAM-BİR-KEZ kapısı). NULL = henüz
      * gönderilmedi. FixtureNotifyGate atomik UPDATE ile set eder; FixtureUpserter
      * bu alana DOKUNMAZ, yani sync'ler boyunca korunur.

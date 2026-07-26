@@ -101,7 +101,15 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
      * {@link com.scorestv.football.live.LiveTickerService} stuck-detection
      * için kullanır (DB'de LIVE ama API live response'unda olmayanları bulur).
      */
-    @Query("SELECT f.id FROM Fixture f WHERE f.statusShort IN :statuses")
+    // ===== Muhabir (manuel lig) konsolu =====
+    int countByLeagueId(Long leagueId);
+
+    List<Fixture> findTop100ByLeagueIdOrderByKickoffAtDesc(Long leagueId);
+
+    /** NOT: yalnız API kaynaklı maçlar — manuel (muhabir) maçlar API'de yoktur,
+     * stuck-detection onları API'den çekmeye çalışmasın. */
+    @Query("SELECT f.id FROM Fixture f "
+            + "WHERE f.statusShort IN :statuses AND f.source = 'api'")
     List<Long> findIdsByStatusShortIn(@Param("statuses") Collection<String> statuses);
 
     /**
@@ -114,7 +122,8 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
      * cek, status FT/AET/PEN'e gecer.
      */
     @Query("SELECT f.id FROM Fixture f "
-            + "WHERE f.statusShort IN :statuses AND f.kickoffAt < :cutoff")
+            + "WHERE f.statusShort IN :statuses AND f.kickoffAt < :cutoff "
+            + "AND f.source = 'api'")
     List<Long> findAgedLiveIds(
             @Param("statuses") Collection<String> statuses,
             @Param("cutoff") Instant cutoff);
