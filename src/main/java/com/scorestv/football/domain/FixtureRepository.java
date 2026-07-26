@@ -106,6 +106,9 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
 
     List<Fixture> findTop100ByLeagueIdOrderByKickoffAtDesc(Long leagueId);
 
+    /** ManualLiveClockJob — canlı manuel maçların dakikasını işletmek için. */
+    List<Fixture> findBySourceAndStatusShortIn(String source, Collection<String> statuses);
+
     /** NOT: yalnız API kaynaklı maçlar — manuel (muhabir) maçlar API'de yoktur,
      * stuck-detection onları API'den çekmeye çalışmasın. */
     @Query("SELECT f.id FROM Fixture f "

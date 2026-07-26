@@ -44,7 +44,7 @@ public final class ReporterDtos {
 
     // ================= Muhabir konsolu =================
 
-    public record AssignedLeagueView(Long leagueId, String leagueName,
+    public record AssignedLeagueView(Long leagueId, String leagueName, String logo,
                                      int teamCount, int fixtureCount) {}
 
     /** Muhabirin genel görünümü: atamalar + başvurular + kazanılan puan. */
@@ -56,7 +56,7 @@ public final class ReporterDtos {
             @NotBlank(message = "Takım adı zorunlu") @Size(max = 150) String name
     ) {}
 
-    public record TeamView(Long id, String name) {}
+    public record TeamView(Long id, String name, String logo) {}
 
     public record CreateFixtureRequest(
             @NotNull(message = "Ev sahibi zorunlu") Long homeTeamId,
@@ -67,13 +67,14 @@ public final class ReporterDtos {
 
     public record FixtureView(
             Long id, String slug, Instant kickoffAt, String statusShort,
-            Integer elapsed, Integer homeGoals, Integer awayGoals,
+            Integer elapsed, Integer statusExtra,
+            Integer homeGoals, Integer awayGoals,
             Long homeTeamId, String homeTeamName,
             Long awayTeamId, String awayTeamName, String round) {}
 
     /**
      * Canlı konsol aksiyonu.
-     * action: START | GOAL_HOME | GOAL_AWAY | SET_SCORE | HT | SECOND_HALF |
+     * action: START | SET_SCORE | HT | SECOND_HALF |
      *         SET_ELAPSED | FINISH | POSTPONE | CANCEL
      */
     public record ActionRequest(
@@ -82,4 +83,58 @@ public final class ReporterDtos {
             Integer homeGoals,
             Integer awayGoals
     ) {}
+
+    // ================= Maç olayları =================
+
+    /**
+     * Olay girişi. type: GOAL | PEN_GOAL | OWN_GOAL | PEN_MISS | YELLOW |
+     * RED | SUB | VAR_GOAL_CANCELLED | VAR_PEN_CONFIRMED.
+     * team: HOME | AWAY (olayı yapan oyuncunun takımı).
+     * SUB'da playerName = çıkan, assistName = giren.
+     */
+    public record EventRequest(
+            @NotBlank(message = "Olay türü zorunlu") String type,
+            @NotBlank(message = "Takım zorunlu") String team,
+            Integer minute,
+            Integer extra,
+            @Size(max = 120) String playerName,
+            @Size(max = 120) String assistName
+    ) {}
+
+    public record EventView(
+            Long id, Integer minute, Integer extra, String type, String detail,
+            Long teamId, String teamName, String playerName, String assistName) {}
+
+    /** Olay sonrası güncel durum — skor da değişmiş olabilir. */
+    public record EventResult(EventView event, FixtureView fixture) {}
+
+    // ================= Kadro =================
+
+    public record LineupPlayerInput(
+            @NotBlank(message = "Oyuncu adı zorunlu") @Size(max = 120) String name,
+            Integer number,
+            @Size(max = 10) String position,
+            boolean substitute
+    ) {}
+
+    public record LineupRequest(
+            @Size(max = 20) String formation,
+            @Size(max = 120) String coachName,
+            @NotNull(message = "Oyuncu listesi zorunlu")
+            @Size(min = 1, max = 30, message = "1-30 oyuncu girilebilir")
+            List<LineupPlayerInput> players
+    ) {}
+
+    public record LineupView(
+            String formation, String coachName, List<LineupPlayerInput> players) {}
+
+    // ================= Yayın =================
+
+    /** Maçın yayınlandığı kanal adları (tam liste — mevcutların yerine geçer). */
+    public record BroadcastsRequest(
+            @NotNull @Size(max = 5, message = "En fazla 5 kanal")
+            List<@Size(max = 100) String> channels
+    ) {}
+
+    public record BroadcastsView(List<String> channels) {}
 }

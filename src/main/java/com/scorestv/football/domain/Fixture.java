@@ -151,6 +151,14 @@ public class Fixture {
     private String source = "api";
 
     /**
+     * Manuel maçta yarının başlama anı (1H başlarken ve 2H başlarken set edilir).
+     * {@code ManualLiveClockJob} elapsed'i buradan otomatik hesaplar. API
+     * maçlarında hep null.
+     */
+    @Column(name = "manual_phase_start")
+    private Instant manualPhaseStart;
+
+    /**
      * "Başladı" push'unun gönderildiği an (TAM-BİR-KEZ kapısı). NULL = henüz
      * gönderilmedi. FixtureNotifyGate atomik UPDATE ile set eder; FixtureUpserter
      * bu alana DOKUNMAZ, yani sync'ler boyunca korunur.

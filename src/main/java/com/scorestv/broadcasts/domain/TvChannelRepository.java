@@ -12,4 +12,7 @@ public interface TvChannelRepository extends JpaRepository<TvChannel, Long> {
 
     /** Tum aktif kanallar — admin listesi. */
     List<TvChannel> findByActiveTrueOrderByCountryCodeAscSortOrderAsc();
+
+    /** Muhabir yayın girişi — kanal adına göre bul-ya-da-oluştur. */
+    java.util.Optional<TvChannel> findFirstByNameIgnoreCase(String name);
 }

@@ -4,9 +4,16 @@ import com.scorestv.common.ApiException;
 import com.scorestv.reporter.ReporterDtos.ActionRequest;
 import com.scorestv.reporter.ReporterDtos.ApplicationView;
 import com.scorestv.reporter.ReporterDtos.ApplyRequest;
+import com.scorestv.reporter.ReporterDtos.BroadcastsRequest;
+import com.scorestv.reporter.ReporterDtos.BroadcastsView;
 import com.scorestv.reporter.ReporterDtos.CreateFixtureRequest;
 import com.scorestv.reporter.ReporterDtos.CreateTeamRequest;
+import com.scorestv.reporter.ReporterDtos.EventRequest;
+import com.scorestv.reporter.ReporterDtos.EventResult;
+import com.scorestv.reporter.ReporterDtos.EventView;
 import com.scorestv.reporter.ReporterDtos.FixtureView;
+import com.scorestv.reporter.ReporterDtos.LineupRequest;
+import com.scorestv.reporter.ReporterDtos.LineupView;
 import com.scorestv.reporter.ReporterDtos.MeResponse;
 import com.scorestv.reporter.ReporterDtos.TeamView;
 import com.scorestv.security.CurrentUser;
@@ -33,9 +40,11 @@ import java.util.List;
 public class ReporterController {
 
     private final ReporterService service;
+    private final ReporterMatchDataService matchData;
 
-    public ReporterController(ReporterService service) {
+    public ReporterController(ReporterService service, ReporterMatchDataService matchData) {
         this.service = service;
+        this.matchData = matchData;
     }
 
     private static Long uid(CurrentUser u) {
@@ -73,6 +82,30 @@ public class ReporterController {
         return service.createTeam(uid(user), leagueId, req);
     }
 
+    // ===== Logo yükleme (PNG/JPG/WebP, max 2MB) =====
+
+    @PostMapping(value = "/teams/{teamId}/logo",
+            consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public TeamView uploadTeamLogo(
+            @PathVariable Long teamId,
+            @org.springframework.web.bind.annotation.RequestParam("file")
+            org.springframework.web.multipart.MultipartFile file,
+            @AuthenticationPrincipal CurrentUser user) throws java.io.IOException {
+        return service.uploadTeamLogo(uid(user), teamId,
+                file.getBytes(), file.getContentType());
+    }
+
+    @PostMapping(value = "/leagues/{leagueId}/logo",
+            consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ReporterDtos.AssignedLeagueView uploadLeagueLogo(
+            @PathVariable Long leagueId,
+            @org.springframework.web.bind.annotation.RequestParam("file")
+            org.springframework.web.multipart.MultipartFile file,
+            @AuthenticationPrincipal CurrentUser user) throws java.io.IOException {
+        return service.uploadLeagueLogo(uid(user), leagueId,
+                file.getBytes(), file.getContentType());
+    }
+
     @GetMapping("/leagues/{leagueId}/fixtures")
     public List<FixtureView> fixtures(@PathVariable Long leagueId,
                                       @AuthenticationPrincipal CurrentUser user) {
@@ -87,11 +120,66 @@ public class ReporterController {
         return service.createFixture(uid(user), leagueId, req);
     }
 
-    /** Canlı konsol aksiyonu (START/GOAL_HOME/.../FINISH). */
+    /** Canlı konsol aksiyonu (START/HT/SECOND_HALF/FINISH/...). */
     @PostMapping("/fixtures/{fixtureId}/actions")
     public FixtureView action(@PathVariable Long fixtureId,
                               @Valid @RequestBody ActionRequest req,
                               @AuthenticationPrincipal CurrentUser user) {
         return service.action(uid(user), fixtureId, req);
+    }
+
+    // ===== Maç olayları (gol/kart/değişiklik/VAR) =====
+
+    @GetMapping("/fixtures/{fixtureId}/events")
+    public List<EventView> events(@PathVariable Long fixtureId,
+                                  @AuthenticationPrincipal CurrentUser user) {
+        return matchData.listEvents(uid(user), fixtureId);
+    }
+
+    @PostMapping("/fixtures/{fixtureId}/events")
+    @ResponseStatus(HttpStatus.CREATED)
+    public EventResult addEvent(@PathVariable Long fixtureId,
+                                @Valid @RequestBody EventRequest req,
+                                @AuthenticationPrincipal CurrentUser user) {
+        return matchData.addEvent(uid(user), fixtureId, req);
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/fixtures/{fixtureId}/events/{eventId}")
+    public FixtureView deleteEvent(@PathVariable Long fixtureId,
+                                   @PathVariable Long eventId,
+                                   @AuthenticationPrincipal CurrentUser user) {
+        return matchData.deleteEvent(uid(user), fixtureId, eventId);
+    }
+
+    // ===== Kadro =====
+
+    @GetMapping("/fixtures/{fixtureId}/lineups/{side}")
+    public LineupView lineup(@PathVariable Long fixtureId,
+                             @PathVariable String side,
+                             @AuthenticationPrincipal CurrentUser user) {
+        return matchData.getLineup(uid(user), fixtureId, side);
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/fixtures/{fixtureId}/lineups/{side}")
+    public LineupView saveLineup(@PathVariable Long fixtureId,
+                                 @PathVariable String side,
+                                 @Valid @RequestBody LineupRequest req,
+                                 @AuthenticationPrincipal CurrentUser user) {
+        return matchData.saveLineup(uid(user), fixtureId, side, req);
+    }
+
+    // ===== Yayın kanalları =====
+
+    @GetMapping("/fixtures/{fixtureId}/broadcasts")
+    public BroadcastsView broadcasts(@PathVariable Long fixtureId,
+                                     @AuthenticationPrincipal CurrentUser user) {
+        return matchData.getBroadcasts(uid(user), fixtureId);
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/fixtures/{fixtureId}/broadcasts")
+    public BroadcastsView saveBroadcasts(@PathVariable Long fixtureId,
+                                         @Valid @RequestBody BroadcastsRequest req,
+                                         @AuthenticationPrincipal CurrentUser user) {
+        return matchData.saveBroadcasts(uid(user), fixtureId, req.channels());
     }
 }

@@ -33,4 +33,15 @@ public class ReporterLeagueTeamLink {
                 .setParameter("l", leagueId)
                 .getResultList();
     }
+
+    /** Takımın bağlı olduğu manuel lig(ler) — logo yükleme yetki kontrolü. */
+    @SuppressWarnings("unchecked")
+    @Transactional(readOnly = true)
+    public List<Long> leagueIdsOfTeam(Long teamId) {
+        return em.createNativeQuery(
+                        "SELECT league_id FROM reporter_league_teams WHERE team_id = :t",
+                        Long.class)
+                .setParameter("t", teamId)
+                .getResultList();
+    }
 }

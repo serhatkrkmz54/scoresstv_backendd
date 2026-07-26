@@ -12,6 +12,7 @@ import com.scorestv.football.domain.Team;
 import com.scorestv.football.domain.TeamRepository;
 import com.scorestv.football.live.LiveBroadcaster;
 import com.scorestv.game.ScoresCoinService;
+import com.scorestv.storage.MinioStorageService;
 import com.scorestv.reporter.ReporterDtos.ActionRequest;
 import com.scorestv.reporter.ReporterDtos.AdminApplicationView;
 import com.scorestv.reporter.ReporterDtos.ApplicationView;
@@ -66,6 +67,7 @@ public class ReporterService {
     private final ScoresCoinService coinService;
     private final LiveBroadcaster liveBroadcaster;
     private final FixtureDetailCacheEvictor detailCacheEvictor;
+    private final MinioStorageService storage;
 
     public ReporterService(ReporterApplicationRepository applicationRepo,
                            ReporterAssignmentRepository assignmentRepo,
@@ -77,7 +79,8 @@ public class ReporterService {
                            UserRepository userRepo,
                            ScoresCoinService coinService,
                            LiveBroadcaster liveBroadcaster,
-                           FixtureDetailCacheEvictor detailCacheEvictor) {
+                           FixtureDetailCacheEvictor detailCacheEvictor,
+                           MinioStorageService storage) {
         this.applicationRepo = applicationRepo;
         this.assignmentRepo = assignmentRepo;
         this.leagueTeams = leagueTeams;
@@ -89,6 +92,7 @@ public class ReporterService {
         this.coinService = coinService;
         this.liveBroadcaster = liveBroadcaster;
         this.detailCacheEvictor = detailCacheEvictor;
+        this.storage = storage;
     }
 
     // ================= Başvuru =================
@@ -118,7 +122,9 @@ public class ReporterService {
             if (l == null) continue;
             List<Long> teamIds = leagueTeams.teamIds(l.getId());
             leagues.add(new AssignedLeagueView(
-                    l.getId(), l.getName(), teamIds.size(),
+                    l.getId(), l.getName(),
+                    resolveLogo(l.getLogoKey(), l.getLogoUrl()),
+                    teamIds.size(),
                     fixtureRepo.countByLeagueId(l.getId())));
         }
         List<ApplicationView> apps = applicationRepo
@@ -206,7 +212,7 @@ public class ReporterService {
         t.setSource("manual");
         t = teamRepo.save(t);
         leagueTeams.link(leagueId, t.getId());
-        return new TeamView(t.getId(), t.getName());
+        return new TeamView(t.getId(), t.getName(), null);
     }
 
     @Transactional(readOnly = true)
@@ -214,11 +220,77 @@ public class ReporterService {
         requireAssignment(userId, leagueId);
         List<TeamView> out = new ArrayList<>();
         for (Long teamId : leagueTeams.teamIds(leagueId)) {
-            teamRepo.findById(teamId)
-                    .ifPresent(t -> out.add(new TeamView(t.getId(), t.getName())));
+            teamRepo.findById(teamId).ifPresent(t -> out.add(new TeamView(
+                    t.getId(), t.getName(),
+                    resolveLogo(t.getLogoKey(), t.getLogoUrl()))));
         }
         out.sort((x, y) -> x.name().compareToIgnoreCase(y.name()));
         return out;
+    }
+
+    // ================= Logo yükleme =================
+
+    /** İzin verilen görsel tipleri ve tavan boyut (2MB). */
+    private static final java.util.Map<String, String> IMAGE_EXT = java.util.Map.of(
+            "image/png", "png", "image/jpeg", "jpg", "image/webp", "webp");
+    private static final long MAX_LOGO_BYTES = 2L * 1024 * 1024;
+
+    /** Manuel takım logosu — MinIO'ya benzersiz anahtarla yüklenir (CDN dostu). */
+    @Transactional
+    public TeamView uploadTeamLogo(Long userId, Long teamId,
+                                   byte[] data, String contentType) {
+        Team t = teamRepo.findById(teamId)
+                .orElseThrow(() -> ApiException.notFound("Takım bulunamadı"));
+        requireManual(t.getSource());
+        boolean allowed = leagueTeams.leagueIdsOfTeam(teamId).stream().anyMatch(lid ->
+                assignmentRepo.findByUserIdAndLeagueIdAndActiveTrue(userId, lid).isPresent());
+        if (!allowed) throw ApiException.forbidden("Bu takım için muhabir yetkiniz yok.");
+        String key = storeLogo("reporter/teams/" + teamId, data, contentType);
+        t.setLogoKey(key);
+        t.setLogoUrl(storage.publicUrl(key));
+        teamRepo.save(t);
+        return new TeamView(t.getId(), t.getName(), t.getLogoUrl());
+    }
+
+    /** Manuel lig logosu. */
+    @Transactional
+    public AssignedLeagueView uploadLeagueLogo(Long userId, Long leagueId,
+                                               byte[] data, String contentType) {
+        requireAssignment(userId, leagueId);
+        League l = leagueRepo.findById(leagueId)
+                .orElseThrow(() -> ApiException.notFound("Lig bulunamadı"));
+        requireManual(l.getSource());
+        String key = storeLogo("reporter/leagues/" + leagueId, data, contentType);
+        l.setLogoKey(key);
+        l.setLogoUrl(storage.publicUrl(key));
+        leagueRepo.save(l);
+        return new AssignedLeagueView(l.getId(), l.getName(), l.getLogoUrl(),
+                leagueTeams.teamIds(leagueId).size(),
+                fixtureRepo.countByLeagueId(leagueId));
+    }
+
+    /** Doğrulama + benzersiz anahtarla MinIO yüklemesi; nesne anahtarını döner. */
+    private String storeLogo(String prefix, byte[] data, String contentType) {
+        if (data == null || data.length == 0) {
+            throw ApiException.badRequest("Dosya boş.");
+        }
+        if (data.length > MAX_LOGO_BYTES) {
+            throw ApiException.badRequest("Logo en fazla 2MB olabilir.");
+        }
+        String ext = IMAGE_EXT.get(contentType);
+        if (ext == null) {
+            throw ApiException.badRequest("Yalnız PNG, JPG veya WebP yüklenebilir.");
+        }
+        // Benzersiz anahtar → CDN/istemci cache'i güvenle immutable tutulabilir.
+        String key = prefix + "-" + java.util.UUID.randomUUID() + "." + ext;
+        storage.upload(key, data, contentType, "public, max-age=31536000, immutable");
+        return key;
+    }
+
+    /** MinIO anahtarı varsa CDN URL'i, yoksa ham URL. */
+    private String resolveLogo(String key, String fallback) {
+        if (key != null && !key.isBlank()) return storage.publicUrl(key);
+        return fallback;
     }
 
     @Transactional
@@ -287,14 +359,7 @@ public class ReporterService {
                 f.setElapsed(1);
                 f.setHomeGoals(0);
                 f.setAwayGoals(0);
-            }
-            case "GOAL_HOME" -> {
-                requireLive(st);
-                f.setHomeGoals(nz(f.getHomeGoals()) + 1);
-            }
-            case "GOAL_AWAY" -> {
-                requireLive(st);
-                f.setAwayGoals(nz(f.getAwayGoals()) + 1);
+                f.setManualPhaseStart(Instant.now()); // otomatik dakika bu andan işler
             }
             case "SET_SCORE" -> {
                 requireLive(st);
@@ -310,6 +375,7 @@ public class ReporterService {
                 f.setStatusShort("HT");
                 f.setStatusLong("Halftime");
                 f.setElapsed(45);
+                f.setStatusExtra(null);
                 f.setScoreHtHome(nz(f.getHomeGoals()));
                 f.setScoreHtAway(nz(f.getAwayGoals()));
             }
@@ -318,6 +384,8 @@ public class ReporterService {
                 f.setStatusShort("2H");
                 f.setStatusLong("Second Half");
                 f.setElapsed(46);
+                f.setStatusExtra(null);
+                f.setManualPhaseStart(Instant.now()); // 46'dan itibaren işler
             }
             case "SET_ELAPSED" -> {
                 requireLive(st);
@@ -331,6 +399,7 @@ public class ReporterService {
                 f.setStatusShort("FT");
                 f.setStatusLong("Match Finished");
                 f.setElapsed(90);
+                f.setStatusExtra(null);
                 f.setScoreFtHome(nz(f.getHomeGoals()));
                 f.setScoreFtAway(nz(f.getAwayGoals()));
             }
@@ -397,10 +466,15 @@ public class ReporterService {
     }
 
     private FixtureView toFixtureView(Fixture f) {
+        return staticFixtureView(f);
+    }
+
+    /** Paket içi ortak dönüşüm ({@link ReporterMatchDataService} de kullanır). */
+    static FixtureView staticFixtureView(Fixture f) {
         String slug = SlugUtil.fixtureSlug(
                 f.getHomeTeam().getName(), f.getAwayTeam().getName(), f.getId());
         return new FixtureView(f.getId(), slug, f.getKickoffAt(), f.getStatusShort(),
-                f.getElapsed(), f.getHomeGoals(), f.getAwayGoals(),
+                f.getElapsed(), f.getStatusExtra(), f.getHomeGoals(), f.getAwayGoals(),
                 f.getHomeTeam().getId(), f.getHomeTeam().getName(),
                 f.getAwayTeam().getId(), f.getAwayTeam().getName(), f.getRound());
     }
