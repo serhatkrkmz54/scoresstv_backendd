@@ -70,8 +70,9 @@ public final class ReporterDtos {
             Integer elapsed, Integer statusExtra,
             Integer homeGoals, Integer awayGoals,
             Integer penHome, Integer penAway,
-            Long homeTeamId, String homeTeamName,
-            Long awayTeamId, String awayTeamName, String round) {}
+            Long homeTeamId, String homeTeamName, String homeTeamLogo,
+            Long awayTeamId, String awayTeamName, String awayTeamLogo,
+            String round) {}
 
     /**
      * Canlı konsol aksiyonu — faz makinesi:

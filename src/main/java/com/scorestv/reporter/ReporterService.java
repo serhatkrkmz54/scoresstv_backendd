@@ -328,6 +328,16 @@ public class ReporterService {
         return toFixtureView(f);
     }
 
+    /** Tekil maç görünümü — konsolların periyodik dakika/skor senkronu için. */
+    @Transactional(readOnly = true)
+    public FixtureView getFixture(Long userId, Long fixtureId) {
+        Fixture f = fixtureRepo.findById(fixtureId)
+                .orElseThrow(() -> ApiException.notFound("Maç bulunamadı"));
+        requireManual(f.getSource());
+        requireAssignment(userId, f.getLeague().getId());
+        return toFixtureView(f);
+    }
+
     @Transactional(readOnly = true)
     public List<FixtureView> listFixtures(Long userId, Long leagueId) {
         requireAssignment(userId, leagueId);
@@ -589,7 +599,9 @@ public class ReporterService {
                 f.getElapsed(), f.getStatusExtra(), f.getHomeGoals(), f.getAwayGoals(),
                 f.getScorePenHome(), f.getScorePenAway(),
                 f.getHomeTeam().getId(), f.getHomeTeam().getName(),
-                f.getAwayTeam().getId(), f.getAwayTeam().getName(), f.getRound());
+                f.getHomeTeam().getLogoUrl(),
+                f.getAwayTeam().getId(), f.getAwayTeam().getName(),
+                f.getAwayTeam().getLogoUrl(), f.getRound());
     }
 
     private AdminApplicationView toAdminView(ReporterApplication a) {

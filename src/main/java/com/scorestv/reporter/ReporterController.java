@@ -120,6 +120,13 @@ public class ReporterController {
         return service.createFixture(uid(user), leagueId, req);
     }
 
+    /** Tekil maç — mobil/web konsol periyodik tazeleme (dakika/skor senkronu). */
+    @GetMapping("/fixtures/{fixtureId}")
+    public FixtureView fixture(@PathVariable Long fixtureId,
+                               @AuthenticationPrincipal CurrentUser user) {
+        return service.getFixture(uid(user), fixtureId);
+    }
+
     /** Canlı konsol aksiyonu (START/HT/SECOND_HALF/FINISH/...). */
     @PostMapping("/fixtures/{fixtureId}/actions")
     public FixtureView action(@PathVariable Long fixtureId,
