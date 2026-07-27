@@ -23,6 +23,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -130,68 +131,116 @@ public class NewsNotificationService {
         this.fcm = fcm;
     }
 
+    /** En fazla deneme — asilirsa satir FAILED olur (sonsuz dongu olmaz). */
+    private static final int MAX_ATTEMPTS = 6;
+
+    /** SENDING lease suresi — bu suredeicinde bitmezse (crash) worker devralir. */
+    private static final java.time.Duration LEASE = java.time.Duration.ofMinutes(3);
+
     /**
-     * Bir haberi push eder. Commit-sonrasi ayri thread + ayri transaction'da
-     * calisir (okuma + {@code news_push_log} INSERT). Idempotent: log'ta zaten
-     * varsa atlar. Hata olursa loglar, atlar (yayinlamayi dusurmez).
-     *
-     * @param articleId yayinlanmis (PUBLISHED), silinmemis haber id
-     * @param target    ALL veya FAVORITES (null ise FAVORITES gibi davranir)
+     * Outbox satirini gonder — dusuk gecikme yolu (yayin commit'i sonrasi
+     * {@link NewsPushPublisher} cagirir). Worker ({@link NewsPushDispatchJob})
+     * ayni islemi emniyet agi olarak periyodik yapar; atomik claim sayesinde
+     * ikisi ayni satiri ASLA iki kez gondermez.
      */
     @Async
-    @Transactional  // read + news_push_log INSERT (idempotency) → readOnly OLAMAZ
-    public void sendForArticle(Long articleId, NewsPushTarget target) {
+    @Transactional
+    public void dispatchOneAsync(Long articleId) {
+        doDispatch(articleId);
+    }
+
+    /** Worker girisi — kendi transaction'inda tek satir isler. */
+    @Transactional
+    public void dispatchOne(Long articleId) {
+        doDispatch(articleId);
+    }
+
+    /**
+     * Tek outbox satirinin gonderimi: atomik claim + lease → alicilari cozumle
+     * → FCM (sert hatada exception) → SENT; hatada backoff'la PENDING'e geri
+     * (MAX_ATTEMPTS asilirsa FAILED). Idempotency: claim'i kazanamayan cikar.
+     */
+    private void doDispatch(Long articleId) {
         if (articleId == null) return;
-        final NewsPushTarget effective =
-                target != null ? target : NewsPushTarget.FAVORITES;
         try {
-            if (!fcm.isEnabled()) {
-                log.debug("Haber push atlandi (FCM kapali) articleId={}", articleId);
+            NewsPushLog row = pushLogRepository.findByArticleId(articleId).orElse(null);
+            if (row == null || "SENT".equals(row.getStatus())
+                    || "FAILED".equals(row.getStatus())) {
                 return;
             }
-            // Idempotency: zaten push edilmis mi?
-            if (pushLogRepository.existsByArticleId(articleId)) {
-                log.info("Haber push atlandi (zaten gonderilmis) articleId={}", articleId);
+            Instant now = Instant.now();
+            // Atomik claim: yalniz vakti gelmis PENDING / lease'i dolmus SENDING.
+            if (pushLogRepository.claim(row.getId(), now, now.plus(LEASE)) == 0) {
+                return; // baska thread/worker gonderiyor ya da sirasi gelmedi
+            }
+            row = pushLogRepository.findByArticleId(articleId).orElseThrow();
+
+            if (row.getAttempts() > MAX_ATTEMPTS) {
+                row.setStatus("FAILED");
+                row.setLastError("Deneme siniri asildi (" + MAX_ATTEMPTS + ")");
+                pushLogRepository.save(row);
+                log.warn("Haber push FAILED (deneme siniri) articleId={}", articleId);
                 return;
             }
 
             NewsArticle article = articleRepository.findByIdAndDeletedAtIsNull(articleId)
                     .orElse(null);
-            if (article == null) {
-                log.info("Haber push atlandi (bulunamadi/silindi) articleId={}", articleId);
+            if (article == null || article.getStatus() != NewsStatus.PUBLISHED) {
+                // Yayindan kalkti/silindi — gonderme, kapat (retry anlamsiz).
+                row.setStatus("FAILED");
+                row.setLastError("Haber yayinda degil/silinmis");
+                pushLogRepository.save(row);
                 return;
             }
-            if (article.getStatus() != NewsStatus.PUBLISHED) {
-                log.info("Haber push atlandi (yayinda degil) articleId={} status={}",
-                        articleId, article.getStatus());
+            if (!fcm.isEnabled()) {
+                // FCM kapali (ör. lokal ortam) — satiri acik birakma.
+                row.setStatus("SENT");
+                row.setLastError("FCM kapali — gonderim yok");
+                pushLogRepository.save(row);
                 return;
             }
 
+            final NewsPushTarget target = "ALL".equals(row.getTarget())
+                    ? NewsPushTarget.ALL : NewsPushTarget.FAVORITES;
             final String lang = langOf(article.getLang());
-
-            // Alici token'lari (dedup).
-            Set<String> tokens = (effective == NewsPushTarget.ALL)
+            Set<String> tokens = (target == NewsPushTarget.ALL)
                     ? resolveAllTokens(lang)
                     : resolveFavoriteTokens(articleId, lang);
 
-            final int recipientCount = tokens.size();
-            if (recipientCount > 0) {
-                Map<String, String> data = buildData(article);
-                String body = buildBody(article);
-                // sendMulticast 500'lu batch'lere kendisi boler.
-                fcm.sendMulticast(new ArrayList<>(tokens),
-                        article.getTitle(), body, data);
+            try {
+                if (!tokens.isEmpty()) {
+                    // Sert (batch) FCM hatasinda exception → retry'a duser;
+                    // tekil token hatalari (gecersiz token) yutulur.
+                    fcm.sendMulticastOrThrow(new ArrayList<>(tokens),
+                            article.getTitle(), buildBody(article), buildData(article),
+                            null, false);
+                }
+                row.setStatus("SENT");
+                row.setRecipientCount(tokens.size());
+                row.setLastError(null);
+                pushLogRepository.save(row);
+                log.info("Haber push tamam articleId={} target={} alici={} deneme={}",
+                        articleId, target, tokens.size(), row.getAttempts());
+            } catch (RuntimeException sendEx) {
+                // Gecici FCM/ag hatasi: backoff'la tekrar dene (30s * 2^n, max 10dk).
+                if (row.getAttempts() >= MAX_ATTEMPTS) {
+                    row.setStatus("FAILED");
+                } else {
+                    row.setStatus("PENDING");
+                    long backoffSec = Math.min(600,
+                            30L << Math.min(10, row.getAttempts() - 1));
+                    row.setNextAttemptAt(Instant.now().plusSeconds(backoffSec));
+                }
+                row.setLastError(clip(String.valueOf(sendEx.getMessage()), 500));
+                pushLogRepository.save(row);
+                log.warn("Haber push hatasi (deneme {}/{}) articleId={}: {}",
+                        row.getAttempts(), MAX_ATTEMPTS, articleId, sendEx.getMessage());
             }
-
-            // Idempotency log satiri (alici 0 olsa bile — tekrar denenmesin).
-            pushLogRepository.save(
-                    new NewsPushLog(articleId, effective.name(), recipientCount));
-            log.info("Haber push tamam articleId={} target={} alici={}",
-                    articleId, effective, recipientCount);
         } catch (Exception ex) {
-            // Bildirim hatasi yayinlamayi ASLA dusurmez.
-            log.warn("Haber push hatasi articleId={} target={}: {}",
-                    articleId, effective, ex.getMessage());
+            // Beklenmeyen hata gonderim dongusunu ASLA dusurmez; lease dolunca
+            // worker satiri yeniden dener.
+            log.warn("Haber push dispatch hatasi articleId={}: {}",
+                    articleId, ex.getMessage());
         }
     }
 

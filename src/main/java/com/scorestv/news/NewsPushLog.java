@@ -14,11 +14,13 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.Instant;
 
 /**
- * Bir haberin push edildigini kaydeden idempotency satiri.
+ * Haber push OUTBOX satiri (ayni zamanda idempotency kaydi).
  *
  * <p>{@code article_id} UNIQUE — bir haber en fazla BIR kez push edilir.
- * {@link NewsNotificationService} push oncesi bu tablonun varligini kontrol
- * eder; sonrasinda satir yazar. Yeniden yayinla/guncelle tekrar push uretmez.
+ * Yayinlama transaction'i satiri {@code PENDING} olarak ATOMIK ekler
+ * (ON CONFLICT DO NOTHING); {@link NewsNotificationService} atomik claim +
+ * lease ile gonderir. Durumlar: PENDING (sirada) → SENDING (lease'li) →
+ * SENT | FAILED. Hata → backoff'la {@code next_attempt_at} ileri atilir.
  */
 @Entity
 @Table(name = "news_push_log")
@@ -40,6 +42,22 @@ public class NewsPushLog {
 
     @Column(name = "recipient_count", nullable = false)
     private int recipientCount = 0;
+
+    /** PENDING | SENDING | SENT | FAILED. */
+    @Column(nullable = false, length = 16)
+    private String status = "SENT";
+
+    /** Kacinci deneme (claim'de artar). */
+    @Column(nullable = false)
+    private int attempts = 0;
+
+    /** Siradaki deneme zamani; SENDING'te lease bitisi. */
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
+
+    /** Son gonderim hatasi (tani icin). */
+    @Column(name = "last_error")
+    private String lastError;
 
     @CreationTimestamp
     @Column(name = "sent_at", nullable = false, updatable = false)
