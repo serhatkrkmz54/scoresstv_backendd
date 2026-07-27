@@ -359,7 +359,7 @@ public class ReporterService {
                 f.setElapsed(1);
                 f.setHomeGoals(0);
                 f.setAwayGoals(0);
-                f.setManualPhaseStart(Instant.now()); // otomatik dakika bu andan işler
+                startPhase(f, 1); // otomatik dakika bu andan işler
             }
             case "SET_SCORE" -> {
                 requireLive(st);
@@ -375,7 +375,7 @@ public class ReporterService {
                 f.setStatusShort("HT");
                 f.setStatusLong("Halftime");
                 f.setElapsed(45);
-                f.setStatusExtra(null);
+                stopClock(f);
                 f.setScoreHtHome(nz(f.getHomeGoals()));
                 f.setScoreHtAway(nz(f.getAwayGoals()));
             }
@@ -384,8 +384,77 @@ public class ReporterService {
                 f.setStatusShort("2H");
                 f.setStatusLong("Second Half");
                 f.setElapsed(46);
-                f.setStatusExtra(null);
-                f.setManualPhaseStart(Instant.now()); // 46'dan itibaren işler
+                startPhase(f, 46); // 46'dan itibaren işler
+            }
+            // Hakemin ilan ettiği uzatma (+dk) — saat 45+N / 90+N'de tutulur.
+            case "SET_STOPPAGE" -> {
+                requireStatus(st, "1H", "2H", "ET");
+                if (req.minute() != null && (req.minute() < 0 || req.minute() > 15)) {
+                    throw ApiException.badRequest("Uzatma 0-15 dk olabilir.");
+                }
+                f.setManualStoppage(
+                        req.minute() == null || req.minute() == 0 ? null : req.minute());
+            }
+            // Normal süre bitti, uzatma devreleri arası mola (ET öncesi/arası).
+            case "BREAK" -> {
+                requireStatus(st, "2H", "ET");
+                f.setStatusShort("BT");
+                f.setStatusLong("Break Time");
+                // 2H sonu → 90'da durur; ET ilk devre sonu → 105'te durur.
+                f.setElapsed("2H".equals(st) ? 90
+                        : (f.getElapsed() != null && f.getElapsed() > 105 ? 120 : 105));
+                stopClock(f);
+            }
+            // Uzatma devresi başlat (BT'den): ilk devre 91', ikinci devre 106'.
+            case "EXTRA_TIME" -> {
+                requireStatus(st, "BT");
+                int base = f.getElapsed() != null && f.getElapsed() >= 105 ? 106 : 91;
+                f.setStatusShort("ET");
+                f.setStatusLong("Extra Time");
+                f.setElapsed(base);
+                startPhase(f, base);
+            }
+            // Penaltı atışlarına geçiş (90' beraberliğinden direkt de olabilir).
+            case "PENALTIES" -> {
+                requireStatus(st, "2H", "BT", "ET");
+                f.setStatusShort("P");
+                f.setStatusLong("Penalty In Progress");
+                f.setElapsed(f.getElapsed() != null && f.getElapsed() > 90 ? 120 : 90);
+                stopClock(f);
+                if (f.getScorePenHome() == null) f.setScorePenHome(0);
+                if (f.getScorePenAway() == null) f.setScorePenAway(0);
+            }
+            // Penaltı atışları skoru (seri ilerledikçe güncellenir).
+            case "SET_PEN_SCORE" -> {
+                requireStatus(st, "P");
+                if (req.homeGoals() == null || req.awayGoals() == null
+                        || req.homeGoals() < 0 || req.awayGoals() < 0
+                        || req.homeGoals() > 30 || req.awayGoals() > 30) {
+                    throw ApiException.badRequest("Geçerli penaltı skoru girin.");
+                }
+                f.setScorePenHome(req.homeGoals());
+                f.setScorePenAway(req.awayGoals());
+            }
+            // Maç durdu (sakatlık, olay, hava...) — saat donar, skor korunur.
+            case "PAUSE" -> {
+                requireStatus(st, "1H", "2H", "ET");
+                f.setStatusShort("INT");
+                f.setStatusLong("Match Interrupted");
+                f.setManualPhaseStart(null); // saat donar; elapsed olduğu yerde kalır
+            }
+            // Duraklatmadan devam — kaldığı dakikadan (uzatma dahil) sürer.
+            case "RESUME" -> {
+                requireStatus(st, "INT", "SUSP");
+                int el = nz(f.getElapsed());
+                String phase = el <= 45 ? "1H" : el <= 90 ? "2H" : "ET";
+                f.setStatusShort(phase);
+                f.setStatusLong(switch (phase) {
+                    case "1H" -> "First Half";
+                    case "2H" -> "Second Half";
+                    default -> "Extra Time";
+                });
+                // Uzatma dakikasındayken durduysa (45+3 gibi) oradan devam etsin.
+                startPhase(f, el + (f.getStatusExtra() != null ? f.getStatusExtra() : 0));
             }
             case "SET_ELAPSED" -> {
                 requireLive(st);
@@ -393,15 +462,38 @@ public class ReporterService {
                     throw ApiException.badRequest("Geçerli dakika girin (0-130).");
                 }
                 f.setElapsed(req.minute());
+                // Saat işliyorsa taban da kaysın; yoksa job eski tabandan ezerdi.
+                if (f.getManualPhaseStart() != null) {
+                    startPhase(f, req.minute());
+                }
             }
             case "FINISH" -> {
-                requireStatus(st, "1H", "HT", "2H");
-                f.setStatusShort("FT");
-                f.setStatusLong("Match Finished");
-                f.setElapsed(90);
-                f.setStatusExtra(null);
+                requireStatus(st, "1H", "HT", "2H", "ET", "BT", "P", "INT", "SUSP");
+                boolean afterEt = "ET".equals(st) || "BT".equals(st)
+                        || (f.getElapsed() != null && f.getElapsed() > 90);
+                if ("P".equals(st)) {
+                    f.setStatusShort("PEN");
+                    f.setStatusLong("Match Finished After Penalty");
+                    f.setElapsed(120);
+                } else if (afterEt) {
+                    f.setStatusShort("AET");
+                    f.setStatusLong("Match Finished After Extra Time");
+                    f.setElapsed(120);
+                } else {
+                    f.setStatusShort("FT");
+                    f.setStatusLong("Match Finished");
+                    f.setElapsed(90);
+                }
+                stopClock(f);
                 f.setScoreFtHome(nz(f.getHomeGoals()));
                 f.setScoreFtAway(nz(f.getAwayGoals()));
+            }
+            // Maç tatil edildi (yarıda kaldı, devam etmeyecek) — puan verilmez.
+            case "ABANDON" -> {
+                requireStatus(st, "1H", "HT", "2H", "ET", "BT", "P", "INT", "SUSP");
+                f.setStatusShort("ABD");
+                f.setStatusLong("Match Abandoned");
+                stopClock(f);
             }
             case "POSTPONE" -> {
                 requireStatus(st, "NS");
@@ -448,10 +540,30 @@ public class ReporterService {
         }
     }
 
+    /** Canlı/ara faz kümesi — skor ve dakika bu fazlarda düzenlenebilir. */
+    private static final java.util.Set<String> LIVE_STATUSES =
+            java.util.Set.of("1H", "HT", "2H", "ET", "BT", "P", "INT", "SUSP");
+
     private static void requireLive(String st) {
-        if (!"1H".equals(st) && !"HT".equals(st) && !"2H".equals(st)) {
+        if (!LIVE_STATUSES.contains(st)) {
             throw ApiException.badRequest("Bu işlem yalnız canlı maçta yapılabilir.");
         }
+    }
+
+    /** Saati başlat: taban dakika + şu an; uzatma sayacı ve ilanı sıfırlanır. */
+    private static void startPhase(Fixture f, int baseMinute) {
+        f.setManualPhaseBase(baseMinute);
+        f.setManualPhaseStart(Instant.now());
+        f.setStatusExtra(null);
+        f.setManualStoppage(null);
+    }
+
+    /** Saati durdur: job artık işletmez; uzatma göstergesi temizlenir. */
+    private static void stopClock(Fixture f) {
+        f.setManualPhaseStart(null);
+        f.setManualPhaseBase(null);
+        f.setStatusExtra(null);
+        f.setManualStoppage(null);
     }
 
     private static void requireStatus(String current, String... allowed) {
@@ -475,6 +587,7 @@ public class ReporterService {
                 f.getHomeTeam().getName(), f.getAwayTeam().getName(), f.getId());
         return new FixtureView(f.getId(), slug, f.getKickoffAt(), f.getStatusShort(),
                 f.getElapsed(), f.getStatusExtra(), f.getHomeGoals(), f.getAwayGoals(),
+                f.getScorePenHome(), f.getScorePenAway(),
                 f.getHomeTeam().getId(), f.getHomeTeam().getName(),
                 f.getAwayTeam().getId(), f.getAwayTeam().getName(), f.getRound());
     }

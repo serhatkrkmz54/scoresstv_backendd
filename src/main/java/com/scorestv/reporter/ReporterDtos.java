@@ -69,13 +69,20 @@ public final class ReporterDtos {
             Long id, String slug, Instant kickoffAt, String statusShort,
             Integer elapsed, Integer statusExtra,
             Integer homeGoals, Integer awayGoals,
+            Integer penHome, Integer penAway,
             Long homeTeamId, String homeTeamName,
             Long awayTeamId, String awayTeamName, String round) {}
 
     /**
-     * Canlı konsol aksiyonu.
-     * action: START | SET_SCORE | HT | SECOND_HALF |
-     *         SET_ELAPSED | FINISH | POSTPONE | CANCEL
+     * Canlı konsol aksiyonu — faz makinesi:
+     * NS/PST → START → 1H → HT → SECOND_HALF → 2H → FINISH(FT)
+     * Uzatma: 2H → BREAK(BT) → EXTRA_TIME(ET, 91') → BREAK(BT, 105')
+     *         → EXTRA_TIME(ET, 106') → FINISH(AET)
+     * Penaltılar: 2H/BT/ET → PENALTIES(P) → SET_PEN_SCORE → FINISH(PEN)
+     * Duraklatma: 1H/2H/ET → PAUSE(INT) → RESUME (kaldığı dakikadan)
+     * Diğer: SET_SCORE, SET_ELAPSED(minute), SET_STOPPAGE(minute = hakem ilanı),
+     *        ABANDON(ABD), POSTPONE, CANCEL.
+     * SET_PEN_SCORE homeGoals/awayGoals alanlarını penaltı skoru olarak kullanır.
      */
     public record ActionRequest(
             @NotBlank(message = "Aksiyon zorunlu") String action,

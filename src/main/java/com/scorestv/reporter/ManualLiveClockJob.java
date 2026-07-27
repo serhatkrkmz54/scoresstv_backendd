@@ -29,7 +29,7 @@ public class ManualLiveClockJob {
 
     private static final Logger log = LoggerFactory.getLogger(ManualLiveClockJob.class);
 
-    private static final Set<String> RUNNING = Set.of("1H", "2H");
+    private static final Set<String> RUNNING = Set.of("1H", "2H", "ET");
 
     private final FixtureRepository fixtureRepo;
     private final LiveBroadcaster liveBroadcaster;
@@ -50,16 +50,31 @@ public class ManualLiveClockJob {
             Instant phaseStart = f.getManualPhaseStart();
             if (phaseStart == null) continue; // eski kayıt — muhabir dakikayı elle yönetir
             long passed = Duration.between(phaseStart, now).toMinutes();
-            // Normal süre biterse dakika 45/90'da durur, UZATMA statusExtra'ya
-            // yazılır (45+2, 90+4 gibi) — frontend'ler API maçlarıyla aynı
-            // sekilde gosterir. Uzatma tavanı 15dk (muhabir bitirmeyi unutursa
-            // sonsuz saymasın).
-            final boolean firstHalf = "1H".equals(f.getStatusShort());
-            final int cap = firstHalf ? 45 : 90;
-            final long total = (firstHalf ? 1 : 46) + passed;
+            // Normal süre biterse dakika 45/90/105/120'de durur, UZATMA
+            // statusExtra'ya yazılır (45+2, 90+4 gibi) — frontend'ler API
+            // maçlarıyla aynı şekilde gösterir. Uzatma tavanı: hakemin ilan
+            // ettiği değer (manual_stoppage) varsa o, yoksa 15 dk (muhabir
+            // bitirmeyi unutursa sonsuz saymasın).
+            final int base = f.getManualPhaseBase() != null
+                    ? f.getManualPhaseBase()
+                    : switch (f.getStatusShort()) {
+                        case "1H" -> 1;
+                        case "2H" -> 46;
+                        default -> 91;
+                    };
+            final int cap = switch (f.getStatusShort()) {
+                case "1H" -> 45;
+                case "2H" -> 90;
+                // ET: ilk devre 91-105, ikinci devre 106-120.
+                default -> base >= 106 ? 120 : 105;
+            };
+            final int extraCap = f.getManualStoppage() != null
+                    ? Math.min(15, f.getManualStoppage())
+                    : 15;
+            final long total = base + passed;
             final int computed = (int) Math.min(cap, total);
             final Integer extra = total > cap
-                    ? (int) Math.min(15, total - cap)
+                    ? (int) Math.min(extraCap, total - cap)
                     : null;
             final boolean elapsedChanged =
                     f.getElapsed() == null || computed > f.getElapsed();

@@ -159,6 +159,17 @@ public class Fixture {
     private Instant manualPhaseStart;
 
     /**
+     * Manuel maçta aktif fazın dakika tabanı (1H=1, 2H=46, ET=91/106; duraklatma
+     * sonrası devamda kaldığı dakika). Saat: elapsed = base + geçen dk.
+     */
+    @Column(name = "manual_phase_base")
+    private Integer manualPhaseBase;
+
+    /** Hakemin ilan ettiği uzatma (+dk) — saat uzatmayı bu değerde tutar. */
+    @Column(name = "manual_stoppage")
+    private Integer manualStoppage;
+
+    /**
      * "Başladı" push'unun gönderildiği an (TAM-BİR-KEZ kapısı). NULL = henüz
      * gönderilmedi. FixtureNotifyGate atomik UPDATE ile set eder; FixtureUpserter
      * bu alana DOKUNMAZ, yani sync'ler boyunca korunur.
