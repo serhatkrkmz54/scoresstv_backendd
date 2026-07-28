@@ -308,15 +308,31 @@ public class PlayerDetailService {
         // Ornek (Fabinho): 2026 sezonunda sadece Brezilya (milli) oynamis,
         // kulup en son 2025 Al-Ittihad. Milli takim degil, kulup gosterilir.
 
-        // --- A) En son transfer (max non-null tarih) → "in" takimi
-        Transfer latestTransfer = null;
+        // --- A) En son transfer → "in" takimi.
+        // NOT: "N/A" tipli satirlar API-Football'un otomatik urettigi
+        // kiralik-donusu artefaktlaridir (in = ana kulup). Bunlar cogu zaman
+        // GERCEK transferden SONRAKI bir tarihe duser ve guncel kulubu yanlis
+        // gosterir. Orn. Essugo: 2025-07-01 "N/A" Sporting'e donus kaydi, oysa
+        // gercek hareket 2025-06-02 "Transfer" -> Chelsea. Bu yuzden once GERCEK
+        // tipli (Transfer/Loan/Free/ucret vb.) en son hareketi seceriz; yalniz
+        // hic gercek-tipli kayit yoksa (hepsi N/A) herhangi birine duseriz.
+        Transfer latestReal = null;
+        Transfer latestAnyTransfer = null;
         for (Transfer tr : transferRepository.findByPlayerIdOrderByTransferDateDesc(playerId)) {
             if (tr.getTransferDate() == null || tr.getInTeamId() == null) continue;
-            if (latestTransfer == null
-                    || tr.getTransferDate().isAfter(latestTransfer.getTransferDate())) {
-                latestTransfer = tr;
+            if (latestAnyTransfer == null
+                    || tr.getTransferDate().isAfter(latestAnyTransfer.getTransferDate())) {
+                latestAnyTransfer = tr;
+            }
+            final String type = tr.getTransferType();
+            final boolean realMove = type != null && !type.isBlank()
+                    && !type.equalsIgnoreCase("N/A");
+            if (realMove && (latestReal == null
+                    || tr.getTransferDate().isAfter(latestReal.getTransferDate()))) {
+                latestReal = tr;
             }
         }
+        Transfer latestTransfer = latestReal != null ? latestReal : latestAnyTransfer;
         Integer transferYear = latestTransfer != null
                 ? latestTransfer.getTransferDate().getYear() : null;
 
