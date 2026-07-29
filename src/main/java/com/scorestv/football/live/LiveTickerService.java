@@ -79,6 +79,19 @@ public class LiveTickerService {
      */
     private static final Duration MAX_LIVE_DURATION = Duration.ofMinutes(95);
 
+    /**
+     * Post-finish settling penceresi: bir maç CANLI'dan finale geçtikten sonra
+     * bu süre boyunca her tick'te yeniden çekilir — penaltı finali / geç
+     * VAR-skor düzeltmesi / eksik son event yakalanır ve mevcut "değişti → yay"
+     * yoluyla ANINDA yayınlanır. Süre dolunca çekilmez (kota korunur). Gecikme
+     * EKLEMEZ; yalnız maç bitince "erken bırakma"yı kaldırır.
+     */
+    private static final Duration SETTLE_WINDOW = Duration.ofMinutes(15);
+
+    /** Final (oynanmış-bitmiş) statüler — settling seçimi için. */
+    private static final Set<String> FINAL_DB_STATUSES =
+            Set.of("FT", "AET", "PEN", "WO", "AWD");
+
     private final ApiFootballClient client;
     private final FixtureUpserter upserter;
     private final FixtureRepository fixtureRepository;
@@ -155,6 +168,14 @@ public class LiveTickerService {
         Instant agedCutoff = Instant.now().minus(MAX_LIVE_DURATION);
         for (Long id : fixtureRepository.findAgedLiveIds(LIVE_DB_STATUSES, agedCutoff)) {
             stuckIdsSet.add(id); // duplicate'i set kendisi yutar
+        }
+        //    c) Post-finish settling: CANLI'dan yeni bitmiş maçlar. Penaltı finali
+        //       / geç VAR-skor düzeltmesi / eksik son event bitişten sonra
+        //       gelirse, pencere boyunca yeniden çekip doğru final veriyi yazar
+        //       + anında yayınlar (donmuş 4-4 → gerçek 4-5 sorunu çözülür).
+        Instant settleCutoff = Instant.now().minus(SETTLE_WINDOW);
+        for (Long id : fixtureRepository.findSettlingIds(FINAL_DB_STATUSES, settleCutoff)) {
+            stuckIdsSet.add(id);
         }
         List<Long> stuckIds = List.copyOf(stuckIdsSet);
         if (!stuckIds.isEmpty()) {

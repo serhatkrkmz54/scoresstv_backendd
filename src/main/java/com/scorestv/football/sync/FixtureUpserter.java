@@ -125,6 +125,14 @@ public class FixtureUpserter {
         return t == null || t.id() == null || t.name() == null;
     }
 
+    /** Final (oynanmış-bitmiş) statüler — settling penceresi için. */
+    private static final java.util.Set<String> FINAL_STATUSES =
+            java.util.Set.of("FT", "AET", "PEN", "WO", "AWD");
+
+    private static boolean isFinalStatus(String s) {
+        return s != null && FINAL_STATUSES.contains(s);
+    }
+
     private void upsertOne(FixtureApiDto item,
                            Map<Long, League> leagues,
                            Map<Long, Team> teams,
@@ -150,6 +158,7 @@ public class FixtureUpserter {
         fixture.setVenueCity(rawVenue != null ? rawVenue.city() : null);
         fixture.setReferee(f.referee());
         fixture.setKickoffAt(OffsetDateTime.parse(f.date()).toInstant());
+        final String prevStatus = fixture.getStatusShort(); // upsert ÖNCESİ (null = yeni satır)
         fixture.setStatusShort(f.status().shortCode());
         fixture.setStatusLong(f.status().longText());
         fixture.setElapsed(f.status().elapsed());
@@ -172,6 +181,16 @@ public class FixtureUpserter {
         fixture.setScoreEtAway(awayOf(et));
         fixture.setScorePenHome(homeOf(pen));
         fixture.setScorePenAway(awayOf(pen));
+
+        // CANLI'dan (ya da NS'ten) FİNAL statüye İLK geçişte finished_at damgala —
+        // "post-finish settling" penceresinin başlangıcı. Zaten final olan ya da
+        // toplu içe aktarılan (prevStatus null) maçlarda damgalanmaz → gereksiz
+        // yeniden-çekme olmaz. Sadece maç canlıyken bitenler settling'e girer.
+        if (fixture.getFinishedAt() == null
+                && isFinalStatus(fixture.getStatusShort())
+                && prevStatus != null && !isFinalStatus(prevStatus)) {
+            fixture.setFinishedAt(Instant.now());
+        }
 
         fixture.setLastSyncedAt(Instant.now());
         fixtureRepository.save(fixture);

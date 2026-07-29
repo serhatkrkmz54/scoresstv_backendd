@@ -181,6 +181,15 @@ public class Fixture {
     @Column(name = "notif_final_at")
     private Instant notifFinalAt;
 
+    /**
+     * Maçın CANLI'dan FİNAL statüye İLK geçtiği an. "Post-finish settling"
+     * penceresinin başlangıcı — bu andan itibaren belirli bir süre maç yeniden
+     * çekilip doğru final skoru/olayı/penaltısı yakalanır. NULL = henüz canlı
+     * bitiş görülmedi (ya da eski/toplu-içe aktarılmış maç).
+     */
+    @Column(name = "finished_at")
+    private Instant finishedAt;
+
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;

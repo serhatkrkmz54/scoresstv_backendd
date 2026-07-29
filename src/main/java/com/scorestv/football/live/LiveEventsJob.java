@@ -37,6 +37,11 @@ public class LiveEventsJob {
     private static final Set<String> LIVE_STATUSES =
             Set.of("1H", "HT", "2H", "ET", "BT", "P", "LIVE");
 
+    /** Final statüler + settling penceresi — bkz. LiveTickerService. */
+    private static final Set<String> FINAL_STATUSES =
+            Set.of("FT", "AET", "PEN", "WO", "AWD");
+    private static final java.time.Duration SETTLE_WINDOW = java.time.Duration.ofMinutes(15);
+
     private final FixtureRepository fixtureRepository;
     private final FixtureEventsLiveProcessor processor;
     private final SyncRateLimiter rateLimiter;
@@ -58,7 +63,12 @@ public class LiveEventsJob {
             return; // batch modu devrede — per-fixture events job devre dışı
         }
         // JOIN FETCH league: SyncRateLimiter.isCovered() lazy-init hatasını önlemek için.
-        List<Fixture> live = fixtureRepository.findByStatusShortInWithLeague(LIVE_STATUSES);
+        List<Fixture> live = new java.util.ArrayList<>(
+                fixtureRepository.findByStatusShortInWithLeague(LIVE_STATUSES));
+        // Post-finish settling: yeni bitmiş maçların son event'i (ör. belirleyici
+        // penaltı) da senkronlanıp "değişti → yay" ile anında düşsün.
+        java.time.Instant settleCutoff = java.time.Instant.now().minus(SETTLE_WINDOW);
+        live.addAll(fixtureRepository.findSettlingWithLeague(FINAL_STATUSES, settleCutoff));
         if (live.isEmpty()) {
             return;
         }

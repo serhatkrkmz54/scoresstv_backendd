@@ -51,9 +51,18 @@ public class FixtureNotifyGate {
     }
 
     /** Final'i atomik claim et; kazanırsa "bitti" mesajını render edip enqueue et (tek tx). */
+    /**
+     * Penaltı maçında final push'un doğru skorla gitmesi için, maçın en az bu
+     * kadar süre önce bitmiş olması istenir (settling penceresi doğru skoru
+     * yazana dek). Bir canlı tick (~15sn) + pay. PEN dışı finalleri etkilemez.
+     */
+    private static final java.time.Duration FINAL_SETTLE_MIN = java.time.Duration.ofSeconds(20);
+
     @Transactional
     public void enqueueFinalIfClaimed(Long fixtureId) {
-        if (fixtureRepository.claimFinalNotification(fixtureId, Instant.now()) != 1) {
+        final Instant now = Instant.now();
+        final Instant settleCutoff = now.minus(FINAL_SETTLE_MIN);
+        if (fixtureRepository.claimFinalNotification(fixtureId, now, settleCutoff) != 1) {
             return;
         }
         final Fixture fixture = fixtureRepository.findById(fixtureId).orElse(null);

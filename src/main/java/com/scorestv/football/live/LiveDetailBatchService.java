@@ -53,6 +53,11 @@ public class LiveDetailBatchService {
     /** API-Football {@code ?ids=} tek çağrıda en fazla 20 id destekler. */
     private static final int MAX_BATCH = 20;
 
+    /** Final (oynanmış-bitmiş) statüler + settling penceresi — bkz. LiveTickerService. */
+    private static final Set<String> FINAL_STATUSES =
+            Set.of("FT", "AET", "PEN", "WO", "AWD");
+    private static final java.time.Duration SETTLE_WINDOW = java.time.Duration.ofMinutes(15);
+
     private static final ParameterizedTypeReference<ApiFootballResponse<List<FixtureBundleApiDto>>>
             BUNDLE_TYPE = new ParameterizedTypeReference<>() {
             };
@@ -87,8 +92,17 @@ public class LiveDetailBatchService {
      * @return detayı işlenen maç sayısı
      */
     public int run() {
-        List<Long> liveIds = fixtureRepository.findIdsByStatusShortIn(LIVE_STATUSES);
-        if (liveIds == null || liveIds.isEmpty()) {
+        List<Long> liveIds = new java.util.ArrayList<>(
+                fixtureRepository.findIdsByStatusShortIn(LIVE_STATUSES));
+        // Post-finish settling: yeni bitmiş maçları da bundle'a dahil et — final
+        // penaltı event'i / geç skor düzeltmesi yakalanıp anında yayınlansın.
+        java.time.Instant settleCutoff = java.time.Instant.now().minus(SETTLE_WINDOW);
+        for (Long id : fixtureRepository.findSettlingIds(FINAL_STATUSES, settleCutoff)) {
+            if (!liveIds.contains(id)) {
+                liveIds.add(id);
+            }
+        }
+        if (liveIds.isEmpty()) {
             return 0;
         }
         int batchSize = Math.min(MAX_BATCH,

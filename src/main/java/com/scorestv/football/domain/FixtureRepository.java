@@ -23,11 +23,25 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "WHERE f.id = :id AND f.notifKickoffAt IS NULL")
     int claimKickoffNotification(@Param("id") Long id, @Param("now") Instant now);
 
-    /** "Bitti" bildirimi için atomik claim — bkz. {@link #claimKickoffNotification}. */
+    /**
+     * "Bitti" bildirimi için atomik claim.
+     *
+     * <p>Penaltıyla biten (PEN) maçlarda belirleyici son atış statü FT'ye
+     * geçtiği anda (ya da hemen sonra) gelir; ilk tick'te skor henüz bayat (4-4)
+     * olabilir. Bu yüzden PEN'de claim, maç {@code settleCutoff}'tan ÖNCE bitmiş
+     * olana kadar (settling penceresi doğru skoru yazana kadar) bekletilir —
+     * böylece "bitti" push'u DOĞRU final skorla gider. PEN dışı finaller ve
+     * {@code finished_at} null olanlar (canlı akıştan geçmemiş/içe aktarılmış)
+     * eskisi gibi anında claim edilir.
+     */
     @Modifying
     @Query("UPDATE Fixture f SET f.notifFinalAt = :now "
-            + "WHERE f.id = :id AND f.notifFinalAt IS NULL")
-    int claimFinalNotification(@Param("id") Long id, @Param("now") Instant now);
+            + "WHERE f.id = :id AND f.notifFinalAt IS NULL "
+            + "AND (f.statusShort <> 'PEN' "
+            + "     OR f.finishedAt IS NULL "
+            + "     OR f.finishedAt <= :settleCutoff)")
+    int claimFinalNotification(@Param("id") Long id, @Param("now") Instant now,
+                               @Param("settleCutoff") Instant settleCutoff);
 
     /**
      * Belirli bir zaman aralığında başlayan maçlar (anasayfa fikstür listesi).
@@ -129,6 +143,33 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
             + "AND f.source = 'api'")
     List<Long> findAgedLiveIds(
             @Param("statuses") Collection<String> statuses,
+            @Param("cutoff") Instant cutoff);
+
+    /**
+     * "Post-finish settling": CANLI'dan YENİ bitmiş (final) maçlar —
+     * {@code finished_at > cutoff}. Penaltı finali / geç VAR-skor düzeltmesi /
+     * eksik son event bitişten sonra gelebildiği için, LiveTickerService bu
+     * maçları settling penceresi boyunca stuck listesine ekleyip
+     * {@code /fixtures?ids=} ile yeniden çeker → doğru final veri + anında
+     * broadcast. Pencere kapanınca (finished_at eskiyince) seçilmez → poll durur.
+     * Yalnız {@code source='api'} (manuel muhabir maçları bu akışa girmez).
+     */
+    @Query("SELECT f.id FROM Fixture f "
+            + "WHERE f.statusShort IN :finalStatuses "
+            + "AND f.finishedAt IS NOT NULL AND f.finishedAt > :cutoff "
+            + "AND f.source = 'api'")
+    List<Long> findSettlingIds(
+            @Param("finalStatuses") Collection<String> finalStatuses,
+            @Param("cutoff") Instant cutoff);
+
+    /** Settling maçları — lig JOIN FETCH ile (per-fixture LiveEventsJob için). */
+    @Query("SELECT f FROM Fixture f "
+            + "JOIN FETCH f.league "
+            + "WHERE f.statusShort IN :finalStatuses "
+            + "AND f.finishedAt IS NOT NULL AND f.finishedAt > :cutoff "
+            + "AND f.source = 'api'")
+    List<Fixture> findSettlingWithLeague(
+            @Param("finalStatuses") Collection<String> finalStatuses,
             @Param("cutoff") Instant cutoff);
 
     /**
