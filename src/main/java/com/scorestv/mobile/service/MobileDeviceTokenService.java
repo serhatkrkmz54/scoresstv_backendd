@@ -2,6 +2,7 @@ package com.scorestv.mobile.service;
 
 import com.scorestv.mobile.domain.MobileDeviceToken;
 import com.scorestv.mobile.domain.MobileDeviceTokenRepository;
+import com.scorestv.mobile.domain.UserNotificationPrefRepository;
 import com.scorestv.mobile.web.dto.DeviceTokenResponse;
 import com.scorestv.mobile.web.dto.RegisterDeviceTokenRequest;
 import org.slf4j.Logger;
@@ -9,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -26,14 +28,15 @@ public class MobileDeviceTokenService {
 
     private static final Logger log =
             LoggerFactory.getLogger(MobileDeviceTokenService.class);
-
+    private final UserNotificationPrefRepository prefRepository;
     private final MobileDeviceTokenRepository repository;
     /** Self-proxy — @Transactional metoda proxy uzerinden gidip dup-key
      *  yarisinda YENI transaction'da UPDATE olarak yeniden deneyebilmek icin. */
     private final MobileDeviceTokenService self;
 
-    public MobileDeviceTokenService(MobileDeviceTokenRepository repository,
+    public MobileDeviceTokenService(UserNotificationPrefRepository prefRepository, MobileDeviceTokenRepository repository,
                                     @Lazy MobileDeviceTokenService self) {
+        this.prefRepository = prefRepository;
         this.repository = repository;
         this.self = self;
     }
@@ -122,9 +125,20 @@ public class MobileDeviceTokenService {
      * FCM dispatcher tarafindan cagrilir — token gecersiz oldugunda
      * (UNREGISTERED hatasi) cihaz kaydini ve prefs'lerini siler (cascade).
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void invalidateToken(String fcmToken) {
-        repository.deleteByFcmToken(fcmToken);
+
+        MobileDeviceToken token =
+                repository.findByFcmToken(fcmToken).orElse(null);
+
+        if (token == null) {
+            return;
+        }
+
+        prefRepository.deleteByDeviceTokenId(token.getId());
+
+        repository.delete(token);
+
         log.info("Gecersiz FCM token silindi: {}", fcmToken);
     }
 
