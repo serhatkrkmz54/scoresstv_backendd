@@ -32,19 +32,25 @@ public class GameService {
     private final UserGameStatRepository statRepo;
     private final ScoresCoinService coinService;
     private final UserRepository userRepo;
+    /** Sonuç açıklama payı — {@link GameResolutionJob} ile AYNI değer (endAt +
+     * grace'te çözülür); istemci geri sayımı resultsAt ile buna hizalanır. */
+    private final long resolveGraceHours;
 
     public GameService(GameCompetitionRepository competitionRepo,
                        GameDuelRepository duelRepo,
                        GamePickRepository pickRepo,
                        UserGameStatRepository statRepo,
                        ScoresCoinService coinService,
-                       UserRepository userRepo) {
+                       UserRepository userRepo,
+                       @org.springframework.beans.factory.annotation.Value(
+                               "${scorestv.game.resolve-grace-hours:6}") long resolveGraceHours) {
         this.competitionRepo = competitionRepo;
         this.duelRepo = duelRepo;
         this.pickRepo = pickRepo;
         this.statRepo = statRepo;
         this.coinService = coinService;
         this.userRepo = userRepo;
+        this.resolveGraceHours = Math.max(0, resolveGraceHours);
     }
 
     /** Verilen kapsamın aktif (OPEN) yarışması + düellolar; yoksa null. */
@@ -116,10 +122,15 @@ public class GameService {
                 })
                 .toList();
 
+        // Sonuç açıklama tahmini: job endAt + grace'te çözer; çözülmüşse gerçek an.
+        final Instant resultsAt = comp.getResolvedAt() != null
+                ? comp.getResolvedAt()
+                : comp.getEndAt().plus(java.time.Duration.ofHours(resolveGraceHours));
+
         return new CompetitionView(comp.getId(), comp.getScope(), comp.getTitle(),
                 comp.getTitleEn(),
                 comp.getStatus(), comp.getStartAt(), comp.getEndAt(), comp.getLockAt(),
-                locked, duelViews);
+                resultsAt, locked, duelViews);
     }
 
     /** Tahmin gönder/güncelle (giriş zorunlu). Kilit + durum kontrolü. */

@@ -11,6 +11,10 @@ public interface LeagueRepository extends JpaRepository<League, Long> {
     /** Senkron kapsamına alınmış (covered = true) ligler. */
     List<League> findByCoveredTrue();
 
+    /** Lig rehberi araması — ada VEYA ülke adına göre (admin panel lig seçici). */
+    List<League> findTop20ByNameContainingIgnoreCaseOrCountryNameContainingIgnoreCase(
+            String name, String countryName);
+
     /** En bayat (en eski updated_at) covered ligler — surekli tazelik
      *  enqueuer'i bunlari oncelikli tazeler. */
     List<League> findByCoveredTrueOrderByUpdatedAtAsc(Pageable pageable);

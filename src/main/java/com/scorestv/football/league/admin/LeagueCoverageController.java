@@ -101,6 +101,36 @@ public class LeagueCoverageController {
     }
 
     /**
+     * Lig REHBERİ/arama — panelde lig ID + guncel sezon bulmak icin
+     * (ör. oyun yarismasi olusturuken lig secici). Ada/ulkeye gore arar;
+     * sorgu sayiysa dogrudan ID ile de bulur. En fazla 20 sonuc.
+     */
+    @GetMapping("/search")
+    public List<LeagueSearchRow> search(@RequestParam String q) {
+        final String query = q == null ? "" : q.trim();
+        if (query.length() < 2) return List.of();
+        final java.util.LinkedHashMap<Long, League> found = new java.util.LinkedHashMap<>();
+        // Sayi girildiyse once dogrudan ID esleşmesi.
+        try {
+            leagueRepository.findById(Long.parseLong(query))
+                    .ifPresent(l -> found.put(l.getId(), l));
+        } catch (NumberFormatException ignored) {
+            // sayi degil — ada gore aranacak
+        }
+        for (League l : leagueRepository
+                .findTop20ByNameContainingIgnoreCaseOrCountryNameContainingIgnoreCase(
+                        query, query)) {
+            found.putIfAbsent(l.getId(), l);
+        }
+        return found.values().stream()
+                .limit(20)
+                .map(l -> new LeagueSearchRow(
+                        l.getId(), l.getName(), l.getType(), l.getCountryName(),
+                        l.getCurrentSeason(), l.getLogoUrl(), l.isCovered()))
+                .toList();
+    }
+
+    /**
      * <b>Tum ligleri</b> tek istekte covered isaretler. Manuel id listesi
      * gerekmez. AutoEnqueueScheduler bu ligler icin /teams sync'i yavas yavas
      * kuyruga ekler — junction tablosu kademeli dolar, mobile favori takim
@@ -134,4 +164,9 @@ public class LeagueCoverageController {
     public record LeagueCoverageRow(
             Long id, String name, String type,
             String country, Integer currentSeason) {}
+
+    /** Lig rehberi satiri — ID + guncel sezon + logo (panel lig secici). */
+    public record LeagueSearchRow(
+            Long id, String name, String type, String country,
+            Integer currentSeason, String logo, boolean covered) {}
 }

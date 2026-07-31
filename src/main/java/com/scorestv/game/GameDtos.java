@@ -40,6 +40,9 @@ public final class GameDtos {
             Instant startAt,
             Instant endAt,
             Instant lockAt,
+            /** Sonuçların açıklanacağı tahmini an (endAt + istatistik oturma
+             *  payı) — istemciler "sonuçlara kalan" geri sayımını buna kurar. */
+            Instant resultsAt,
             boolean locked,         // artık tahmin verilemez mi
             List<DuelView> duels) {}
 
