@@ -133,6 +133,8 @@ public class VolleyballNotificationService {
         }
         final EventKind ek = eventKind(kind);
 
+        // Futboldaki gibi dil topic'iyle (lang_tr / lang_en) iki ayri condition:
+        // TR alici Turkce, EN alici Ingilizce metin alir.
         if (useFcmTopics) {
             final String suffix = switch (ek) {
                 case START -> "basladi";
@@ -143,7 +145,13 @@ public class VolleyballNotificationService {
             if (homeTeamId != null) topics.add(FcmTopics.volleyballTeamEvent(homeTeamId, suffix));
             if (awayTeamId != null) topics.add(FcmTopics.volleyballTeamEvent(awayTeamId, suffix));
             topics.add(FcmTopics.volleyballGame(gameId));
-            fcm.sendToConditionOrThrow(FcmTopics.orCondition(topics), titleTr, bodyTr, data);
+            final String orCond = FcmTopics.orCondition(topics);
+            final String tEnTitle = (titleEn != null && !titleEn.isBlank()) ? titleEn : titleTr;
+            final String tEnBody = (bodyEn != null && !bodyEn.isBlank()) ? bodyEn : bodyTr;
+            fcm.sendToConditionOrThrow(
+                    FcmTopics.andLang(orCond, FcmTopics.lang("tr")), titleTr, bodyTr, data);
+            fcm.sendToConditionOrThrow(
+                    FcmTopics.andLang(orCond, FcmTopics.lang("en")), tEnTitle, tEnBody, data);
             log.info("FCM voleybol {} topic dispatch: gameId={} topics={}", kind, gameId, topics);
             return new SendResult("TOPIC", 0, 0);
         }

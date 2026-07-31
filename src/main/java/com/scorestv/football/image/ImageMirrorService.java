@@ -513,10 +513,20 @@ public class ImageMirrorService {
      * Başarısızlıkta {@code null} döner (loglanır) — varlık bir sonraki turda denenir.
      */
     private String mirror(String sourceUrl, String folder, Long id) {
+        // Sentaksı bozuk URL (örn. "flags/ .svg" — API boş ülke koduyla üretmiş)
+        // KALICI hatadır: her turda yeniden denemek yerine PLACEHOLDER dön →
+        // caller url'i null'lar, satır bir daha kuyruğa girmez (log spam biter).
+        final URI uri;
+        try {
+            uri = URI.create(sourceUrl);
+        } catch (IllegalArgumentException bad) {
+            log.info("Geçersiz görsel URL'i (kalıcı, atlandı): {}", sourceUrl);
+            return PLACEHOLDER;
+        }
         try {
             Thread.sleep(THROTTLE_MS);
             ResponseEntity<byte[]> response = downloadClient.get()
-                    .uri(URI.create(sourceUrl))
+                    .uri(uri)
                     .retrieve()
                     .toEntity(byte[].class);
 

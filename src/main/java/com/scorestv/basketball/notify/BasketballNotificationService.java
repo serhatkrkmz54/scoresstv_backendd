@@ -35,8 +35,9 @@ import java.util.Set;
  * INTERNAL/UNKNOWN hataları bildirimi düşürmez (eskiden at-ve-unut idi).
  *
  * <p><b>TR + EN:</b> her bildirim iki dilde üretilir; token-multicast yolunda
- * alıcılar cihaz locale'ine göre ({@code MobileDeviceToken.locale}) ayrılıp
- * doğru dil gönderilir. (Topic yolu locale ayırmaz → TR gider.)
+ * alıcılar cihaz locale'ine göre ({@code MobileDeviceToken.locale}) ayrılır,
+ * topic yolunda ise futboldaki gibi {@code lang_tr}/{@code lang_en} dil
+ * topic'iyle iki ayrı condition gönderilir — herkes kendi dilinde alır.
  */
 @Service
 public class BasketballNotificationService {
@@ -137,7 +138,9 @@ public class BasketballNotificationService {
         }
         final EventKind ek = eventKind(kind);
 
-        // ---- FCM Topics yolu (flag ACIK) — locale ayirimi yok, TR gonderilir.
+        // ---- FCM Topics yolu (flag ACIK) — futboldaki gibi dil topic'iyle
+        // (lang_tr / lang_en) iki ayri condition: TR alici Turkce, EN alici
+        // Ingilizce metin alir. (Eskiden tek TR mesaj herkese gidiyordu.)
         if (useFcmTopics) {
             final String suffix = switch (ek) {
                 case START -> "basladi";
@@ -148,7 +151,13 @@ public class BasketballNotificationService {
             if (homeTeamId != null) topics.add(FcmTopics.basketballTeamEvent(homeTeamId, suffix));
             if (awayTeamId != null) topics.add(FcmTopics.basketballTeamEvent(awayTeamId, suffix));
             topics.add(FcmTopics.basketballGame(gameId));
-            fcm.sendToConditionOrThrow(FcmTopics.orCondition(topics), titleTr, bodyTr, data);
+            final String orCond = FcmTopics.orCondition(topics);
+            final String tEnTitle = (titleEn != null && !titleEn.isBlank()) ? titleEn : titleTr;
+            final String tEnBody = (bodyEn != null && !bodyEn.isBlank()) ? bodyEn : bodyTr;
+            fcm.sendToConditionOrThrow(
+                    FcmTopics.andLang(orCond, FcmTopics.lang("tr")), titleTr, bodyTr, data);
+            fcm.sendToConditionOrThrow(
+                    FcmTopics.andLang(orCond, FcmTopics.lang("en")), tEnTitle, tEnBody, data);
             log.info("FCM basketbol {} topic dispatch: gameId={} topics={}", kind, gameId, topics);
             return new SendResult("TOPIC", 0, 0);
         }

@@ -117,16 +117,16 @@ public class LeagueCoverageController {
         } catch (NumberFormatException ignored) {
             // sayi degil — ada gore aranacak
         }
-        for (League l : leagueRepository
-                .findTop20ByNameContainingIgnoreCaseOrCountryNameContainingIgnoreCase(
-                        query, query)) {
+        for (League l : leagueRepository.searchForGuide(
+                query, org.springframework.data.domain.PageRequest.of(0, 20))) {
             found.putIfAbsent(l.getId(), l);
         }
         return found.values().stream()
                 .limit(20)
                 .map(l -> new LeagueSearchRow(
-                        l.getId(), l.getName(), l.getType(), l.getCountryName(),
-                        l.getCurrentSeason(), l.getLogoUrl(), l.isCovered()))
+                        l.getId(), l.getName(), l.getNameTr(), l.getType(),
+                        l.getCountryName(), l.getCurrentSeason(),
+                        l.getLogoUrl(), l.isCovered()))
                 .toList();
     }
 
@@ -165,8 +165,9 @@ public class LeagueCoverageController {
             Long id, String name, String type,
             String country, Integer currentSeason) {}
 
-    /** Lig rehberi satiri — ID + guncel sezon + logo (panel lig secici). */
+    /** Lig rehberi satiri — ID + guncel sezon + logo (panel lig secici).
+     *  nameTr: elle girilmis Turkce ad (yoksa null; panel TR'yi varsayar). */
     public record LeagueSearchRow(
-            Long id, String name, String type, String country,
+            Long id, String name, String nameTr, String type, String country,
             Integer currentSeason, String logo, boolean covered) {}
 }
